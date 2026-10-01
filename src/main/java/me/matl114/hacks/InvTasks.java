@@ -151,9 +151,12 @@ public class InvTasks {
                 return;
             }
             (speedLimit ? clickExecutor : unlimitedClickExecutor).execute(() -> {
-                if (mc.gameMode == null) return;
+                if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                    return false;
+                }
                 mc.gameMode.handleContainerInput(syncId, index, 0, ContainerInput.PICKUP, mc.player);
                 mc.gameMode.handleContainerInput(syncId, index, 1, ContainerInput.PICKUP, mc.player);
+                return true;
             });
             ItemStack sample = handler.getCarried();
             if (sample.isEmpty()) {
@@ -171,8 +174,12 @@ public class InvTasks {
                                 && ItemStack.isSameItemSameComponents(slot.getItem(), s.getItem()))) {
                     final int fi = i;
                     (speedLimit ? clickExecutor : unlimitedClickExecutor).execute(() -> {
-                        if (mc.gameMode == null) return;
+                        if (mc.gameMode == null
+                                || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                            return false;
+                        }
                         mc.gameMode.handleContainerInput(syncId, fi, 0, ContainerInput.PICKUP, mc.player);
+                        return true;
                     });
                     if (handler.getCarried().isEmpty()) {
                         return;
@@ -180,10 +187,13 @@ public class InvTasks {
                 }
             }
             (speedLimit ? clickExecutor : unlimitedClickExecutor).execute(() -> {
-                if (mc.gameMode == null) return;
+                if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                    return false;
+                }
                 if (!handler.getCarried().isEmpty()) {
                     mc.gameMode.handleContainerInput(syncId, index, 0, ContainerInput.PICKUP, mc.player);
                 }
+                return true;
             });
 
             //            while (handler.getSlot(index).getItem().getCount() > 1){
@@ -204,12 +214,15 @@ public class InvTasks {
 
         } else {
             (speedLimit ? clickExecutor : unlimitedClickExecutor).execute(() -> {
-                if (mc.gameMode == null) return;
+                if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                    return false;
+                }
                 if (!handler.getCarried().isEmpty()) {
 
                     mc.gameMode.handleContainerInput(handler.containerId, -999, 0, ContainerInput.PICKUP, mc.player);
                 }
                 mc.gameMode.handleContainerInput(handler.containerId, index, 0, ContainerInput.QUICK_MOVE, mc.player);
+                return true;
             });
         }
     }
@@ -853,53 +866,6 @@ public class InvTasks {
         }
     }
 
-    public static int playerInventoryRevisionManage = 0;
-
-    public static void syncPlayerInventoryRevision(int revision) {
-        if (playerInventoryRevisionManage < 0) {
-            playerInventoryRevisionManage = revision;
-        } else {
-            int abs = Math.abs(playerInventoryRevisionManage - revision);
-            if (abs > 20) {
-                playerInventoryRevisionManage = revision;
-            } else {
-                if (playerInventoryRevisionManage < revision) {
-                    playerInventoryRevisionManage = revision;
-                }
-            }
-        }
-    }
-
-    public static void fastAsyncUpdateRevision(Event<ClientboundContainerSetSlotPacket> eventUpdate) {
-        if (mc.player == null || mc.level == null) return;
-        int syncId = eventUpdate.context.getContainerId();
-        if (mc.gameMode.getPlayerMode().isSurvival()) {
-            if (syncId == 0) {
-                syncPlayerInventoryRevision(eventUpdate.context.getStateId());
-            } else {
-                AbstractContainerMenu handler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
-                if (handler.containerId == syncId) {
-                    handler.stateId = eventUpdate.context.getStateId();
-                }
-            }
-        }
-    }
-
-    public static void fastAsyncUpdateRevision2(Event<ClientboundContainerSetContentPacket> eventUpdate) {
-        if (mc.player == null) return;
-        int syncId = eventUpdate.context.containerId();
-        if (mc.gameMode.getPlayerMode().isSurvival()) {
-            if (syncId == 0) {
-                syncPlayerInventoryRevision(eventUpdate.context.stateId());
-            } else {
-                AbstractContainerMenu handler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
-                if (handler.containerId == syncId) {
-                    handler.stateId = eventUpdate.context.stateId();
-                }
-            }
-        }
-    }
-
     public static void onGameJoin(Event<LocalPlayer> gameJoin) {
         LAST_SYNC_ID = 0;
         historyScreens.clear();
@@ -975,6 +941,9 @@ public class InvTasks {
     private static InvExtra invExtra;
 
     @Getter
+    private static InvDesyncFix invDesyncFix;
+
+    @Getter
     private static GuiMove guiMove;
 
     @Getter
@@ -1019,7 +988,7 @@ public class InvTasks {
 
     @Getter
     //
-    private static final ItemCache customItemDatabase = new ItemCache("sfhelper-configs/recipes/item-database.json");
+    private static final ItemCache customItemDatabase = new ItemCache("item-database.nbt");
 
     public static final Codec<ItemStackData> CUSTOM_ITEM_DATA_CODEC = customItemDatabase.createStackDataCodec();
 
@@ -1034,6 +1003,7 @@ public class InvTasks {
 
     private static void initModules(ModuleManager m) {
         invExtra = new InvExtra().register(m);
+        invDesyncFix = new InvDesyncFix().register(m);
         guiMove = new GuiMove().register(m);
         fastInv = new FastInv().register(m);
         fastCraft = new FastCraft().register(m);
@@ -1066,12 +1036,6 @@ public class InvTasks {
         Listener.getPacketPostHandlePoint()
                 .getChannel(ClientboundContainerSetContentPacket.class)
                 .registerHandler(InvTasks::onInventoryOld2);
-        Listener.getPacketPoint()
-                .getChannel(ClientboundContainerSetSlotPacket.class)
-                .registerHandler(InvTasks::fastAsyncUpdateRevision);
-        Listener.getPacketPoint()
-                .getChannel(ClientboundContainerSetContentPacket.class)
-                .registerHandler(InvTasks::fastAsyncUpdateRevision2);
         moduleManager.registerFactories(InvTasks::initModules);
         HackModules.registerModuleGroup(moduleManager);
         clickExecutor = new LimitedSpeedExecutor(invExtra.inventoryClickLimit);

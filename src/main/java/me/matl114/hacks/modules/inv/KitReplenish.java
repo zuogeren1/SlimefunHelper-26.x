@@ -62,6 +62,7 @@ import me.matl114.utils.config.ValueAccessor;
 import me.matl114.utils.inventory.MutableInventory;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
@@ -149,7 +150,7 @@ public class KitReplenish extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getWorldSwitchPoint(), this::onSwitchWorld);
+        registerListener(Listener.getPlayerRespawnPoint(), this::onSwitchWorld);
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
         registerCommandBootstrap(this::registerReplenishCommand);
     }
@@ -179,7 +180,7 @@ public class KitReplenish extends BaseModule {
         transaction = null;
     }
 
-    public void onSwitchWorld(Event<Level> event) {
+    public void onSwitchWorld(Event<LocalPlayer> event) {
         clearReplenishingTask();
         enderChestRequest = false;
         shulkerBoxRequest = null;
@@ -1543,7 +1544,11 @@ public class KitReplenish extends BaseModule {
             this.transaction = new Transaction();
             this.transaction.setKit(kit);
             this.transaction.setUseEnderChest(enableEnder.get());
-            this.transaction.rule = this.transaction.rule.withPostReorder(true);
+            this.transaction.rule = this.transaction
+                    .rule
+                    .withPostReorder(true)
+                    .withAutoClose(false)
+                    .withPostMine(false);
             this.transaction.stage = Transaction.STAGE_POST_REORDER_INVENTORY;
             this.timerPostResortInventory = 0;
         } else {

@@ -19,7 +19,9 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.utils.ClientUtils;
 import me.matl114.utils.InventoryUtils;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
@@ -51,9 +53,6 @@ public class InvHelper extends BaseModule {
 
     public final DoubleRef stackPercentage =
             doubleBuilder(hotBar.add("stack-percentage")).defaultValue(0.25D).build();
-
-    public final FlagRef stackUsingHotBar =
-            flagBuilder(hotBar.add("hot-bar-stack-using-hot-bar")).build();
 
     public final FlagRef offHandStack =
             flagBuilder(hotBar.add("off-hand-stack")).build();
@@ -169,7 +168,7 @@ public class InvHelper extends BaseModule {
                 ItemStack stack = inventory.getItem(re);
                 if (!stack.isEmpty() && (double) stack.getCount() < (autoMergePercentage.get() * stack.getMaxStackSize())) {
                     int idx = re;
-                    for (var find = 0; find < InventoryUtils.getPlayerBackpackSize(); ++find) {
+                    for (var find = re + 1; find < InventoryUtils.getPlayerBackpackSize(); ++find) {
                         if (find == re) continue;
                         ItemStack stack2 = inventory.getItem(find);
                         if (!stack2.isEmpty()
@@ -230,7 +229,7 @@ public class InvHelper extends BaseModule {
             for (var i = 0; i < 9; ++i) {
                 ItemStack stack = inventory.getItem(i);
                 if (!stack.isEmpty() && (double) stack.getCount() < (stackPercentage.get() * stack.getMaxStackSize())) {
-                    if (resupply(inventory, i, stack, stackUsingHotBar.get())) {
+                    if (resupply(inventory, i, stack, false)) {
                         if (--total <= 0) {
                             return;
                         }
@@ -242,7 +241,7 @@ public class InvHelper extends BaseModule {
                 int i = 40;
                 ItemStack stack = inventory.getItem(i);
                 if (!stack.isEmpty() && (double) stack.getCount() < (stackPercentage.get() * stack.getMaxStackSize())) {
-                    resupply(inventory, i, stack, stackUsingHotBar.get());
+                    resupply(inventory, i, stack, false);
                 }
             }
         }
@@ -429,8 +428,9 @@ public class InvHelper extends BaseModule {
         return false;
     }
 
-    private void onMergeInventory() {
-        if (checkNull()) return;
+    private boolean onMergeInventory() {
+        if (checkNull()) return false;
+        if (!(ClientUtils.getScreen(mc) instanceof AbstractContainerScreen<?>)) return false;
         var inventory = mc.player.getInventory();
         boolean[] locked = new boolean[InventoryUtils.getPlayerBackpackSize()];
         for (var i = 0; i < InventoryUtils.getPlayerBackpackSize(); ++i) {
@@ -494,5 +494,6 @@ public class InvHelper extends BaseModule {
                 }
             }
         }
+        return true;
     }
 }

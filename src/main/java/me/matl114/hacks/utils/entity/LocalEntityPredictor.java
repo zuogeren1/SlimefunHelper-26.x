@@ -3,10 +3,10 @@ package me.matl114.hacks.utils.entity;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
-public record SimpleEntityPredictor(Entity entity) implements Predictor {
+public record LocalEntityPredictor(Entity entity) implements Predictor {
     @Override
     public Vec3 getKnownDeltaMovement() {
-        return new Vec3(entity.getX() - entity.xo, entity.getY() - entity.yo, entity.getZ() - entity.zo);
+        return Vec3.ZERO;
     }
 
     @Override
@@ -15,8 +15,8 @@ public record SimpleEntityPredictor(Entity entity) implements Predictor {
     }
 
     @Override
-    public Vec3 predict(int ticksLater, int method, int a) {
-        return entity.getPosition(ticksLater);
+    public Vec3 predict(int ticksLater, int method, int useTickBefore) {
+        return entity.position();
     }
 
     @Override

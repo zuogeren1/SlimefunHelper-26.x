@@ -9,44 +9,140 @@ import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
 import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.PositionMoveRotation;
+import net.minecraft.world.entity.Relative;
 import net.minecraft.world.phys.Vec3;
 
 public class PredictorImpl implements Predictor {
     private static final Minecraft mc = Minecraft.getInstance();
-    private final Entity owner;
+    private int ownerId;
+    private Entity owner;
     private final Deque<KnownPosition> positions = new ArrayDeque<>();
-    private static final int MAX_HISTORY = 30;
+    private static final int MAX_HISTORY = 80;
+    private Vec3 currentTrackedPosition;
+    private float currentSyncedPitch;
+    private float currentSyncedYaw;
+
+    public PredictorImpl() {}
 
     public PredictorImpl(Entity owner) {
         this.owner = owner;
+        this.ownerId = owner.getId();
+        this.currentTrackedPosition = owner.position();
+        this.currentSyncedPitch = owner.getXRot();
+        this.currentSyncedYaw = owner.getYRot();
+    }
+
+    public void initializeTrackedPosition(int owner, double x, double y, double z, float pitch, float yaw) {
+        this.ownerId = owner;
+        this.currentTrackedPosition = new Vec3(x, y, z);
+        this.currentSyncedPitch = pitch;
+        this.currentSyncedYaw = yaw;
     }
 
     public void tick() {
-        while (positions.size() > MAX_HISTORY) {
-            positions.removeFirst();
-        }
-        if (mc.player == this.owner) {
-            addRecord(new KnownPosition(owner.position(), Tasks.getTick()));
+        synchronized (this) {
+            while (positions.size() > MAX_HISTORY) {
+                positions.removeFirst();
+            }
+            if (mc.player != null && mc.player.getId() == this.ownerId) {
+                // The local player is moved by client-side input between server packets.
+                // Keep the synchronised position in step with the client entity until a
+                // server position packet supplies a new base position.
+
+                setSyncedPosition(mc.player.position());
+                currentSyncedPitch = mc.player.getXRot();
+                currentSyncedYaw = mc.player.getYRot();
+                addRecord(new KnownPosition(getCurrentPos(), Tasks.getTick()));
+            }
         }
     }
 
     public void onEntityPositionPost(Event<ClientboundTeleportEntityPacket> event) {
-        ClientboundTeleportEntityPacket packet = event.context();
-        if (packet.id() != owner.getId()) return;
-        addRecord(new KnownPosition(owner.position(), Tasks.getTick()));
+        ClientboundTeleportEntityPacket packet = event.context;
+        if (packet.id() != ownerId) return;
+        synchronized (this) {
+            PositionMoveRotation position = apply(packet.change(), packet.relatives());
+            setSyncedPosition(position.position());
+            currentSyncedPitch = position.xRot();
+            currentSyncedYaw = position.yRot();
+            addRecord(new KnownPosition(getCurrentPos(), Tasks.getTick()));
+        }
     }
 
     public void onEntityPositionSyncPost(Event<ClientboundEntityPositionSyncPacket> event) {
-        ClientboundEntityPositionSyncPacket packet = event.context();
-        if (packet.id() != owner.getId()) return;
-        addRecord(new KnownPosition(owner.position(), Tasks.getTick()));
+        ClientboundEntityPositionSyncPacket packet = event.context;
+        if (packet.id() != ownerId) return;
+        synchronized (this) {
+            PositionMoveRotation position = packet.values();
+            setSyncedPosition(position.position());
+            currentSyncedPitch = position.xRot();
+            currentSyncedYaw = position.yRot();
+            addRecord(new KnownPosition(getCurrentPos(), Tasks.getTick()));
+        }
     }
 
     public void onEntityPositionMove(Event<ClientboundMoveEntityPacket> event) {
-        ClientboundMoveEntityPacket packet = event.context();
-        if (packet.getEntity(mc.level) == owner) {
-            addRecord(new KnownPosition(owner.position(), Tasks.getTick()));
+        ClientboundMoveEntityPacket packet = event.context;
+        Entity tracked = trackedOwner();
+        if (tracked == null || packet.getEntity(mc.level) != tracked) return;
+        synchronized (this) {
+            if (mc.player != null && mc.player.getId() == ownerId || packet.hasPosition()) {
+                Vec3 position = applyDelta(getCurrentPos(), packet.getXa(), packet.getYa(), packet.getZa());
+                setSyncedPosition(position);
+            }
+            if (packet.hasRotation()) {
+                currentSyncedYaw = packet.getYRot();
+                currentSyncedPitch = packet.getXRot();
+            }
+            addRecord(new KnownPosition(getCurrentPos(), Tasks.getTick()));
         }
+    }
+
+    /**
+     * 把数据包里的相对位移（1/4096 格）加到同步位置上。
+     *
+     * <p>语义与 26.2 的 {@code net.minecraft.network.protocol.game.VecDeltaCodec#decode} 保持一致：
+     * 先把基准坐标按 1/4096 量化（{@code Math.round(v * 4096.0)}），加上增量后再除以 4096；
+     * 增量为 0 的分量直接取基准值。直接写 {@code base + delta / 4096.0} 会漏掉量化步骤，
+     * 在远离原点处与客户端实际解出的位置有 1/4096 量级偏差，进而影响 getLastKnownPositions 的距离判定。
+     */
+    private static Vec3 applyDelta(Vec3 base, long deltaX, long deltaY, long deltaZ) {
+        if (base == null) return Vec3.ZERO;
+        if (deltaX == 0L && deltaY == 0L && deltaZ == 0L) return base;
+        double x = deltaX == 0L ? base.x : (Math.round(base.x * 4096.0D) + deltaX) / 4096.0D;
+        double y = deltaY == 0L ? base.y : (Math.round(base.y * 4096.0D) + deltaY) / 4096.0D;
+        double z = deltaZ == 0L ? base.z : (Math.round(base.z * 4096.0D) + deltaZ) / 4096.0D;
+        return new Vec3(x, y, z);
+    }
+
+    /**
+     * 把数据包里的「相对传送」折算成绝对位置
+     */
+    private PositionMoveRotation apply(PositionMoveRotation position, Set<Relative> relatives) {
+        PositionMoveRotation current = new PositionMoveRotation(
+                getCurrentPos() == null ? Vec3.ZERO : getCurrentPos(),
+                Vec3.ZERO,
+                currentSyncedYaw,
+                currentSyncedPitch);
+        return PositionMoveRotation.calculateAbsolute(current, position, relatives);
+    }
+
+    private void setSyncedPosition(Vec3 position) {
+        if (position != null) {
+            currentTrackedPosition = position;
+        }
+    }
+
+    private Entity trackedOwner() {
+        if (owner != null) {
+            return owner;
+        }
+        Entity resolved = mc.level == null ? null : mc.level.getEntity(ownerId);
+        if (resolved != null) {
+            owner = resolved;
+        }
+        return resolved;
     }
 
     /**
@@ -57,17 +153,32 @@ public class PredictorImpl implements Predictor {
      * @return 速度向量；若 tick 差为 0，则返回零向量（同一时刻无有效速度）
      */
     public Vec3 getKnownDeltaMovement() {
-        if (positions.size() < 2) return Vec3.ZERO;
-        Iterator<KnownPosition> it = positions.descendingIterator();
-        KnownPosition newest = it.next();
-        KnownPosition second = it.next();
-        int dt = newest.tick() - second.tick();
-        if (dt == 0) {
-            // 同一 tick 内无法计算速度，返回零向量（或根据需求返回位移差）
-            return newest.vec3d().subtract(second.vec3d());
+        synchronized (this) {
+            if (positions.size() < 2) return Vec3.ZERO;
+            Iterator<KnownPosition> it = positions.descendingIterator();
+            KnownPosition newest = it.next();
+            KnownPosition second = it.next();
+            int dt = newest.tick() - second.tick();
+            if (dt == 0) {
+                // 同一 tick 内无法计算速度，返回零向量（或根据需求返回位移差）
+                return newest.vec3d().subtract(second.vec3d());
+            }
+            Vec3 displacement = newest.vec3d().subtract(second.vec3d());
+            return displacement.scale(1.0 / dt);
         }
-        Vec3 displacement = newest.vec3d().subtract(second.vec3d());
-        return displacement.scale(1.0 / dt);
+    }
+
+    @Override
+    public Vec3 getCurrentPos() {
+        synchronized (this) {
+            if (currentTrackedPosition == null) {
+                Entity tracked = trackedOwner();
+                if (tracked != null) {
+                    currentTrackedPosition = tracked.position();
+                }
+            }
+            return currentTrackedPosition == null ? Vec3.ZERO : currentTrackedPosition;
+        }
     }
 
     /**
@@ -77,23 +188,26 @@ public class PredictorImpl implements Predictor {
      * @param useTicksBefore 只使用过去 useTicksBefore 刻内的历史记录
      */
     public Vec3 predict(int ticksLater, int method, int useTicksBefore) {
-        if (ticksLater == 0) return owner.position();
-        int currentTick = Tasks.getTick();
-        Vec3 currentPos = owner.position();
-
+        Vec3 trackedPos;
         List<KnownPosition> histRecords = new ArrayList<>();
         KnownPosition lastKnown = null;
-        // 如果当前在范围内，则将其前一个加入。？
+        int currentTick = Tasks.getTick();
         boolean add = false;
-        for (KnownPosition pos : positions) {
-            if (pos.tick() >= currentTick - useTicksBefore) {
-                add = true;
-                if (lastKnown != null) {
-                    histRecords.add(lastKnown);
+
+        synchronized (this) {
+            trackedPos = getCurrentPos();
+            for (KnownPosition pos : positions) {
+                if (pos.tick() >= currentTick - useTicksBefore) {
+                    add = true;
+                    if (lastKnown != null) {
+                        histRecords.add(lastKnown);
+                    }
                 }
+                lastKnown = pos;
             }
-            lastKnown = pos;
         }
+        if (ticksLater == 0) return trackedPos;
+        Vec3 currentPos = trackedPos;
         // 如果最后一个需要加入。那么add必然为true
         if (lastKnown != null && add) {
             histRecords.add(lastKnown);
@@ -209,8 +323,12 @@ public class PredictorImpl implements Predictor {
         if (lastNumber <= 0) return Collections.emptyList();
 
         // 先收集已有的历史记录（从旧到新）
-        List<KnownPosition> result = new ArrayList<>(positions);
-
+        List<KnownPosition> result;
+        Vec3 currentPos;
+        synchronized (this) {
+            result = new ArrayList<>(positions);
+            currentPos = getCurrentPos();
+        }
         // 如果历史记录超过所需数量，只保留最后 lastNumber 个
         if (result.size() > lastNumber) {
             result = result.subList(result.size() - lastNumber, result.size());
@@ -219,7 +337,6 @@ public class PredictorImpl implements Predictor {
         // 如果不足，用当前实体位置补全（添加在末尾）
         int missing = lastNumber - result.size();
         if (missing > 0) {
-            Vec3 currentPos = owner.position();
             int currentTick = Tasks.getTick();
             for (int i = 0; i < missing; i++) {
                 result.add(new KnownPosition(currentPos, currentTick));
