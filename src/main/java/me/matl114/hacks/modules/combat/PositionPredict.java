@@ -4,23 +4,28 @@ import com.google.common.hash.Hashing;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import it.unimi.dsi.fastutil.ints.Int2ObjectArrayMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.With;
 import me.matl114.accessors.hacks.EntityInternalAccess;
-import me.matl114.accessors.hacks.PlayerInternalAccess;
+import me.matl114.events.*;
 import me.matl114.events.Event;
 import me.matl114.events.impl.Render3D;
-import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
+import me.matl114.events.packets.PacketStorage;
+import me.matl114.events.packets.PacketStorageImpl;
 import me.matl114.gui.basic.*;
 import me.matl114.gui.elements.ButtonElement;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.NBTTypes;
+import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.entity.EntityMovementStatus;
+import me.matl114.hacks.utils.entity.LocalEntityPredictor;
 import me.matl114.hacks.utils.entity.Predictor;
 import me.matl114.hacks.utils.entity.PredictorImpl;
 import me.matl114.hacks.utils.enums.PredictionMode;
@@ -38,10 +43,13 @@ import me.matl114.utils.entity.PlayerInputUtils;
 import me.matl114.versioned.api.VRender;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.*;
 import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
 import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.player.Player;
@@ -81,6 +89,14 @@ public class PositionPredict extends BaseModule {
             .defaultValue(false)
             .build();
 
+    public final FlagRef playerSyncPositionPeek =
+            flagBuilder(attack.add("player-sync-position-peek")).build();
+
+    public final NBTRef<WrapColor> playerSyncPosColor = builder(
+                    attack.add("player-sync-position-render-color"), WrapColor.class)
+            .defaultValue(new WrapColor(Color.GREEN))
+            .build();
+
     public final FlagRef debugRender =
             flagBuilder(attack.add("debug-render-prediction")).build();
     Int2ObjectArrayMap<List<Vec3>> recordedPoints = new Int2ObjectArrayMap<>();
@@ -96,18 +112,121 @@ public class PositionPredict extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(
-                Listener.getPacketPostHandlePoint().getChannel(ClientboundMoveEntityPacket.class), this::onPostEntity);
-        registerListener(
-                Listener.getPacketPostHandlePoint().getChannel(ClientboundTeleportEntityPacket.class),
-                this::onPostEntityPos);
-        registerListener(
-                Listener.getPacketPostHandlePoint().getChannel(ClientboundEntityPositionSyncPacket.class),
-                this::onPostEntityTeleport);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
     }
 
+    static {
+        PacketManager.getPacketQueueInEvent().registerHandler(PositionPredict::onInBoundPacket, Integer.MIN_VALUE);
+    }
+
+    static final Int2ObjectMap<PredictorImpl> asyncLoadedPlayerPositionTrackers = new Int2ObjectOpenHashMap<>();
+
+    public static void onInBoundPacket(Event<PacketStorage> event) {
+        if (event.<Boolean>getArgs(1) && event.context instanceof PacketStorageImpl impl) {
+            onPacket(impl.packet());
+        }
+    }
+
+    public static Predictor getPlayerPredictor(Entity id) {
+        synchronized (asyncLoadedPlayerPositionTrackers) {
+            var re = asyncLoadedPlayerPositionTrackers.get(id.getId());
+            return re != null ? re : new LocalEntityPredictor(id);
+        }
+    }
+
+    private static void onPacket(Packet<?> ev) {
+        if (ev instanceof ClientboundBundlePacket bundle) {
+            for (var re : bundle.subPackets()) {
+                onPacket(re);
+            }
+            return;
+        }
+        if (ev instanceof ClientboundLoginPacket joinWorld || ev instanceof ClientboundRespawnPacket) {
+            synchronized (asyncLoadedPlayerPositionTrackers) {
+                asyncLoadedPlayerPositionTrackers.clear();
+            }
+            return;
+        }
+        if (ev instanceof ClientboundAddEntityPacket packet && packet.getType() == EntityTypes.PLAYER) {
+            PredictorImpl newPredictor = new PredictorImpl();
+            newPredictor.initializeTrackedPosition(
+                    packet.getId(),
+                    packet.getX(),
+                    packet.getY(),
+                    packet.getZ(),
+                    packet.getXRot(),
+                    packet.getYRot());
+            synchronized (asyncLoadedPlayerPositionTrackers) {
+                asyncLoadedPlayerPositionTrackers.put(packet.getId(), newPredictor);
+            }
+            return;
+        }
+        if (ev instanceof ClientboundRemoveEntitiesPacket destroy) {
+            synchronized (asyncLoadedPlayerPositionTrackers) {
+                destroy.getEntityIds().forEach(asyncLoadedPlayerPositionTrackers::remove);
+            }
+        }
+        PredictorImpl impl;
+        if (ev instanceof ClientboundMoveEntityPacket packet) {
+            synchronized (asyncLoadedPlayerPositionTrackers) {
+                impl = asyncLoadedPlayerPositionTrackers.get(packet.getEntity(mc.level).getId());
+            }
+
+            if (impl != null) {
+                impl.onEntityPositionMove(packet);
+            }
+            return;
+        }
+        if (ev instanceof ClientboundTeleportEntityPacket packet) {
+            synchronized (asyncLoadedPlayerPositionTrackers) {
+                impl = asyncLoadedPlayerPositionTrackers.get(packet.id());
+            }
+
+            if (impl != null) {
+                impl.onEntityPositionPost(packet);
+            }
+            return;
+        }
+        if (ev instanceof ClientboundEntityPositionSyncPacket sync) {
+            synchronized (asyncLoadedPlayerPositionTrackers) {
+                impl = asyncLoadedPlayerPositionTrackers.get(sync.id());
+            }
+
+            if (impl != null) {
+                impl.onEntityPositionSyncPost(sync);
+            }
+            return;
+        }
+    }
+
     public void onRender(Event<Render3D> event) {
+        if (playerSyncPositionPeek.get()) {
+            List<AABB> boxes = new ArrayList<>();
+            for (var re : mc.level.players()) {
+                Vec3 trackedPos = re.trackingPosition();
+                Vec3 currentPos = getPredictor(re).getCurrentPos();
+                if (currentPos.distanceToSqr(trackedPos) > 1E-2) {
+                    boxes.add(re.dimensions.makeBoundingBox(currentPos));
+                }
+            }
+            if (!boxes.isEmpty()) {
+                RenderUtils.startDrawVirtual(event.context.stack());
+                try {
+                    VRender.getInstance().createLinesLayer(((operation, vertexConsumer) -> {
+                        for (AABB box : boxes) {
+                            operation.drawOutlinedBox(
+                                    event.context.stack(),
+                                    vertexConsumer,
+                                    box.getMinPosition(),
+                                    box.getMaxPosition(),
+                                    playerSyncPosColor.get().withAlpha(255));
+                        }
+                    }));
+                } finally {
+                    RenderUtils.stopDrawVirtual(event.context.stack());
+                }
+            }
+        }
         if (debugRender.get()) {
             RenderUtils.startDrawVirtual(event.context.stack());
             try {
@@ -157,45 +276,6 @@ public class PositionPredict extends BaseModule {
             } finally {
                 RenderUtils.stopDrawVirtual(event.context.stack());
             }
-        }
-    }
-
-    // on player update events;
-    public void onPostEntity(Event<ClientboundMoveEntityPacket> event) {
-        if (checkNull()) return;
-        if (event.context.getEntity(mc.level) instanceof PlayerInternalAccess internal) {
-            if (EntityInternalAccess.of((Player) internal).getPositionPredictor() instanceof PredictorImpl impl) {
-                impl.onEntityPositionMove(event);
-            }
-            onPlayerEntityUpdate((Player) internal);
-        }
-    }
-
-    public void onPostEntityPos(Event<ClientboundTeleportEntityPacket> event) {
-        if (checkNull()) return;
-        if (mc.level.getEntity(event.context.id()) instanceof PlayerInternalAccess internal) {
-            if (EntityInternalAccess.of((Player) internal).getPositionPredictor() instanceof PredictorImpl impl) {
-                impl.onEntityPositionPost(event);
-            }
-            onPlayerEntityUpdate((Player) internal);
-        }
-    }
-
-    public void onPostEntityTeleport(Event<ClientboundEntityPositionSyncPacket> event) {
-        if (checkNull()) return;
-        if (mc.level.getEntity(event.context.id()) instanceof PlayerInternalAccess internal) {
-            if (EntityInternalAccess.of((Player) internal).getPositionPredictor() instanceof PredictorImpl impl) {
-                impl.onEntityPositionSyncPost(event);
-            }
-            onPlayerEntityUpdate((Player) internal);
-        }
-    }
-
-    public void onPlayerEntityUpdate(Player player) {
-        if (placeRecorder.get()) {
-            recordedPoints
-                    .computeIfAbsent(player.getId(), (v) -> new ArrayList<>())
-                    .add(player.position());
         }
     }
 

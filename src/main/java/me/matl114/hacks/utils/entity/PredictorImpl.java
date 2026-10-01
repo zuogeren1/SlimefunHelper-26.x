@@ -58,8 +58,7 @@ public class PredictorImpl implements Predictor {
         }
     }
 
-    public void onEntityPositionPost(Event<ClientboundTeleportEntityPacket> event) {
-        ClientboundTeleportEntityPacket packet = event.context;
+    public void onEntityPositionPost(ClientboundTeleportEntityPacket packet) {
         if (packet.id() != ownerId) return;
         synchronized (this) {
             PositionMoveRotation position = apply(packet.change(), packet.relatives());
@@ -70,8 +69,7 @@ public class PredictorImpl implements Predictor {
         }
     }
 
-    public void onEntityPositionSyncPost(Event<ClientboundEntityPositionSyncPacket> event) {
-        ClientboundEntityPositionSyncPacket packet = event.context;
+    public void onEntityPositionSyncPost(ClientboundEntityPositionSyncPacket packet) {
         if (packet.id() != ownerId) return;
         synchronized (this) {
             PositionMoveRotation position = packet.values();
@@ -82,8 +80,7 @@ public class PredictorImpl implements Predictor {
         }
     }
 
-    public void onEntityPositionMove(Event<ClientboundMoveEntityPacket> event) {
-        ClientboundMoveEntityPacket packet = event.context;
+    public void onEntityPositionMove(ClientboundMoveEntityPacket packet) {
         Entity tracked = trackedOwner();
         if (tracked == null || packet.getEntity(mc.level) != tracked) return;
         synchronized (this) {

@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.impl.BlockBreak;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.MovTasks;
@@ -12,8 +13,11 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.interact.InteractExtra;
+import me.matl114.hacks.modules.combat.CombatManager;
+import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.PacketMine;
+import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
 import me.matl114.hacks.utils.tasks.TimerExecutor;
@@ -23,11 +27,15 @@ import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.collections.FlagEntry;
 import me.matl114.utils.collections.IndexEntry;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -82,6 +90,11 @@ public class AnchorAura extends BaseModule {
             .validator(Configs.INT_POSITIVE)
             .build();
 
+    public final FlagRef place0TickSupply =
+            flagBuilder(root.add("zero-tick-place-supply")).build();
+
+    public final FlagRef use0TickSupply = flagBuilder(root.add("zero-tick-use")).build();
+
     public final FlagRef eatingAbort = builder(root.add("using-item-abort"), Boolean.class)
             .defaultValue(false)
             .build();
@@ -96,21 +109,6 @@ public class AnchorAura extends BaseModule {
             .validator(Configs.doubleRange(0.0D, 1000.0D))
             .build();
 
-    public final FlagRef considerAllTerrain =
-            flagBuilder(root.add("consider-all-terrain")).build();
-
-    public final FlagRef packetMineBridge =
-            flagBuilder(root.add("packet-mine-bridge")).build();
-
-    public final KeyBindRef packetMineBridgeHotkey = toggleHotkey(
-                    root.add("packet-mine-bridge-hotkey"), new MultiKeyBind(), root.add("packet-mine-bridge"))
-            .build();
-
-    public final FlagRef place0TickSupply =
-            flagBuilder(root.add("zero-tick-place-supply")).build();
-
-    public final FlagRef use0TickSupply = flagBuilder(root.add("zero-tick-use")).build();
-
     public final EnumRef<GhostHandMode> ghostHand = builder(root.add("ghost-hand-mode"), GhostHandMode.class)
             .defaultValue(GhostHandMode.INV_SWAP)
             .build();
@@ -120,24 +118,50 @@ public class AnchorAura extends BaseModule {
     public final FlagRef swingHand =
             builder(root.add("swing-hand"), Boolean.class).defaultValue(true).build();
 
+    public final ModulePath packetMine = root.add("bridge-packet-mine");
+
+    public final FlagRef packetMineBridge = flagBuilder(packetMine.addEnable()).build();
+
+    public final KeyBindRef packetMineBridgeHotkey = toggleHotkey(
+                    packetMine.addHotkey(), new MultiKeyBind(), packetMine.addEnable())
+            .build();
+
+    public final ModulePath blocking = root.add("auto-block");
+
+    public final FlagRef autoBlock = flagBuilder(blocking.addEnable()).build();
+
+    public final NBTRef<EntrySet<Item>> blockingBlock = builder(
+                    blocking.add("blocking-block"), EntrySet.<Item>parameter())
+            .defaultValue(new EntrySet<>(BuiltInRegistries.ITEM, List.of(Items.OBSIDIAN)))
+            .build();
+
+    public final DoubleRef blockReduce = doubleBuilder(blocking.add("block-reduce"))
+            .defaultValue(0.9D)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
+            .build();
+
+    public final FlagRef zeroTickBlock = flagBuilder(blocking.add("zero-tick")).build();
+
     final TimerExecutor noSupplyExecutor = new TimerExecutor();
 
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getWorldSwitchPoint(), this::onSwitchWorld);
-        registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvents);
-        registerListener(PacketMine.getPostPacketMine(), this::onPacketMine);
-        registerListener(PacketMine.getPrePacketMine(), this::onPrePacketMine);
+        registerListener(Listener.getPlayerRespawnPoint(), this::onSwitchWorld);
+        registerListener(Listener.getPostHandleInputEvents(), this::onPostInputEvents);
+        registerListener(PacketMine.getPacketMineAction(), this::onPacketMine);
+        registerListener(PacketMine.getPacketMineAction().getChannel(BlockBreak.Stage.PRE), this::onPrePacketMine);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onPreset);
     }
 
     public Map<BlockPos, AnchorCache> trackedAnchorPositions = new LinkedHashMap<>();
     public List<Player> targetEntity = List.of();
+    private AnchorPlan pendingPlace;
 
-    public void onSwitchWorld(Event<Level> event) {
+    public void onSwitchWorld(Event<LocalPlayer> event) {
         trackedAnchorPositions.clear();
         targetEntity = List.of();
+        pendingPlace = null;
     }
 
     public void refreshTarget() {
@@ -183,13 +207,22 @@ public class AnchorAura extends BaseModule {
 
     private Map<Player, Double> calculateAnchorDamage(
             BlockPos pos, Map<Player, AABB> predictedBoxes, boolean usePredict) {
+        return calculateAnchorDamage(pos, predictedBoxes, usePredict, Map.of());
+    }
+
+    private Map<Player, Double> calculateAnchorDamage(
+            BlockPos pos,
+            Map<Player, AABB> predictedBoxes,
+            boolean usePredict,
+            Map<BlockPos, BlockState> overrides) {
         Map<Player, Double> damageMap = new LinkedHashMap<>();
         if (mc.level == null || mc.player == null) {
             return damageMap;
         }
         Vec3 explosionPos = Vec3.atCenterOf(pos);
-        Map<BlockPos, BlockState> overrides = Map.of(pos, Blocks.AIR.defaultBlockState());
-        var access = ExplosionUtils.fromWorldWithOverrides(mc.level, overrides);
+        overrides = new HashMap<>(overrides);
+        overrides.put(pos, Blocks.AIR.defaultBlockState());
+        ExplosionUtils.BlockStateAccess access = ExplosionUtils.fromWorldWithOverrides(mc.level, overrides);
         damageMap.put(mc.player, (double) ExplosionUtils.calculateExplosionRawDamage(
                 ANCHOR_POWER, explosionPos, mc.player.getBoundingBox(), access, ExplosionUtils.ALL_TERRAIN));
         for (Player target : targetEntity) {
@@ -198,11 +231,7 @@ public class AnchorAura extends BaseModule {
             }
             AABB targetBox = getTargetDamageBox(target, predictedBoxes, usePredict);
             damageMap.put(target, (double) ExplosionUtils.calculateExplosionRawDamage(
-                    ANCHOR_POWER,
-                    explosionPos,
-                    targetBox,
-                    access,
-                    considerAllTerrain.get() ? ExplosionUtils.ALL_TERRAIN : ExplosionUtils.EXPLOSION_RESISTENCE));
+                    ANCHOR_POWER, explosionPos, targetBox, access, ExplosionUtils.EXPLOSION_RESISTENCE));
         }
         return damageMap;
     }
@@ -252,14 +281,22 @@ public class AnchorAura extends BaseModule {
         if (damageMap == null || damageMap.isEmpty()) {
             return false;
         }
+        if (!isSelfDamageAcceptable(damageMap)) {
+            return false;
+        }
+        return isTargetDamageAcceptable(damageMap);
+    }
+
+    private boolean isSelfDamageAcceptable(Map<Player, Double> damageMap) {
         double selfDamage = damageMap.getOrDefault(mc.player, Double.POSITIVE_INFINITY);
         float finalDamage = DamageUtils.getFinalDamage(
                 mc.player,
                 (float) selfDamage,
                 DamageUtils.createDamageSource(DamageTypes.PLAYER_EXPLOSION, null, null));
-        if (finalDamage > selfFinalDamageThreshold.get()) {
-            return false;
-        }
+        return finalDamage <= selfFinalDamageThreshold.get();
+    }
+
+    private boolean isTargetDamageAcceptable(Map<Player, Double> damageMap) {
         return getBestEnemyDamage(damageMap) >= targetDamageThreshold.get();
     }
 
@@ -273,12 +310,12 @@ public class AnchorAura extends BaseModule {
     public boolean isSuitablePosition(BlockPos pos) {
         BlockState state = mc.level.getBlockState(pos);
         return (state.isAir() || state.liquid() || state.canBeReplaced())
-                && InteractUtils.canBlockPlace(mc.player, pos, Blocks.RESPAWN_ANCHOR.defaultBlockState());
+                && CombatManager.INSTANCE.canBlockPlace(mc.player, pos, Blocks.RESPAWN_ANCHOR.defaultBlockState());
     }
 
     int timer = 0;
 
-    public void onPreInputEvents(Event<Void> event) {
+    public void onPostInputEvents(Event<Void> event) {
         if (checkNull()) return;
         if (enable.get()) {
             if (!InteractUtils.canRespawnAnchorExplode(mc.level)) {
@@ -292,18 +329,35 @@ public class AnchorAura extends BaseModule {
             if (eatingAbort.get() && mc.player.isUsingItem()) {
                 return;
             }
+            ++timer;
+            if (placePendingBlock()) {
+                return;
+            }
             tickAnchorPosition();
-            if (++timer >= delay.get() && !targetEntity.isEmpty()) {
-                timer = 0;
+            if (timer >= delay.get() && !targetEntity.isEmpty()) {
                 if (!checkSupplies()) return;
                 if (!tickAnchorExplode()) {
-                    tickAnchorPlace();
+                    if (tickAnchorPlace()) {
+                        timer = 0;
+                    }
+                } else {
+                    timer = 0;
                 }
             }
         } else {
             trackedAnchorPositions.clear();
             targetEntity = List.of();
+            pendingPlace = null;
         }
+    }
+
+    private boolean placePendingBlock() {
+        if (pendingPlace == null) {
+            return false;
+        }
+        AnchorPlan option = pendingPlace;
+        pendingPlace = null;
+        return placeBlockingBlock(option);
     }
 
     public boolean tickAnchorExplode() {
@@ -386,17 +440,14 @@ public class AnchorAura extends BaseModule {
         return interactCount;
     }
 
-    public void tickAnchorPlace() {
+    public boolean tickAnchorPlace() {
         if (targetEntity.isEmpty()) {
-            return;
+            return false;
         }
         Map<Player, AABB> predictedBoxes = new HashMap<>();
 
-        BlockPos bestPos = null;
-
-        FlagEntry<BlockHitResult> bestHitResult = null;
-        Map<Player, Double> bestDamageMap = null;
-        double bestEnemyDamage = Double.NEGATIVE_INFINITY;
+        AnchorPlan bestOption = null;
+        double bestOptionValue = Double.NEGATIVE_INFINITY;
         BlockPos currentPos = mc.player.blockPosition();
         for (Vec3i delta : interactRangeBlocks) {
             BlockPos pos = currentPos.offset(delta);
@@ -416,26 +467,92 @@ public class AnchorAura extends BaseModule {
                 continue;
             }
             Map<Player, Double> damageMap = calculateAnchorDamage(pos, predictedBoxes, true);
-            // ...
-            if (!isSuitableExplodePos(pos, damageMap)) {
+            AnchorPlan option;
+            if (!isTargetDamageAcceptable(damageMap)) {
                 continue;
             }
+            if (isSelfDamageAcceptable(damageMap)) {
+                option = new AnchorPlan(pos, hitResult.val(), damageMap, Optional.empty());
+            } else {
+                if (!autoBlock.get()) {
+                    continue;
+                }
+                option = findBlockingOption(pos, hitResult.val(), predictedBoxes);
+                if (option == null) {
+                    continue;
+                }
+            }
 
-            double enemyDamage = getBestEnemyDamage(damageMap);
-            if (enemyDamage > bestEnemyDamage) {
-                bestPos = pos;
-                bestHitResult = hitResult;
-                bestDamageMap = damageMap;
-                bestEnemyDamage = enemyDamage;
+            double optionValue = getOptionValue(option);
+            if (optionValue > bestOptionValue) {
+                bestOption = option;
+                bestOptionValue = optionValue;
             }
         }
-        if (bestPos != null) {
-            if (InteractUtils.canInteractAndPlace(mc.player, bestHitResult)) {
-                if (placeAnchor(bestPos, bestHitResult.val())) {
-                    updateAnchor(bestPos, bestDamageMap);
+        if (bestOption == null) return false;
+        completeAnchorPlan(bestOption);
+        return true;
+    }
+
+    private void completeAnchorPlan(AnchorPlan bestOption) {
+        if (bestOption != null && placeAnchor(bestOption.anchorHitResult)) {
+            updateAnchor(bestOption.anchorPos, bestOption.damageMap);
+            if (bestOption.blockingPos.isPresent()) {
+                if (zeroTickBlock.get()) {
+                    placeBlockingBlock(bestOption);
+                } else {
+                    pendingPlace = bestOption;
                 }
             }
         }
+    }
+
+    private AnchorPlan findBlockingOption(
+            BlockPos anchorPos, BlockHitResult anchorHitResult, Map<Player, AABB> predictedBoxes) {
+        IndexEntry<ItemStack> blockingItem = supplyBlockingBlock();
+        if (blockingItem == null) {
+            return null;
+        }
+        if (!InteractExtra.INSTANCE.isWithinInteractRange(mc.player.position(), anchorPos)) {
+            return null;
+        }
+
+        AnchorPlan bestOption = null;
+        double bestOptionValue = Double.NEGATIVE_INFINITY;
+        for (Direction direction : Direction.values()) {
+            BlockPos blockingPos = anchorPos.relative(direction);
+            // when it is in head, it's too late
+            if (InteractionTasks.checkInHead(anchorPos, mc.player.position())
+                    || !InteractionTasks.checkPositionPlace(anchorPos, direction, mc.player.position())) {
+                continue;
+            }
+
+            BlockState blockingState = mc.level.getBlockState(blockingPos);
+            if (!blockingState.isAir() && !blockingState.liquid() && !blockingState.canBeReplaced()) {
+                continue;
+            }
+            if (!CombatManager.INSTANCE.canCubePlace(mc.player, blockingPos)) {
+                continue;
+            }
+            var newDamageMap = calculateAnchorDamage(
+                    anchorPos, predictedBoxes, true, Map.of(blockingPos, Blocks.OBSIDIAN.defaultBlockState()));
+            if (!isSuitableExplodePos(anchorPos, newDamageMap)) {
+                continue;
+            }
+            AnchorPlan option = new AnchorPlan(anchorPos, anchorHitResult, newDamageMap, Optional.of(blockingPos));
+
+            double optionValue = getOptionValue(option);
+            if (optionValue > bestOptionValue) {
+                bestOption = option;
+                bestOptionValue = optionValue;
+            }
+        }
+        return bestOption;
+    }
+
+    private double getOptionValue(AnchorPlan option) {
+        double value = getBestEnemyDamage(option.damageMap);
+        return option.blockingPos.isEmpty() ? value : value * blockReduce.get();
     }
 
     public boolean placeAnchor(BlockPos pos) {
@@ -444,16 +561,60 @@ public class AnchorAura extends BaseModule {
         if (InteractUtils.canInteractAndPlace(mc.player, hitResult)
                 && InteractExtra.INSTANCE.isWithinInteractRange(
                         mc.player.position(), hitResult.val().getBlockPos())) {
-            return placeAnchor(pos, hitResult.val());
+            return placeAnchor(hitResult.val());
         }
         return false;
     }
 
-    public boolean placeAnchor(BlockPos pos, BlockHitResult hitResult) {
+    public boolean placeAnchor(BlockHitResult hitResult) {
         var entry = supplyItem(Items.RESPAWN_ANCHOR);
         if (entry == null) return false;
         var runnable = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, ghostHand.get());
         if (runnable == null) return false;
+        InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
+        runnable.run();
+        return true;
+    }
+
+    private IndexEntry<ItemStack> supplyBlockingBlock() {
+        EntrySet<Item> allowedBlocks = blockingBlock.get();
+        if (allowedBlocks == null) {
+            return null;
+        }
+        return InventoryUtils.findPlayerItem(
+                stack -> stack.getItem() instanceof BlockItem
+                        && !stack.is(Items.GLOWSTONE)
+                        && allowedBlocks.test(stack.getItem()),
+                ghostHand.get().getSearchSize(false),
+                true,
+                false);
+    }
+
+    private boolean placeBlockingBlock(AnchorPlan option) {
+        if (option.blockingPos().isEmpty()) return false;
+        BlockState anchorPos = mc.level.getBlockState(option.anchorPos());
+        if (anchorPos.isAir() || anchorPos.liquid() || anchorPos.canBeReplaced()) {
+            return false;
+        }
+        BlockPos blockingPos = option.blockingPos().get();
+        BlockState blockingState = mc.level.getBlockState(blockingPos);
+        if (!blockingState.isAir() && !blockingState.liquid() && !blockingState.canBeReplaced()) {
+            return false;
+        }
+        Vec3 directionVec = Vec3.atLowerCornerOf(blockingPos.subtract(option.anchorPos()));
+        Direction direction = Direction.getApproximateNearest(directionVec);
+        BlockHitResult hitResult = InteractionTasks.createHitResult(option.anchorPos(), direction);
+        if (!InteractionTasks.checkPositionPlace(hitResult)) {
+            return false;
+        }
+        IndexEntry<ItemStack> entry = supplyBlockingBlock();
+        if (entry == null) {
+            return false;
+        }
+        Runnable runnable = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, ghostHand.get());
+        if (runnable == null) {
+            return false;
+        }
         InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
         runnable.run();
         return true;
@@ -501,9 +662,12 @@ public class AnchorAura extends BaseModule {
         return best;
     }
 
-    public void onPrePacketMine(Event<PacketMine.Pre> eventPreMine) {
-        if (enable.get() && !eventPreMine.isCancelled()) {
-            BlockPos pos = eventPreMine.getArgs(0);
+    public void onPrePacketMine(Event<BlockBreak> eventPreMine) {
+        if (enable.get()
+                && !eventPreMine.isCancelled()
+                && eventPreMine.canCancel()
+                && eventPreMine.context().stage() == BlockBreak.Stage.PRE) {
+            BlockPos pos = eventPreMine.context().blockPos();
             if (trackedAnchorPositions.containsKey(pos)
                     && mc.level.getBlockState(pos).getBlock() instanceof RespawnAnchorBlock) {
                 eventPreMine.cancel();
@@ -511,17 +675,35 @@ public class AnchorAura extends BaseModule {
         }
     }
 
-    public void onPacketMine(Event<PacketMine.Post> eventPostMine) {
-        if (enable.get() && packetMineBridge.get() && !targetEntity.isEmpty()) {
+    public void onPacketMine(Event<BlockBreak> eventPostMine) {
+        if (enable.get()
+                && packetMineBridge.get()
+                && !targetEntity.isEmpty()
+                && eventPostMine.context().stage() == BlockBreak.Stage.POST) {
             // bridge
-            float floatValue = eventPostMine.getArgs(1);
+            float floatValue = eventPostMine.context().progress();
             if (floatValue > 0.7f) {
-                BlockPos pos = eventPostMine.getArgs(0);
+                BlockPos pos = eventPostMine.context().blockPos();
                 mc.level.setServerVerifiedBlockState(pos, Blocks.AIR.defaultBlockState(), 3);
                 Map<Player, Double> damageMap = calculateAnchorDamage(pos, null, false);
-                if (isSuitableExplodePos(pos, damageMap)) {
-                    if (placeAnchor(pos)) {
-                        updateAnchor(pos, damageMap);
+
+                if (isTargetDamageAcceptable(damageMap)) {
+                    FlagEntry<BlockHitResult> hitResult = InteractionTasks.getPlaceSupportingResult(
+                            pos, airplace.get(), !mode.get().isLegal());
+                    if (InteractUtils.canInteractAndPlace(mc.player, hitResult)
+                            && InteractExtra.INSTANCE.isWithinInteractRange(
+                                    mc.player.position(), hitResult.val().getBlockPos())) {
+                        BlockHitResult hit = hitResult.val();
+                        AnchorPlan plan;
+
+                        if (isSelfDamageAcceptable(damageMap)) {
+                            plan = new AnchorPlan(pos, hit, damageMap, Optional.empty());
+                        } else {
+                            plan = findBlockingOption(pos, hit, null);
+                        }
+                        if (plan != null) {
+                            completeAnchorPlan(plan);
+                        }
                     }
                 }
             }
@@ -555,4 +737,10 @@ public class AnchorAura extends BaseModule {
         int powerLevel;
         Map<Player, Double> damageCache;
     }
+
+    public static record AnchorPlan(
+            BlockPos anchorPos,
+            BlockHitResult anchorHitResult,
+            Map<Player, Double> damageMap,
+            Optional<BlockPos> blockingPos) {}
 }

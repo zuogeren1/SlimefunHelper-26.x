@@ -3,6 +3,7 @@ package me.matl114.hacks.modules.combat;
 import java.awt.*;
 import java.util.HashSet;
 import java.util.Set;
+import me.matl114.events.*;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.PacketManager;
@@ -30,7 +31,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityEvent;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 public class BackTrack extends BaseModule {
@@ -97,7 +97,10 @@ public class BackTrack extends BaseModule {
     }
 
     public void setNoDelay() {
-        shouldDelay = false;
+        if (shouldDelay) {
+            shouldDelay = false;
+            PacketManager.scheduleImmediateFlush();
+        }
     }
 
     public void setDelay() {

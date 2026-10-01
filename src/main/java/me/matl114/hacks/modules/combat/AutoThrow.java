@@ -5,7 +5,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
-import javax.swing.*;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.InteractionTasks;

@@ -291,7 +291,8 @@ public class AntiCrystal extends BaseModule {
                 if (supply != null) {
                     for (var re : needConsider) {
                         if (!checkNoEntity(re)) continue;
-                        if (SequencedActionManager.INSTANCE.isWaitingResponse(re, s -> s.is(Items.FIREWORK_ROCKET))
+                        if (SequencedActionManager.INSTANCE.isWaitingResponse(
+                                        re, s -> s.is(Items.FIREWORK_ROCKET))
                                 || SequencedActionManager.INSTANCE.isWaitingResponse(
                                         re.below(), s -> s.is(Items.FIREWORK_ROCKET))) {
                             continue;
