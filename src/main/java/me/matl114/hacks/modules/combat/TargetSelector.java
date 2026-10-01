@@ -10,7 +10,7 @@ import java.util.function.Predicate;
 import java.util.stream.DoubleStream;
 import java.util.stream.Stream;
 import lombok.Getter;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.basic.*;
 import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.CombatTasks;

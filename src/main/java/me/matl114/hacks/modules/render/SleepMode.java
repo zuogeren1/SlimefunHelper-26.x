@@ -6,7 +6,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import me.matl114.accessors.access.ChatScreenAccess;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.*;

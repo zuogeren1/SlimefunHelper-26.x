@@ -3,7 +3,7 @@ package me.matl114.hacks.modules.move;
 import java.util.Optional;
 import java.util.function.Consumer;
 import me.matl114.accessors.access.ClientPlayerAccess;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.EventContainer;

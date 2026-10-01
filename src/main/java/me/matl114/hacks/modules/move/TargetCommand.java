@@ -3,7 +3,7 @@ package me.matl114.hacks.modules.move;
 import com.mojang.datafixers.util.Pair;
 import java.util.HashMap;
 import java.util.Map;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.utils.ChatUtils;

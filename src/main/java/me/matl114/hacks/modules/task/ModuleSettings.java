@@ -3,7 +3,7 @@ package me.matl114.hacks.modules.task;
 import java.util.List;
 import me.matl114.accessors.events.ChatHudAccess;
 import me.matl114.accessors.gui.TextFieldAccess;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.gui.presets.single.KeyBindConfigurateWidget;

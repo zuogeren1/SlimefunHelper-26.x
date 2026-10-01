@@ -5,8 +5,8 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import lombok.Getter;
-import me.matl114.bridge.BridgeMain;
-import me.matl114.commands.MainCommand;
+import me.matl114.registry.RegistryBootstrap;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
 import me.matl114.gui.GuiMain;
@@ -110,7 +110,7 @@ public class SlimefunHelper implements ModInitializer {
         GuiMain.init();
         // hacks main
         MainTasks.init();
-        BridgeMain.init();
+        RegistryBootstrap.init();
         SlimefunHelperApi.init();
         Debug.info("SlimefunHelper loading finish");
     }

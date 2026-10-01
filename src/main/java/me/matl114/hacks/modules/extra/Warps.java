@@ -4,7 +4,7 @@ import com.mojang.serialization.JavaOps;
 import java.util.*;
 import java.util.stream.Stream;
 import javax.annotation.Nonnull;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.EventContainer;

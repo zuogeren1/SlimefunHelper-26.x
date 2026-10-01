@@ -7,7 +7,7 @@ import java.util.*;
 import java.util.stream.Stream;
 import lombok.Getter;
 import me.matl114.accessors.gui.ScreenAccess;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.complex.slimefun.SlimefunChoiceScreen;
 import me.matl114.gui.complex.slimefun.SlimefunEntryListScreen;
 import me.matl114.hacks.api.ModuleGroup;

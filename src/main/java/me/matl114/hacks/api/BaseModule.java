@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.events.channels.ListenerPoint;
 import me.matl114.gui.basic.*;
 import me.matl114.gui.complex.config.DefaultedKeyValueInputWidget;

@@ -7,7 +7,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.api.BaseModule;

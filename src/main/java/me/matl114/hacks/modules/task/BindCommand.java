@@ -6,7 +6,7 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import me.matl114.commands.MainCommand;
+import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.ChatTasks;
