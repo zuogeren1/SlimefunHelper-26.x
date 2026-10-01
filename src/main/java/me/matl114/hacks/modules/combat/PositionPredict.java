@@ -22,6 +22,7 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.entity.EntityMovementStatus;
 import me.matl114.hacks.utils.entity.Predictor;
+import me.matl114.hacks.utils.entity.PredictorImpl;
 import me.matl114.hacks.utils.enums.PredictionMode;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
@@ -163,7 +164,9 @@ public class PositionPredict extends BaseModule {
     public void onPostEntity(Event<ClientboundMoveEntityPacket> event) {
         if (checkNull()) return;
         if (event.context.getEntity(mc.level) instanceof PlayerInternalAccess internal) {
-            internal.getPredictorImpl().onEntityPositionMove(event);
+            if (EntityInternalAccess.of((Player) internal).getPositionPredictor() instanceof PredictorImpl impl) {
+                impl.onEntityPositionMove(event);
+            }
             onPlayerEntityUpdate((Player) internal);
         }
     }
@@ -171,7 +174,9 @@ public class PositionPredict extends BaseModule {
     public void onPostEntityPos(Event<ClientboundTeleportEntityPacket> event) {
         if (checkNull()) return;
         if (mc.level.getEntity(event.context.id()) instanceof PlayerInternalAccess internal) {
-            internal.getPredictorImpl().onEntityPositionPost(event);
+            if (EntityInternalAccess.of((Player) internal).getPositionPredictor() instanceof PredictorImpl impl) {
+                impl.onEntityPositionPost(event);
+            }
             onPlayerEntityUpdate((Player) internal);
         }
     }
@@ -179,7 +184,9 @@ public class PositionPredict extends BaseModule {
     public void onPostEntityTeleport(Event<ClientboundEntityPositionSyncPacket> event) {
         if (checkNull()) return;
         if (mc.level.getEntity(event.context.id()) instanceof PlayerInternalAccess internal) {
-            internal.getPredictorImpl().onEntityPositionSyncPost(event);
+            if (EntityInternalAccess.of((Player) internal).getPositionPredictor() instanceof PredictorImpl impl) {
+                impl.onEntityPositionSyncPost(event);
+            }
             onPlayerEntityUpdate((Player) internal);
         }
     }

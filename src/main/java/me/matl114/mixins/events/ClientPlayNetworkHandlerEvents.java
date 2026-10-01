@@ -11,10 +11,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Consumer;
 import me.matl114.accessors.access.PlayerMoveC2SPacketAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.impl.ChatRecv;
 import me.matl114.events.impl.Teleportation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -23,10 +25,12 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.multiplayer.chat.ChatListener;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketListener;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.network.protocol.game.*;
@@ -149,7 +153,7 @@ public abstract class ClientPlayNetworkHandlerEvents {
         Listener.getWorldSwitchPoint().broadcast(this.level);
         if (playerRecreateOnJoin) {
             playerRecreateOnJoin = false;
-            Listener.getThisPlayerSpawnPoint().broadcast(Minecraft.getInstance().player);
+            Listener.getPlayerRespawnPoint().broadcast(Minecraft.getInstance().player);
         }
     }
 
@@ -178,7 +182,7 @@ public abstract class ClientPlayNetworkHandlerEvents {
             worldChangeOnRespawn = false;
             Listener.getWorldSwitchPoint().broadcast(this.level);
         }
-        Listener.getThisPlayerSpawnPoint().broadcast(Minecraft.getInstance().player);
+        Listener.getPlayerRespawnPoint().broadcast(Minecraft.getInstance().player);
     }
 
     @Shadow
@@ -189,6 +193,9 @@ public abstract class ClientPlayNetworkHandlerEvents {
 
     @Shadow
     public abstract void sendCommand(String command);
+
+    @Shadow
+    public abstract PlayerInfo getPlayerInfo(UUID player);
 
     @WrapOperation(
             method = "handleMovePlayer",
@@ -352,5 +359,39 @@ public abstract class ClientPlayNetworkHandlerEvents {
     private void onLoadChunkPost(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
         ChunkPos pos = new ChunkPos(packet.getX(), packet.getZ());
         Listener.getChunkUpdateListener().broadcast(pos);
+    }
+
+    @WrapOperation(
+            method = "handleSystemChat",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/client/multiplayer/chat/ChatListener;handleOverlay(Lnet/minecraft/network/chat/Component;)V"))
+    private void onOverlayMessage(ChatListener instance, Component message, Operation<Void> original) {
+        Event<Component> actionBarEvent = new Event<>(message, true, true);
+        Listener.getActionBarMessageReceive().handleValue(actionBarEvent);
+        if (actionBarEvent.isCancelled()) {
+            return;
+        }
+        original.call(instance, actionBarEvent.context());
+    }
+
+    @WrapOperation(
+            method = "handleSystemChat",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/client/multiplayer/chat/ChatListener;handleSystemMessage(Lnet/minecraft/network/chat/Component;Z)V"))
+    private void onGameMessage(
+            ChatListener instance, Component message, boolean remote, Operation<Void> original) {
+        ChatRecv chatRecv = ChatRecv.parseSystemMessage(message);
+        Event<ChatRecv> chatRecvEvent = new Event<>(chatRecv, true, false);
+        Listener.getChatMessageReceive().handleValue(chatRecvEvent);
+        if (chatRecvEvent.isCancelled()) {
+            return;
+        }
+        original.call(instance, chatRecvEvent.context.text(), remote);
     }
 }

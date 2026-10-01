@@ -1,5 +1,6 @@
 package me.matl114.accessors.access;
 
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
@@ -27,7 +28,7 @@ public interface PlayerInteractBlockC2SPacketAccess {
     void setUseContext(UseContext stack);
 
     public static record UseContext(
-            ItemStack stack, BlockState oldState, InteractionResult actionResult, boolean blockPlace) {
+            ItemStack stack, BlockState oldState, InteractionResult actionResult, Optional<BlockPos> placePos) {
         public boolean isEmpty() {
             return stack.isEmpty() || !(stack.getItem() instanceof BlockItem);
         }
@@ -40,6 +41,10 @@ public interface PlayerInteractBlockC2SPacketAccess {
                 return new BlockPlaceContext(Minecraft.getInstance().player, hand, stack, blockHitResult)
                         .getClickedPos();
             }
+        }
+
+        public boolean blockPlace() {
+            return placePos.isPresent();
         }
 
         public boolean isAccepted() {

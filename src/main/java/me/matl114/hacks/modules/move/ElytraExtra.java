@@ -13,6 +13,7 @@ import me.matl114.events.PacketManager;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.events.impl.MetadataUpdate;
 import me.matl114.events.packets.PacketStorage;
+import me.matl114.events.packets.PacketStorageImpl;
 import me.matl114.hacks.ACTasks;
 import me.matl114.hacks.CombatTasks;
 import me.matl114.hacks.MovTasks;
@@ -1807,7 +1808,7 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
                 || !armorGlideMaxDelayTicks.get().isPresent()) {
             return;
         }
-        if (event.context instanceof PacketManager.PacketStorageImpl impl
+        if (event.context instanceof PacketStorageImpl impl
                 && impl.packet() instanceof ClientboundPingPacket pingPacket) {
             lastTransactionRecv = pingPacket.getId();
         }
@@ -1822,7 +1823,7 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
             return;
         } else if (Tasks.getTick() - PlayerStateManager.INSTANCE.lastStartGlidingTick
                         < armorGlideMaxDelayTicks.get().getValue()
-                && event.context instanceof PacketManager.PacketStorageImpl impl) {
+                && event.context instanceof PacketStorageImpl impl) {
             Iterable<ClientboundSetEntityDataPacket> list;
             if (impl.packet() instanceof ClientboundSetEntityDataPacket update && update.id() == mc.player.getId()) {
                 list = List.of(update);
@@ -1849,7 +1850,7 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
             }
             if (finalGlidingOverrideState == Boolean.FALSE) {
                 currentDelaying = true;
-                PacketManager.handleQueueIn(new PacketManager.PacketStorageImpl(
+                PacketManager.handleQueueIn(new PacketStorageImpl(
                         new ClientboundPingPacket(lastTransactionRecv), event.context.timestampMS(), impl.connection()));
                 currentDelayingLastTransaction = lastTransactionRecv;
                 event.cancel();
@@ -1891,7 +1892,7 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
         }
         // restart a lock
         if (eventRemoval.context.timestampMS() > lastStartDelayOrReleaseMs + fireworksDelayMS.get() + 50
-                && eventRemoval.context instanceof PacketManager.PacketStorageImpl impl
+                && eventRemoval.context instanceof PacketStorageImpl impl
                 && recordedWorldFireworkRockets.stream()
                                 .filter(EntityUtils::isEntityValid)
                                 .count()

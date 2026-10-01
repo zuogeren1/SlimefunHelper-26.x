@@ -50,6 +50,7 @@
 		"events.ItemStackEvents",
 		"events.KeyBoardEvents",
 		"events.LivingEntityEvents",
+		"events.MessageHandlerEvents",
 		"events.MainEvents",
 		"events.MinecraftClientEvents",
 		"events.MouseEvents",

@@ -401,6 +401,15 @@ public class Listener {
     @Modifiable
     private static final EventChannel<String> chatScreenSendMessage = new EventChannel<>();
 
+    @Getter
+    @Cancelable
+    private static final EventChannel<ChatRecv> chatMessageReceive = new EventChannel<>();
+
+    @Getter
+    @Cancelable
+    @Modifiable
+    private static final EventChannel<Component> actionBarMessageReceive = new EventChannel<>();
+
     // screen events
     @Getter
     @Broadcast
@@ -517,7 +526,7 @@ public class Listener {
 
     @Getter
     @Broadcast
-    private static final EventChannel<LocalPlayer> thisPlayerSpawnPoint = new EventChannel<>();
+    private static final EventChannel<LocalPlayer> playerRespawnPoint = new EventChannel<>();
 
     @Getter
     @Cancelable
@@ -584,6 +593,11 @@ public class Listener {
     @Cancelable
     @Modifiable
     private static final EventChannel<FPoint> playerChangeLook = new EventChannel<>();
+
+    @Getter
+    @Cancelable
+    @Modifiable
+    private static final EventChannel<Integer> playerScrollHotBar = new EventChannel<>();
 
     @Getter
     @Cancelable

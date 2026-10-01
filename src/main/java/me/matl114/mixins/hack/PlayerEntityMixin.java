@@ -73,14 +73,6 @@ public abstract class PlayerEntityMixin extends LivingEntity
         predictorImpl.tick();
     }
 
-    @Override
-    public PredictorImpl getPredictorImpl() {
-        if (predictorImpl == null) {
-            predictorImpl = new PredictorImpl(this);
-        }
-        return predictorImpl;
-    }
-
     @Inject(method = "blockInteractionRange", at = @At("RETURN"), cancellable = true)
     private void getBlockInteractionRange(CallbackInfoReturnable<Double> cir) {
         double reach = InteractExtra.INSTANCE.reachDistance.get();

@@ -2,6 +2,7 @@ package me.matl114.jsApi;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import me.matl114.accessors.access.PlayerInteractBlockC2SPacketAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Listener;
@@ -131,7 +132,7 @@ public class PacketHelper {
                                 .copy(),
                         mc.level.getBlockState(hitResult.getBlockPos()),
                         InteractionResult.SUCCESS,
-                        false));
+                        Optional.empty()));
             }
             return packet;
         });

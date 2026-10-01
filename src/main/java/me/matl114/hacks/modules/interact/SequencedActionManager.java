@@ -77,7 +77,7 @@ public class SequencedActionManager extends BaseModule {
                         new UseItemOnBlock(
                                 event.context.getHitResult(),
                                 InteractionResult.SUCCESS,
-                                false,
+                                Optional.empty(),
                                 event.context.getHand(),
                                 stack)));
         lastBlockPlaceTick = Tasks.getTick();

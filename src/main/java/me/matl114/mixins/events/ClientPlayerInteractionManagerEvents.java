@@ -5,6 +5,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import java.util.ArrayDeque;
+import java.util.Optional;
 import me.matl114.accessors.access.PlayerInteractBlockC2SPacketAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -13,6 +14,7 @@ import me.matl114.events.impl.UseItem;
 import me.matl114.events.impl.UseItemOnBlock;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.ClientRecipeBook;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -26,6 +28,7 @@ import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.crafting.display.RecipeDisplayId;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -103,7 +106,7 @@ public abstract class ClientPlayerInteractionManagerEvents {
             CallbackInfoReturnable<InteractionResult> cir,
             @Local(argsOnly = true) LocalRef<BlockHitResult> hand2) {
         Event<UseItemOnBlock> blockHitResultEvent =
-                new Event<>(new UseItemOnBlock(hitResult, InteractionResult.SUCCESS, false, hand, player.getItemInHand(hand)), true, true);
+                new Event<>(new UseItemOnBlock(hitResult, InteractionResult.SUCCESS, Optional.empty(), hand, player.getItemInHand(hand)), true, true);
         Listener.getPrePlayerUseItemAtBlock().handleValue(blockHitResultEvent);
         if (blockHitResultEvent.isCancelled()) {
             cir.setReturnValue(blockHitResultEvent.context.actionResult());
@@ -137,13 +140,17 @@ public abstract class ClientPlayerInteractionManagerEvents {
         ItemStack stackCopy = minecraft.player.getItemInHand(hand).copy();
         BlockState state = minecraft.level.getBlockState(hitResult.getBlockPos());
         MutableBoolean placeBlock = new MutableBoolean(false);
+        BlockPos predictingPlace = new BlockPlaceContext(minecraft.player, hand, stackCopy, hitResult).getClickedPos();
         original.call(instance, world, (PredictiveAction) (seq) -> {
             lastInteractCaptureBlockPlace.addLast(placeBlock);
             try {
                 var packet = packetCreator.predict(seq);
                 if (packet instanceof PlayerInteractBlockC2SPacketAccess access) {
                     access.setUseContext(new PlayerInteractBlockC2SPacketAccess.UseContext(
-                            stackCopy, state, actionResult.getValue(), placeBlock.booleanValue()));
+                            stackCopy,
+                            state,
+                            actionResult.getValue(),
+                            placeBlock.booleanValue() ? Optional.of(predictingPlace) : Optional.empty()));
                 }
                 return packet;
             } finally {
@@ -152,7 +159,15 @@ public abstract class ClientPlayerInteractionManagerEvents {
         });
         InteractionResult acc = actionResult.getValue();
         Event<UseItemOnBlock> eventResult =
-                new Event<>(new UseItemOnBlock(hitResult, acc, placeBlock.getValue(), hand, stackCopy), false, true);
+                new Event<>(
+                        new UseItemOnBlock(
+                                hitResult,
+                                acc,
+                                placeBlock.getValue() ? Optional.of(predictingPlace) : Optional.empty(),
+                                hand,
+                                stackCopy),
+                        false,
+                        true);
         Listener.getPostPlayerUseItemOnBlock().handleValue(eventResult);
         actionResult.setValue(eventResult.context.actionResult());
     }

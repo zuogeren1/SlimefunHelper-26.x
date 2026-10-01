@@ -10,18 +10,17 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import lombok.Getter;
-import me.matl114.accessors.events.ClientConnectionAccess;
 import me.matl114.events.annotations.Broadcast;
 import me.matl114.events.annotations.Cancelable;
 import me.matl114.events.annotations.ExtraArgs;
 import me.matl114.events.channels.EventChannel;
 import me.matl114.events.channels.ListenerPoint;
 import me.matl114.events.packets.PacketStorage;
+import me.matl114.events.packets.PacketStorageImpl;
 import me.matl114.managers.ScheduleService;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.network.protocol.PacketType;
 import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 import net.minecraft.network.protocol.common.ClientboundKeepAlivePacket;
@@ -121,6 +120,7 @@ public class PacketManager {
         if (startFlushIn) {
             return false;
         }
+        checkImmediatelyFlush();
         // todo: what about BundlePacket
         if (connection.getPacketListener() instanceof ClientGamePacketListener play) {
             if (packet instanceof ClientboundDisconnectPacket
@@ -151,6 +151,31 @@ public class PacketManager {
         flushOutBound();
     }
 
+    static boolean immediatelyFlush;
+
+    public static void scheduleImmediateFlush() {
+        immediatelyFlush = true;
+    }
+
+    public static void scheduleInInBoundThread(Runnable runnable) {
+        if (mc.getConnection() != null) {
+            if (mc.getConnection().getConnection().channel.eventLoop().inEventLoop(Thread.currentThread())) {
+                runnable.run();
+            } else {
+                mc.getConnection().getConnection().channel.eventLoop().execute(runnable);
+            }
+        } else {
+            runnable.run();
+        }
+    }
+
+    private static void checkImmediatelyFlush() {
+        if (immediatelyFlush) {
+            immediatelyFlush = false;
+            flushInBoundInternal(false);
+        }
+    }
+
     public static boolean handleQueueOutPacket(Packet<?> packet, Connection connection) {
         if (startFlushOut) {
             return false;
@@ -173,7 +198,7 @@ public class PacketManager {
 
     private static void flushInBoundInternal(boolean escapePipeline) {
         if (mc.getConnection() != null) {
-            mc.getConnection().getConnection().channel.eventLoop().execute(() -> {
+            Runnable task = () -> {
                 try {
                     if (startFlushIn) {
                         return;
@@ -183,10 +208,16 @@ public class PacketManager {
                         // flush
                         // do not trigger recursive call
                         startFlushIn = true;
+                        immediatelyFlush = false;
                         try {
                             var oldQueue = packetQueueIn;
                             packetQueueIn = new ConcurrentLinkedQueue<>();
                             for (var packet : oldQueue) {
+                                // abort if need a immediate flush
+                                if (immediatelyFlush) {
+                                    packetQueueIn.add(packet);
+                                    continue;
+                                }
                                 if (!escapePipeline) {
                                     Event<PacketStorage> queueEvent = new Event<>(
                                             packet,
@@ -212,7 +243,12 @@ public class PacketManager {
                 } catch (Throwable e) {
                     packetQueueIn.clear();
                 }
-            });
+            };
+            if (mc.getConnection().getConnection().channel.eventLoop().inEventLoop(Thread.currentThread())) {
+                task.run();
+            } else {
+                mc.getConnection().getConnection().channel.eventLoop().execute(task);
+            }
         } else {
             packetQueueIn.clear();
         }
@@ -365,34 +401,5 @@ public class PacketManager {
         DROP,
         FLUSH,
         QUEUE;
-    }
-
-    public static record PacketStorageImpl(Packet<?> packet, long timestampMS, Connection connection)
-            implements PacketStorage {
-        @Override
-        public PacketType<?> packetType() {
-            return packet.type();
-        }
-
-        @Override
-        public PacketFlow side() {
-            return packet.type().flow();
-        }
-
-        @Override
-        public void send() {
-            try {
-                connection.send(packet);
-            } catch (Throwable throwable) {
-            }
-        }
-
-        @Override
-        public void handle() {
-            try {
-                ClientConnectionAccess.of(connection).handlePacket(packet);
-            } catch (Throwable throwable) {
-            }
-        }
     }
 }

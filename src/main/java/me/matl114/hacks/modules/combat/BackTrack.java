@@ -9,6 +9,7 @@ import me.matl114.events.PacketManager;
 import me.matl114.events.RenderListener;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.packets.PacketStorage;
+import me.matl114.events.packets.PacketStorageImpl;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
@@ -152,7 +153,7 @@ public class BackTrack extends BaseModule {
         }
         if (enable.get() && currentTarget != null && event.<Boolean>getArgs(1)) {
             var storage = event.context;
-            if (storage instanceof PacketManager.PacketStorageImpl impl) {
+            if (storage instanceof PacketStorageImpl impl) {
                 var packet = impl.packet();
                 if (PacketManager.isAsyncOrNotTransactionS2CPacket(packet)) return;
                 if (packet instanceof ClientboundEntityPositionSyncPacket positionSync
