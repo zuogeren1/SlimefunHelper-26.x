@@ -21,14 +21,12 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.Debug;
-import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.utils.entity.PlayerInputUtils;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.ApiStatus;
 
 public class ElytraFlight extends BaseModule implements LegalMovementManager.MovementModifier {
     public static ElytraFlight INSTANCE;
@@ -128,11 +126,9 @@ public class ElytraFlight extends BaseModule implements LegalMovementManager.Mov
             .show(() -> this.controlMode.get().isIn(Mode.CONTROL))
             .build();
 
-    @ApiStatus.Experimental
     public final FlagRef autoRescaleBestClimbingSpeed = flagBuilder(
                     simpleFlightControl.add("use-auto-rescale-best-climbing-speed"))
             .show(() -> ElytraExtra.INSTANCE.autoRescale.get())
-            .experimental()
             .build();
 
     boolean currentTakeOff = false;
@@ -390,7 +386,7 @@ public class ElytraFlight extends BaseModule implements LegalMovementManager.Mov
                 if (shouldControlRotation && realVector.lengthSqr() > 5e-3) {
                     // fliter zero control
                     if (!movementManagerEvent.context.hasImportantRotation()) {
-                        if (realVector.horizontalDistanceSqr() > 5E-3) {
+                        if (realVector.horizontalDistanceSqr() > 1E-7) {
                             movementManagerEvent.context.pushImportantRotation(true, true);
                             Vec2 py = EntityUtils.rotationToPitchYaw(realVector.normalize());
                             movementManagerEvent.context.markForResetRot();
@@ -406,7 +402,7 @@ public class ElytraFlight extends BaseModule implements LegalMovementManager.Mov
                     // pitch reset to trigger grim lastPitch lastYaw update
                     if (useAutoRescale.get()) {
                         float yaw = mc.player.getYRot();
-                        float newYaw = (Tasks.getTick() % 2 == 0) ? yaw + 0.01F : yaw - 0.01F;
+                        float newYaw = (Tasks.getTick() % 2 == 0) ? yaw + 0.001F : yaw - 0.001F;
                         PlayerStateManager.setPlayerYawSafe(mc.player, newYaw);
                         Vec3 newVectorRot = EntityUtils.pitchYawToRotation(mc.player.getXRot(), newYaw);
                         realVector = newVectorRot.normalize().scale(realVector.length());
