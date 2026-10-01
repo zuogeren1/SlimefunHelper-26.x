@@ -37,8 +37,10 @@ import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.mine.QueueMine;
 import me.matl114.hacks.utils.HotKeyUtils;
+import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
+import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.managers.Configs;
 import me.matl114.managers.FileManager;
@@ -63,6 +65,7 @@ import me.matl114.utils.inventory.MutableInventory;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
@@ -128,6 +131,11 @@ public class KitReplenish extends BaseModule {
 
     public final FlagRef log =
             builder(replenishRoot.add("log"), Boolean.class).defaultValue(true).build();
+
+    public final NBTRef<EntrySet<Item>> dropBlackListedItem = builder(
+                    replenishRoot.add("drop-black-listed-item"), EntrySet.<Item>parameter())
+            .defaultValue(new EntrySet<>(new Regex("^(netherite.*|elytra)$"), BuiltInRegistries.ITEM))
+            .build();
 
     public final KeyBindRef hotkeyReplenish = hotkey(replenishRoot.add("execute-replenish"), new MultiKeyBind())
             .registerHotkey(HotKeyUtils.asNonInputHandler(this::replenishCurrentKit))
@@ -747,8 +755,12 @@ public class KitReplenish extends BaseModule {
             if (isShulker(currentStack)) {
                 continue;
             }
-            if (!rule.dump() && !currentStack.isEmpty() && !canReplenish(templateItem, currentStack)) {
-                continue;
+            if (!currentStack.isEmpty() && !canReplenish(templateItem, currentStack)) {
+                if (!rule.dump()) {
+                    continue;
+                } else if (dropBlackListedItem.get().test(currentStack.getItem())) {
+                    continue;
+                }
             }
             int slotI = handler.findSlot(playerInventory, i).getAsInt();
             for (var s = 0; s < topInventory.getContainerSize(); ++s) {
@@ -814,6 +826,7 @@ public class KitReplenish extends BaseModule {
                             if (re == transaction.leftEmptySlotForShulker) continue;
                             var reItem = playerInventory.getItem(re);
                             if (isShulker(reItem)) continue;
+                            if (dropBlackListedItem.get().test(reItem.getItem())) continue;
                             if (template.match(reItem)) {
                                 if (reItem.getCount() <= min) {
                                     min = reItem.getCount();
@@ -899,6 +912,7 @@ public class KitReplenish extends BaseModule {
                                 if (re == transaction.leftEmptySlotForShulker) continue;
                                 var reItem = playerInventory.getItem(re);
                                 if (isShulker(reItem)) continue;
+                                if (dropBlackListedItem.get().test(reItem.getItem())) continue;
                                 if (template.match(reItem)) {
                                     if (reItem.getCount() <= min) {
                                         min = reItem.getCount();
@@ -1142,6 +1156,9 @@ public class KitReplenish extends BaseModule {
         AbstractContainerMenu handler = mc.player.containerMenu;
         from = Math.clamp(from, 0, Math.min(inventory.getContainerSize(), InventoryUtils.getPlayerBackpackSize()));
         to = Math.clamp(to, from, Math.min(inventory.getContainerSize(), InventoryUtils.getPlayerBackpackSize()));
+        Set<ReplenishTemplate> templates = InventoryUtils.streamInventory(trans.viewInventory)
+                .map(ReplenishTemplate::new)
+                .collect(Collectors.toSet());
         for (var i = from; i < to; ++i) {
             if (i == trans.leftEmptySlotForShulker) {
                 continue;
@@ -1150,12 +1167,17 @@ public class KitReplenish extends BaseModule {
             if (targetSlot < 0) {
                 continue;
             }
+            ItemStack currentStack = playerInventory.getItem(i);
+            if (dropBlackListedItem.get().test(currentStack.getItem())) continue;
+            ReplenishTemplate template = new ReplenishTemplate(currentStack);
+            if (templates.contains(template)) continue;
+            ;
             ItemStack templateStack = inventory.getItem(i);
             if (isShulker(templateStack)) {
                 continue;
             }
-            ItemStack currentStack = playerInventory.getItem(i);
-            if (!canReplenish(templateStack, currentStack)) {
+
+            if (!template.match(templateStack)) {
                 drop(handler, targetSlot);
             }
         }
