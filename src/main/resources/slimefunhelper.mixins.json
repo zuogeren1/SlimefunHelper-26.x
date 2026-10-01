@@ -15,6 +15,7 @@
 		"access.MoonriseCubeVoxelShapeMixin",
 		"access.MoonriseSliceShapeMixin",
 		"access.MoonriseVoxelShapeMixin",
+		"access.PendingUpdateManagerMixin",
 		"access.PlayerInteractBlockC2SPacketMixin",
 		"access.PlayerInteractEntityC2SPacketMixin",
 		"access.PlayerInteractItemC2SPacketMixin",

@@ -14,7 +14,6 @@ import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.hacks.api.ModuleGroup;
 import me.matl114.hacks.api.ModuleManager;
 import me.matl114.hacks.modules.HackModules;
-import me.matl114.hacks.modules.ac.DisablerManager;
 import me.matl114.hacks.modules.interact.*;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
@@ -129,6 +128,10 @@ public class InteractionTasks {
     }
 
     public static void addPostRotationCorrectTask(Vec3 look3d, Vec3 eyePos, Runnable callback) {
+        addPostRotationCorrectTask(look3d.subtract(eyePos), callback);
+    }
+
+    public static void addPostRotationCorrectTask(Vec3 rotationVec, Runnable callback) {
         //        RenderTasks.registerVirtualRenderTask(new RenderTasks.RenderTask(
         //            RenderTasks.DEBUG_TICK, new RenderTasks.BoxObject(look3d.add(-0.1, -0.1, -0.1), look3d.add(0.1,
         // 0.1, 0.1), Color.MAGENTA)));
@@ -145,8 +148,7 @@ public class InteractionTasks {
                         LocalPlayer player = movementManagerEvent.context.playerStatus.entity;
 
                         Vec2 rotation =
-                                EntityUtils.rotationToPitchYaw(look3d.subtract(eyePos.add(mc.player.getDeltaMovement()))
-                                        .normalize());
+                                EntityUtils.rotationToPitchYaw(rotationVec.normalize());
                         movementManagerEvent.context.pushImportantRotation(true, true);
                         PlayerStateManager.setPlayerYawSafe(player, rotation.y);
                         EntityUtils.setEntityPitchSafe(player, rotation.x);
@@ -165,7 +167,12 @@ public class InteractionTasks {
                 });
     }
 
-    private static Vec3 raycastBlock(BlockPos pos, Vec3 bestEyePos) {
+    public static Vec3 createBlockRayCastDirection(BlockPos pos) {
+        Vec3 bestEyePos = InteractExtra.INSTANCE.getBestInteractEyePos(mc.player.position(), new BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false));
+        return createBlockRayCastDirection(pos, bestEyePos);
+    }
+
+    public static Vec3 createBlockRayCastDirection(BlockPos pos, Vec3 bestEyePos) {
         Vec3 center = Vec3.atCenterOf(pos);
         AABB box = new AABB(pos);
         var raycastDirection1 =
@@ -186,120 +193,58 @@ public class InteractionTasks {
     public static void handlePlaceMode(
             LegalInteractMode mode, BlockHitResult result, InteractionHand hand, boolean swingHand) {
         Vec3 bestEyePos = InteractExtra.INSTANCE.getBestInteractEyePos(mc.player.position(), result);
+        boolean directlyHit = RaycastUtils.canRaycastHit(
+                mc.player,
+                PlayerStateManager.INSTANCE.lastPitch,
+                PlayerStateManager.INSTANCE.lastYaw,
+                result.getBlockPos(),
+                InteractExtra.INSTANCE.getBlockReachDistance());
         switch (mode) {
             case USEITEM_PACKET -> {
-                Vec2 rotation = EntityUtils.rotationToPitchYaw(
-                        raycastBlock(result.getBlockPos(), bestEyePos).normalize());
+                Vec2 rotation =
+                        EntityUtils.rotationToPitchYaw(createBlockRayCastDirection(result.getBlockPos(), bestEyePos)
+                                .normalize());
                 mc.gameMode.startPrediction(
                         mc.level, (i) -> new ServerboundUseItemPacket(hand, i, rotation.y, rotation.x));
                 InteractionTasks.interactBlock(hand, result, swingHand);
             }
             case DELAY_MOVEMENT -> {
                 InteractionTasks.interactBlock(hand, result, swingHand);
-                InteractionTasks.addPostRotationCorrectTask(
-                        Vec3.atCenterOf(result.getBlockPos()), bestEyePos, Runnables.doNothing());
+                if (!directlyHit) {
+                    InteractionTasks.addPostRotationCorrectTask(
+                            Vec3.atCenterOf(result.getBlockPos()), bestEyePos, Runnables.doNothing());
+                }
             }
             case MOVEMENT_POST -> {
-                MutableObject<ServerboundUseItemOnPacket> catcher = new MutableObject<>();
-                Listener.addPrePacketCatcher(new PacketCatcherImpl<>(ServerboundUseItemOnPacket.class, (eve) -> {
-                    if (eve.isCancelled()) return true;
-                    catcher.setValue(eve.context);
-                    eve.cancel();
-                    return true;
-                }));
-                InteractionTasks.interactBlock(hand, result, swingHand);
-                if (catcher.getValue() != null) {
-                    var pkt = catcher.getValue();
-                    InteractionTasks.addPostRotationCorrectTask(
-                            Vec3.atCenterOf(result.getBlockPos()),
-                            bestEyePos,
-                            () -> mc.getConnection().send(pkt));
+                if (!directlyHit) {
+                    MutableObject<ServerboundUseItemOnPacket> catcher = new MutableObject<>();
+                    Listener.addPrePacketCatcher(new PacketCatcherImpl<>(ServerboundUseItemOnPacket.class, (eve) -> {
+                        if (eve.isCancelled()) return true;
+                        catcher.setValue(eve.context);
+                        eve.cancel();
+                        return true;
+                    }));
+                    InteractionTasks.interactBlock(hand, result, swingHand);
+                    if (catcher.getValue() != null) {
+                        var pkt = catcher.getValue();
+                        InteractionTasks.addPostRotationCorrectTask(
+                                Vec3.atCenterOf(result.getBlockPos()), bestEyePos, () -> mc.getConnection()
+                                        .send(pkt));
+                    }
+                } else {
+                    InteractionTasks.interactBlock(hand, result, swingHand);
                 }
             }
             case LEGACY_SLIENT_ROT -> {
-                Vec2 rotation = EntityUtils.rotationToPitchYaw(raycastBlock(result.getBlockPos(), bestEyePos));
-                LegacySnapRotManager.INSTANCE.snapAt(rotation.x, rotation.y, false);
+                if (!directlyHit) {
+                    Vec2 rotation = EntityUtils.rotationToPitchYaw(
+                            createBlockRayCastDirection(result.getBlockPos(), bestEyePos));
+                    LegacySnapRotManager.INSTANCE.snapAt(rotation.x, rotation.y, false);
+                }
                 InteractionTasks.interactBlock(hand, result, swingHand);
             }
             case NONE -> {
                 InteractionTasks.interactBlock(hand, result, swingHand);
-            }
-        }
-    }
-
-    public static void flushACPlaceQueue() {
-        DisablerManager.INSTANCE.flushACPlaceQueue();
-        // for flush places
-        //        ACTasks.getDisablerManager().flushACPlaceQueue();
-    }
-
-    public static void handlePlaceModeMulti(
-            LegalInteractMode mode,
-            Vec3 targetCenter,
-            List<Pair<BlockHitResult, InteractionHand>> resultList,
-            boolean swingHand) {
-        switch (mode) {
-            case USEITEM_PACKET -> {
-                Vec2 rotation = EntityUtils.rotationToPitchYaw(
-                        targetCenter.subtract(mc.player.getEyePosition()).normalize());
-
-                int selectedSlot = -1;
-                for (Pair<BlockHitResult, InteractionHand> pair : resultList) {
-                    var hand = pair.getSecond();
-                    var result = pair.getFirst();
-                    if (selectedSlot == -1) {
-                        selectedSlot = InventoryUtils.getSelectedSlot();
-                        mc.gameMode.startPrediction(
-                                mc.level,
-                                (i) -> new ServerboundUseItemPacket(
-                                        InteractionHand.MAIN_HAND, i, rotation.y, rotation.x));
-                    } else {
-                        flushACPlaceQueue();
-                    }
-                    InteractionTasks.interactBlock(hand, result, swingHand);
-                }
-            }
-            case DELAY_MOVEMENT -> {
-                int selectedSlot = -1;
-                for (Pair<BlockHitResult, InteractionHand> pair : resultList) {
-                    if (selectedSlot == -1) {
-                        selectedSlot = InventoryUtils.getSelectedSlot();
-                    } else {
-                        // for flush places
-                        flushACPlaceQueue();
-                    }
-                    var hand = pair.getSecond();
-                    var result = pair.getFirst();
-                    InteractionTasks.interactBlock(hand, result, swingHand);
-                }
-                InteractionTasks.addPostRotationCorrectTask(
-                        targetCenter, mc.player.getEyePosition(), Runnables.doNothing());
-            }
-            case LEGACY_SLIENT_ROT -> {
-                int selectedSlot = -1;
-                for (Pair<BlockHitResult, InteractionHand> pair : resultList) {
-                    if (selectedSlot == -1) {
-                        selectedSlot = InventoryUtils.getSelectedSlot();
-                    } else {
-                        // for flush places
-                        flushACPlaceQueue();
-                    }
-                    var hand = pair.getSecond();
-                    var result = pair.getFirst();
-                    LegacySnapRotManager.INSTANCE.snapAt(
-                            Vec3.atCenterOf(result.getBlockPos())
-                                    .subtract(mc.player.getEyePosition())
-                                    .normalize(),
-                            false);
-                    InteractionTasks.interactBlock(hand, result, swingHand);
-                }
-            }
-            case NONE -> {
-                for (Pair<BlockHitResult, InteractionHand> pair : resultList) {
-                    var hand = pair.getSecond();
-                    var result = pair.getFirst();
-                    InteractionTasks.interactBlock(hand, result, swingHand);
-                }
             }
         }
     }
@@ -321,7 +266,7 @@ public class InteractionTasks {
         if (hitResult.isInside()) {
             return checkInHead(hitResult.getBlockPos(), mc.player.position());
         } else {
-            return checkPositionPlace(hitResult.getBlockPos(), hitResult.getDirection(), hitResult.getLocation());
+            return checkPositionPlace(hitResult.getBlockPos(), hitResult.getDirection(), mc.player.position());
         }
     }
 
@@ -465,7 +410,8 @@ public class InteractionTasks {
             if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
                 continue;
             }
-            boolean mayInteract = InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
+            boolean mayInteract =
+                    InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
 
             if (checkInHead(targetPos, playerPos)) {
                 // ?
@@ -566,7 +512,8 @@ public class InteractionTasks {
             if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
                 continue;
             }
-            boolean mayInteract = InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
+            boolean mayInteract =
+                    InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
             if (checkInHead(targetPos, playerPos)) {
                 // ?
                 result.add(new FlagEntry<>(
@@ -633,7 +580,8 @@ public class InteractionTasks {
                 if (interactState.isAir() || interactState.liquid() || interactState.canBeReplaced()) {
                     continue;
                 }
-                boolean mayInteract = InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
+                boolean mayInteract =
+                        InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
                 if (checkInHead(targetPos, playerFeetPos)) {
                     // ?
                     var re = new FlagEntry<>(
@@ -699,7 +647,8 @@ public class InteractionTasks {
                 if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
                     continue;
                 }
-                boolean mayInteract = InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
+                boolean mayInteract =
+                        InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
                 if (checkInHead(targetPos, playerFeetPos)) {
                     // ?
                     var re = new FlagEntry<>(
@@ -763,7 +712,8 @@ public class InteractionTasks {
                 if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
                     continue;
                 }
-                boolean mayInteract = InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
+                boolean mayInteract =
+                        InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
                 if (checkInHead(targetPos, playerFeetPos)) {
                     // ?
                     var re = new FlagEntry<>(
@@ -944,8 +894,8 @@ public class InteractionTasks {
                 if (checkInteractRange(placeTargetBlock, playerFeetPos, interactRange)) {
                     for (Direction direction : order) {
                         Vec3 plateCenter = centerPos.relative(direction, 0.5);
-                        boolean mayInteract =
-                                InteractUtils.isInteractAcceptable(mc.level, mc.player, placeTargetBlock, currentState);
+                        boolean mayInteract = InteractUtils.isInteractAcceptable(
+                                mc.level, mc.player, placeTargetBlock, currentState);
                         if (checkInHead(placeTargetBlock, playerFeetPos)) {
                             // ?
                             var re = new FlagEntry<>(
@@ -993,7 +943,8 @@ public class InteractionTasks {
                 if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
                     continue;
                 }
-                boolean mayInteract = InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
+                boolean mayInteract =
+                        InteractUtils.isInteractAcceptable(mc.level, mc.player, targetPos, interactState);
                 if (checkInHead(targetPos, playerFeetPos)) {
                     // ?
                     var re = new FlagEntry<>(
@@ -1351,6 +1302,9 @@ public class InteractionTasks {
     private static AutoSurround autoSurround;
 
     @Getter
+    private static SelfTrap selfTrap;
+
+    @Getter
     private static BlockRotate blockRotate;
 
     @Getter
@@ -1387,6 +1341,7 @@ public class InteractionTasks {
         tpInteract = new TpInteract().register(m);
         airplace = new Airplace().register(m);
         autoSurround = new AutoSurround().register(m);
+        selfTrap = new SelfTrap().register(m);
         blockRotate = new BlockRotate().register(m);
         printerRewrite = new PrinterRewrite().register(m);
         autoPlate = new AutoPlate().register(m);

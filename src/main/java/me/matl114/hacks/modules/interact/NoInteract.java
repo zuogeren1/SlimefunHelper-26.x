@@ -143,7 +143,7 @@ public class NoInteract extends BaseModule {
                 BlockState state = mc.level.getBlockState(interactAtPos);
                 if (!noInteractBlocks.get().test(state.getBlock())) return;
                 boolean mayInteractAccept =
-                        InteractUtils.isInteractAcceptable(mc.level, mc.player, interactAtPos, state, stack);
+                        InteractUtils.isInteractOnBlockAcceptable(mc.level, mc.player, interactAtPos, state, stack);
                 if (!InteractUtils.canInteractAndPlace(mc.player, mayInteractAccept)) {
                     onFailOriginalInteract(interactAtPos, state);
                     if (stack.getItem() instanceof BlockItem) {

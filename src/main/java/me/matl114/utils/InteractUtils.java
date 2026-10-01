@@ -248,6 +248,14 @@ public class InteractUtils {
         return actionResult;
     }
 
+    /**
+     * 上游 1.1.7.2 新增的重载，签名与上游一致（EntityHitResult）。
+     * 委托到既有 simulateInteract，不重复实现交互副作用。
+     */
+    public static InteractionResult simulateInteractEntity(EntityHitResult entityHitResult) {
+        return simulateInteract(entityHitResult);
+    }
+
     public static void swingHandIfSuccess(InteractionResult actionResult3, InteractionHand hand) {
         if (actionResult3 instanceof InteractionResult.Success) {
             InteractionResult.Success success3 = (InteractionResult.Success) actionResult3;
@@ -362,6 +370,20 @@ public class InteractUtils {
         }
         MenuProvider factory = state.getMenuProvider(world, pos);
         return factory != null;
+    }
+
+    /**
+     * 上游 1.1.7.2 的新名（isInteractAcceptable -> isInteractOnBlockAcceptable）。
+     * 我方保留既有名不动（全仓数十处调用），这里只新增同名重载并委托，避免大规模改名风险。
+     */
+    public static boolean isInteractOnBlockAcceptable(
+            Level world, Player player, BlockPos pos, BlockState state) {
+        return isInteractAcceptable(world, player, pos, state);
+    }
+
+    public static boolean isInteractOnBlockAcceptable(
+            Level world, Player player, BlockPos pos, BlockState state, ItemStack interactStack) {
+        return isInteractAcceptable(world, player, pos, state, interactStack);
     }
 
     public static boolean isInteractAcceptable(Level world, Player player, BlockPos pos, BlockState state) {

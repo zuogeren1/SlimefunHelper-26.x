@@ -72,17 +72,27 @@ public class AutoStore extends BaseModule {
                             int slot = anyMatch(handler.slots, stackt, stackt.getCount(), outputSlot.toIntArray());
                             if (slot >= 0) {
                                 InvTasks.getClickExecutor().execute(() -> {
+                                    if (mc.gameMode == null
+                                            || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                                        return false;
+                                    }
                                     mc.gameMode.handleContainerInput(
                                             handledScreen.getMenu().containerId,
                                             slot,
                                             0,
                                             ContainerInput.PICKUP,
                                             player);
+                                    return true;
                                 });
                             } else {
                                 InvTasks.getClickExecutor().execute(() -> {
+                                    if (mc.gameMode == null
+                                            || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                                        return false;
+                                    }
                                     mc.gameMode.handleContainerInput(
                                             handledScreen.getMenu().containerId, slot, 0, ContainerInput.THROW, player);
+                                    return true;
                                 });
                             }
                             return;
@@ -93,10 +103,13 @@ public class AutoStore extends BaseModule {
                         if (slot >= 0) {
 
                             InvTasks.getClickExecutor().execute(() -> {
-                                mc.gameMode.handleContainerInput(
-                                        handledScreen.getMenu().containerId, i, 1, ContainerInput.PICKUP, player);
-                                mc.gameMode.handleContainerInput(
-                                        handledScreen.getMenu().containerId, slot, 0, ContainerInput.PICKUP, player);
+                                if (mc.gameMode == null
+                                        || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                                    return false;
+                                }
+                                mc.gameMode.handleContainerInput(handledScreen.getMenu().containerId, i, 1, ContainerInput.PICKUP, player);
+                                mc.gameMode.handleContainerInput(handledScreen.getMenu().containerId, slot, 0, ContainerInput.PICKUP, player);
+                                return true;
                             });
                             return;
                         }

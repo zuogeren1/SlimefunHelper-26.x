@@ -17,8 +17,11 @@ import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.ElytraExtra;
 import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.NBTTypes;
+import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.enums.GhostHandMode;
+import me.matl114.hacks.utils.tasks.TimerExecutor;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
@@ -33,6 +36,9 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffect;
@@ -47,7 +53,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.consume_effects.ApplyStatusEffectsConsumeEffect;
-import net.minecraft.world.level.Level;
 import org.apache.commons.lang3.stream.Streams;
 
 public class AutoEat extends BaseModule {
@@ -64,64 +69,12 @@ public class AutoEat extends BaseModule {
     public final KeyBindRef hotkey = moduleEntry(autoEat.addHotkey(), new MultiKeyBind(), autoEat.addEnable())
             .build();
 
-    public final FlagRef log =
-            builder(autoEat.add("log"), Boolean.class).defaultValue(true).build();
-
-    public final FlagRef inv =
-            builder(autoEat.add("inv"), Boolean.class).defaultValue(true).build();
-
-    public final FlagRef forceEatLeftClick =
-            flagBuilder(autoEat.add("left-click-tool-force-eat")).build();
-
-    public final FlagRef leftClickWeapon = builder(autoEat.add("left-click-weapon"), Boolean.class)
-            .defaultValue(true)
-            .build();
-
-    public final NBTRef<EntrySet<Item>> extraLeftClickItem = builder(
-                    autoEat.add("left-click-extra-items"), EntrySet.<Item>parameter())
-            .defaultValue(new EntrySet<>(BuiltInRegistries.ITEM, List.of(Items.TOTEM_OF_UNDYING)))
-            .build();
-
-    public final FlagRef enableHealth = builder(autoEat.add("enable-health"), Boolean.class)
-            .defaultValue(true)
-            .build();
-
-    public final FlagRef enableHunger = builder(autoEat.add("enable-hunger"), Boolean.class)
-            .defaultValue(true)
-            .build();
-
-    public final DoubleRef healthLevel = doubleBuilder(autoEat.add("health-level"))
-            .defaultValue(10.0D)
-            .validator(Configs.doubleRange(0.0D, 20.0D))
-            .build();
-
-    public final IntRef hungerLevel = intBuilder(autoEat.add("hunger-level"))
-            .defaultValue(16)
-            .validator(Configs.intRange(0, 20))
-            .build();
-
-    public final FlagRef noEnemy =
-            builder(autoEat.add("no-enemy"), Boolean.class).defaultValue(true).build();
-
-    public final DoubleRef noEnemyAir = doubleBuilder(autoEat.add("no-enemy-distance-air"))
-            .defaultValue(8.0D)
-            .validator(Configs.doubleRange(0.0D, 64.0D))
-            .build();
-
-    public final DoubleRef noEnemyGround = doubleBuilder(autoEat.add("no-enemy-distance-ground"))
-            .defaultValue(8.0D)
-            .validator(Configs.doubleRange(0.0D, 64.0D))
-            .build();
-
-    public final IntRef cooldown =
-            intBuilder(autoEat.add("cooldown")).defaultValue(20).build();
-
     public final NBTRef<EntrySet<Item>> whiteListItem = builder(
                     autoEat.add("white-list-item"), EntrySet.<Item>parameter())
             .defaultValue(new EntrySet<>(new Regex("^(golden_apple|potion|golden_carrot)$"), BuiltInRegistries.ITEM))
             .build();
 
-    public final FlagRef fireworkFix = builder(autoEat.add("firework-fix"), Boolean.class)
+    public final FlagRef fireworkFix = builder(autoEat.add("pause-for-fireworks"), Boolean.class)
             .defaultValue(true)
             .build();
 
@@ -129,31 +82,120 @@ public class AutoEat extends BaseModule {
             .defaultValue(false)
             .build();
 
-    public final FlagRef pauseInLava = builder(autoEat.add("pause-in-liquid"), Boolean.class)
+    public final FlagRef pauseWhenSurround = builder(autoEat.add("pause-when-surround"), Boolean.class)
             .defaultValue(false)
+            .build();
+
+    public final NBTRef<OptionalPrimitive<Integer>> pauseWhenInteracting = builder(
+                    autoEat.add("pause-when-interact"), OptionalPrimitive.INT_TYPE)
+            .defaultValue(new OptionalPrimitive<>(false, NBTTypes.INT_TYPE, 2))
             .build();
 
     public final EnumRef<GhostHandMode> ghostHand = builder(autoEat.add("ghost-hand-mode"), GhostHandMode.class)
             .defaultValue(GhostHandMode.INV_SWAP)
             .build();
 
+    public final FlagRef log =
+            builder(autoEat.add("log"), Boolean.class).defaultValue(true).build();
+
+    public final ModulePath auto = autoEat.add("auto");
+
+    public final FlagRef inv = flagBuilder(auto.addEnable()).build();
+
+    public final KeyBindRef hk1 =
+            toggleHotkey(auto.addHotkey(), new MultiKeyBind(), auto.addEnable()).build();
+
+    public final FlagRef enableHealth =
+            builder(auto.add("enable-health"), Boolean.class).defaultValue(true).build();
+
+    public final FlagRef enableHunger =
+            builder(auto.add("enable-hunger"), Boolean.class).defaultValue(true).build();
+
+    public final DoubleRef healthLevel = doubleBuilder(auto.add("health-level"))
+            .defaultValue(10.0D)
+            .validator(Configs.doubleRange(0.0D, 20.0D))
+            .build();
+
+    public final IntRef hungerLevel = intBuilder(auto.add("hunger-level"))
+            .defaultValue(16)
+            .validator(Configs.intRange(0, 20))
+            .build();
+
+    public final FlagRef noEnemy =
+            builder(auto.add("no-enemy"), Boolean.class).defaultValue(true).build();
+
+    public final DoubleRef noEnemyAir = doubleBuilder(auto.add("no-enemy-distance-air"))
+            .defaultValue(8.0D)
+            .validator(Configs.doubleRange(0.0D, 64.0D))
+            .build();
+
+    public final DoubleRef noEnemyGround = doubleBuilder(auto.add("no-enemy-distance-ground"))
+            .defaultValue(8.0D)
+            .validator(Configs.doubleRange(0.0D, 64.0D))
+            .build();
+
+    public final IntRef cooldown =
+            intBuilder(auto.add("cooldown")).defaultValue(20).build();
+
+    public final FlagRef pauseInLava = builder(auto.add("pause-in-lava"), Boolean.class)
+            .defaultValue(false)
+            .build();
+
+    public final ModulePath manual = autoEat.add("left-click-force-eat");
+
+    public final FlagRef forceEatLeftClick = flagBuilder(manual.addEnable()).build();
+
+    public final KeyBindRef hk2 = toggleHotkey(manual.addHotkey(), new MultiKeyBind(), manual.addEnable())
+            .build();
+
+    public final FlagRef forceEatLeftClickHold =
+            flagBuilder(manual.add("need-press-left-button")).build();
+
+    public final FlagRef forceEatOffhand = builder(manual.add("enable-offhand"), Boolean.class)
+            .defaultValue(true)
+            .build();
+
+    public final FlagRef leftClickWeapon = builder(manual.add("enable-weapon"), Boolean.class)
+            .defaultValue(true)
+            .build();
+
+    public final NBTRef<EntrySet<Item>> extraLeftClickItem = builder(
+                    manual.add("enable-extra-items"), EntrySet.<Item>parameter())
+            .defaultValue(new EntrySet<>(BuiltInRegistries.ITEM, List.of(Items.TOTEM_OF_UNDYING)))
+            .build();
+
     private boolean eating;
+    private boolean manualEating;
     private Runnable nextTickCallback = null;
     private Runnable restoreCallback = null;
     private int eatingSlot = -1;
     private int eatingCooldownTick = 0;
     private int nextTickStartEat = 0;
+    private final TimerExecutor interactMark = new TimerExecutor();
 
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreHandleInputEvents(), this::onTickPre);
         registerListener(Listener.getPostHandleInputEvents(), this::onTickPost);
-        registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch);
+        registerListener(Listener.getPlayerRespawnPoint(), this::onWorldSwitch);
         registerListener(
                 Listener.getPacketPostHandlePoint().getChannel(ClientboundEntityEventPacket.class),
                 this::onStatusConsumed);
         registerListener(Listener.getPrePlayerUseItem(), this::onRightClick);
+        registerListener(Listener.getPlayerScrollHotBar(), this::onHotBarManuallySwap);
+        registerListener(
+                Listener.getPacketPoint().getChannel(ServerboundUseItemPacket.class),
+                this::onInteractPacket,
+                114514);
+        registerListener(
+                Listener.getPacketPoint().getChannel(ServerboundUseItemOnPacket.class),
+                this::onInteractPacket,
+                114514);
+        registerListener(
+                Listener.getPacketPoint().getChannel(ServerboundAttackPacket.class),
+                this::onInteractPacket,
+                114514);
     }
 
     @Override
@@ -162,12 +204,27 @@ public class AutoEat extends BaseModule {
         stopEating();
     }
 
+    private void onInteractPacket(Event<?> eventPacket) {
+        if (eventPacket.isCancelled()) return;
+        interactMark.mark();
+    }
+
     private void onStatusConsumed(Event<ClientboundEntityEventPacket> event) {
         if (eating
                 && event.context.getEntity(mc.level) == mc.player
                 && event.context.getEventId() == EntityEvent.USE_ITEM_COMPLETE) {
             stopEating();
             eatingCooldownTick = Tasks.getTick() + cooldown.get();
+        }
+    }
+
+    private void onHotBarManuallySwap(Event<Integer> eventSwap) {
+        if (eating && eventSwap.context() != InventoryUtils.getSelectedSlot()) {
+            if (log.get()) {
+                logI18N("message.module.auto-eat.stop");
+            }
+            stopEating();
+            eventSwap.cancel();
         }
     }
 
@@ -206,7 +263,24 @@ public class AutoEat extends BaseModule {
                 : findHandStack(healthPriority);
     }
 
-    private void tryStartEating(@Nonnull IndexEntry<ItemStack> re, boolean offHand) {
+    private boolean interactionCheck() {
+        if (pauseWhenSurround.get()) {
+            if (AutoSurround.INSTANCE.enable.get() && AutoSurround.INSTANCE.needPlaceState.state()) {
+                return false;
+            }
+            if (SelfTrap.INSTANCE.enable.get() && SelfTrap.INSTANCE.needPlaceState.state()) {
+                return false;
+            }
+        }
+        if (pauseWhenInteracting.get().isPresent()) {
+            if (!interactMark.canRun(pauseWhenInteracting.get().getValue())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void tryStartEating(@Nonnull IndexEntry<ItemStack> re, boolean offHand, boolean manual) {
 
         if (log.get()) {
             Component text = VItem.getInstance().getFormattedName(re.val());
@@ -223,6 +297,7 @@ public class AutoEat extends BaseModule {
                     && ItemStack.isSameItemSameComponents(re.val(), mc.player.getUseItem())) {
                 mc.options.keyUse.setDown(true);
                 eating = true;
+                manualEating = manual;
                 if (nextTick != null) {
                     restoreCallback = () -> {
                         cbb.run();
@@ -240,19 +315,20 @@ public class AutoEat extends BaseModule {
         }
     }
 
-    private void onWorldSwitch(Event<Level> event) {
+    private void onWorldSwitch(Event<LocalPlayer> event) {
         stopEating();
     }
 
     private void stopEating() {
         if (eating) {
-            KeyBindAccess.of(mc.options.keyUse).resetKeyState(); // mc.options.useKey.setPressed(false);
+            KeyBindAccess.of(mc.options.keyUse).resetKeyState(); // mc.options.keyUse.setDown(false);
             if (!checkNull() && restoreCallback != null) {
                 nextTickCallback = restoreCallback;
             }
         }
         restoreCallback = null;
         eating = false;
+        manualEating = false;
         eatingSlot = -1;
         eatingCooldownTick = Tasks.getTick() + cooldown.get();
     }
@@ -358,9 +434,12 @@ public class AutoEat extends BaseModule {
                             lastAutoFireworkIsDone = true;
                         }
                     }
+                    if (!interactionCheck()) {
+                        canStartNow = false;
+                    }
                     if (canStartNow) {
                         lastAutoFireworkIsDone = false;
-                        tryStartEating(re, false);
+                        tryStartEating(re, false, false);
                     }
                 }
             }
@@ -409,9 +488,12 @@ public class AutoEat extends BaseModule {
                         lastAutoFireworkIsDone = true;
                     }
                 }
+                if (!interactionCheck()) {
+                    canStartEat = false;
+                }
                 if (canStartEat) {
                     lastAutoFireworkIsDone = false;
-                    tryStartEating(re, hand == InteractionHand.OFF_HAND);
+                    tryStartEating(re, hand == InteractionHand.OFF_HAND, true);
                     if (eating) {
                         event.cancel();
                         event.context.actionResult(InteractionResult.SUCCESS);

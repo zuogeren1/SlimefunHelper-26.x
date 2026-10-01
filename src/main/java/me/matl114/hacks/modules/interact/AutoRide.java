@@ -66,7 +66,7 @@ public class AutoRide extends BaseModule {
                 if (selected != null) {
                     var boxxx = lastEntity.getBoundingBox();
                     var re = new EntityHitResult(lastEntity, boxxx.getCenter().add(0, boxxx.getYsize() / 2, 0));
-                    InteractUtils.simulateInteract(re);
+                    InteractUtils.simulateInteractEntity(re);
                 }
             }
         }

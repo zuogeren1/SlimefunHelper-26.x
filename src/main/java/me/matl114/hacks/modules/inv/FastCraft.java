@@ -92,29 +92,37 @@ public class FastCraft extends BaseModule {
                     }
                 }
                 int slot = craftingScreen.getMenu().getResultSlot().getContainerSlot();
-                craftAtSlotIndex(craftingScreen, maxCraft, slot);
+                craftAtSlotIndex(craftingScreen, getDisplayItemStack(), maxCraft, slot);
             }
         } else {
             Debug.chat("Crafting History Is Empty");
         }
     }
 
-    public void craftAtSlotIndex(AbstractContainerScreen<?> screen, int maxCraft, int slot) {
+    public void craftAtSlotIndex(AbstractContainerScreen<?> screen, ItemStack resultItem, int maxCraft, int slot) {
         // Debug.info("What's wrong?",doCraft);
 
         boolean dropCraft = this.dropCraft.get();
         // Debug.info("Drop craft?",dropCraft);
+        var handler = screen.getMenu();
         if (dropCraft) {
-            for (int i = 0; i < maxCraft; ++i) {
-                InvTasks.getClickExecutor().execute(() -> {
-                    mc.gameMode.handleContainerInput(
-                            screen.getMenu().containerId, slot, 0, ContainerInput.THROW, mc.player);
-                });
-            }
+            // do not use this
+            InvTasks.getClickExecutor().execute(() -> {
+                if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                    return false;
+                }
+                mc.gameMode.handleContainerInput(
+                        screen.getMenu().containerId, slot, 1, ContainerInput.THROW, mc.player);
+                return true;
+            });
         } else {
             InvTasks.getClickExecutor().execute(() -> {
+                if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
+                    return false;
+                }
                 mc.gameMode.handleContainerInput(
                         screen.getMenu().containerId, slot, 1, ContainerInput.QUICK_MOVE, mc.player);
+                return true;
             });
         }
     }
@@ -176,9 +184,7 @@ public class FastCraft extends BaseModule {
                 .addToSub(recipeSubScreen);
 
         createElement(
-                        new SlotElement(this::getDisplayItemStack)
-                                .setSlotFrame(false)
-                                .setInSlot(false),
+                        new SlotElement(this::getDisplayItemStack).setSlotFrame(false),
                         null,
                         null,
                         150,

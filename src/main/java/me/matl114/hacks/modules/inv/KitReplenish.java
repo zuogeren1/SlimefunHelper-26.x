@@ -130,11 +130,11 @@ public class KitReplenish extends BaseModule {
             builder(replenishRoot.add("log"), Boolean.class).defaultValue(true).build();
 
     public final KeyBindRef hotkeyReplenish = hotkey(replenishRoot.add("execute-replenish"), new MultiKeyBind())
-            .registerHotkey(HotKeyUtils.asNoneInputHandler(this::replenishCurrentKit))
+            .registerHotkey(HotKeyUtils.asNonInputHandler(this::replenishCurrentKit))
             .build();
 
     public final KeyBindRef hotkeyInvSort = hotkey(replenishRoot.add("execute-reorder"), new MultiKeyBind())
-            .registerHotkey(HotKeyUtils.asNoneInputHandler(this::reorderCurrentInventory))
+            .registerHotkey(HotKeyUtils.asNonInputHandler(this::reorderCurrentInventory))
             .build();
 
     public final KeyBindRef autoEnderChest = hotkey(replenishRoot.add("auto-ender-chest"), new MultiKeyBind())

@@ -291,9 +291,9 @@ public class AntiCrystal extends BaseModule {
                 if (supply != null) {
                     for (var re : needConsider) {
                         if (!checkNoEntity(re)) continue;
-                        if (SequencedActionManager.INSTANCE.isWaitingResponse(
+                        if (SequencedActionManager.INSTANCE.isWaitingBlockResponse(
                                         re, s -> s.is(Items.FIREWORK_ROCKET))
-                                || SequencedActionManager.INSTANCE.isWaitingResponse(
+                                || SequencedActionManager.INSTANCE.isWaitingBlockResponse(
                                         re.below(), s -> s.is(Items.FIREWORK_ROCKET))) {
                             continue;
                         }
@@ -370,7 +370,7 @@ public class AntiCrystal extends BaseModule {
                         for (var direction : Direction.values()) {
                             BlockHitResult result =
                                     InteractionTasks.createHitResult(re.relative(direction), direction.getOpposite());
-                            if (!SequencedActionManager.INSTANCE.isWaitingResponse(
+                            if (!SequencedActionManager.INSTANCE.isWaitingBlockResponse(
                                             result.getBlockPos(), (rer) -> rer.is(Items.ITEM_FRAME))
                                     && InteractExtra.INSTANCE.isWithinInteractRange(
                                             mc.player.position(), result.getBlockPos())
@@ -391,7 +391,7 @@ public class AntiCrystal extends BaseModule {
             }
             shoot:
             if (bow.get() && bowCallback == null && useTimer.canRun(6)) {
-                if (SequencedActionManager.INSTANCE.isWaitingResponse(s -> s.is(Items.CROSSBOW))) {
+                if (SequencedActionManager.INSTANCE.isWaitingItemResponse(s -> s.is(Items.CROSSBOW))) {
                     return;
                 }
 
@@ -441,7 +441,7 @@ public class AntiCrystal extends BaseModule {
                                                 hitPoint.subtract(mc.player.getEyePosition())
                                                         .normalize(),
                                                 true,
-                                                Interact.INSTANCE.swingHand.get());
+                                                Interact.INSTANCE.swingHandBlock.get());
                                         break shoot;
                                     }
                                 }

@@ -22,6 +22,7 @@ import me.matl114.hacks.utils.config.*;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
+import me.matl114.hacks.utils.tasks.StateExecutor;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
@@ -162,6 +163,7 @@ public class AutoSurround extends BaseModule implements LegalMovementManager.Mov
 
     int delayTicks;
     boolean needSneak = false;
+    StateExecutor needPlaceState = new StateExecutor();
 
     public void onInput(Event<Void> inputEvent) {
         if (enable.get()) {
@@ -173,9 +175,13 @@ public class AutoSurround extends BaseModule implements LegalMovementManager.Mov
                             triggerCenterFix = true;
                         }
                         delayTicks = 0;
+                        needPlaceState.state(true);
                     } else {
                         triggerCenterFix = false;
+                        needPlaceState.state(false);
                     }
+                } else {
+                    needPlaceState.state(false);
                 }
             }
             if (needSneak) {

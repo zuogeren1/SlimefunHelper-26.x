@@ -80,6 +80,7 @@ public class BlockRotate extends BaseModule {
     public final ModulePath blockRotate = makePath(Configs.INTERACT_CONFIG, "block-rotate");
     public final ModulePath tempSchematic = blockRotate.add("temporary-schematic");
     public final ModulePath litematicaFix = blockRotate.add("litematica-shit-fix");
+    public final ModulePath placeCorrect = blockRotate.add("simple-placement-correct");
     public static BlockRotate INSTANCE;
 
     public BlockRotate() {
@@ -112,6 +113,8 @@ public class BlockRotate extends BaseModule {
     public final FlagRef enable2 = flagBuilder(litematicaFix.add("enable")).build();
 
     public final FlagRef legal = flagBuilder(litematicaFix.add("legal-look")).build();
+
+    public final FlagRef enable4 = flagBuilder(placeCorrect.add("enable")).build();
 
     //    public final FlagRef enable3 =
     //            flagBuilder(litematicaFix.add("enable-easyplace-post-fix")).build();
@@ -170,34 +173,33 @@ public class BlockRotate extends BaseModule {
                 //
                 Vec2 currentPy = new Vec2(PlayerStateManager.INSTANCE.lastPitch, PlayerStateManager.INSTANCE.lastYaw);
                 PitchYawDeceive deceivePy = null;
-                Vec3 lookVec = null;
+                Vec3 lookRot = null;
                 if (paccess.hasUseContext()) {
+                    Event<PitchYawDeceive> yawDeceive = new Event<>(new PitchYawDeceive(), false, true);
+                    Event<BlockPos> playerLookAt = new Event<>(null, false, true);
                     if (paccess.getUseContext().blockPlace()) {
                         PlayerInteractBlockC2SPacketAccess.UseContext context = paccess.getUseContext();
                         Item blockItem = context.stack().getItem();
-                        Event<PitchYawDeceive> yawDeceive = new Event<>(new PitchYawDeceive(), false, true);
-                        Event<Vec3> playerLookAt = new Event<>(null, false, true);
+
                         handlePlaceCorrectLitematica(blockItem, e.context, context, yawDeceive, playerLookAt);
                         handlePlaceCorrectTemperarySchematic(blockItem, e.context, context, yawDeceive);
-
-                        if (yawDeceive.context != null && yawDeceive.context.hasDeceive()) {
-                            deceivePy = yawDeceive.context;
-                        }
-                        if (playerLookAt.context != null) {
-                            lookVec = playerLookAt.context;
-                        }
+                        handleSimpleInteractCorrect(
+                                e.context.getHitResult().getBlockPos(), playerLookAt);
                     } else if (paccess.getUseContext().isAccepted()) {
                         BlockState oldState = paccess.getUseContext().oldState();
                         BlockPos interactState = e.context.getHitResult().getBlockPos();
                         BlockState newState = mc.level.getBlockState(interactState);
                         if (oldState != newState) {
                             // handle yaw fix
-                            Event<PitchYawDeceive> yawDeceive = new Event<>(new PitchYawDeceive(), false, true);
-                            handleInteractCorrectLitematica(interactState, newState, yawDeceive);
-                            if (yawDeceive.context != null && yawDeceive.context.hasDeceive()) {
-                                deceivePy = yawDeceive.context;
-                            }
+                            handleInteractCorrectLitematica(interactState, newState, yawDeceive, playerLookAt);
                         }
+                        handleSimpleInteractCorrect(interactState, playerLookAt);
+                    }
+                    if (yawDeceive.context != null && yawDeceive.context.hasDeceive()) {
+                        deceivePy = yawDeceive.context;
+                    }
+                    if (playerLookAt.context != null) {
+                        lookRot = InteractionTasks.createBlockRayCastDirection(playerLookAt.context);
                     }
                 }
                 if (deceivePy != null
@@ -221,7 +223,7 @@ public class BlockRotate extends BaseModule {
                     LegacySnapRotManager.INSTANCE.snapAt(
                             deceivePy.getPitch(currentPy.x), deceivePy.getYaw(currentPy.y), true);
                 }
-                if (lookVec != null
+                if (lookRot != null
                         && (bypassMode2.get().hasAc()
                                 || (deceivePy != null
                                         && ViaFabricPlusHooks.getInstance()
@@ -229,11 +231,10 @@ public class BlockRotate extends BaseModule {
                                                 .isLowerOrEqualTo(20, 8)))) {
                     if (ViaFabricPlusHooks.isSupportDupRot()) {
                         var packet = LegacySnapRotManager.INSTANCE.createSnapAt(
-                                lookVec.subtract(mc.player.getEyePosition()));
+                                lookRot);
                         PacketManager.schedulePostSendPacket(e.context, packet);
                     } else {
-                        InteractionTasks.addPostRotationCorrectTask(
-                                lookVec, mc.player.getEyePosition(), Runnables.doNothing());
+                        InteractionTasks.addPostRotationCorrectTask(lookRot, Runnables.doNothing());
                     }
                 }
             }
@@ -267,7 +268,7 @@ public class BlockRotate extends BaseModule {
                 // do not rotate, because other module will rotate itself
                 //                packetHitResult = newPacketHitResult;
                 //                if (legal.get()) {
-                //                    look.context(packetHitResult.getBlockPos().toCenterPos());
+                //                    look.context(packetHitResult.getBlockPos());
                 //                }
                 handleYawDeceive(litematicaState, yawDeceive.context);
                 if (clientTempFix.get()) {
@@ -282,7 +283,7 @@ public class BlockRotate extends BaseModule {
             ServerboundUseItemOnPacket packet,
             PlayerInteractBlockC2SPacketAccess.UseContext useContext,
             Event<PitchYawDeceive> yawDeceive,
-            Event<Vec3> look) {
+            Event<BlockPos> look) {
 
         if (enable2.get() && LitematicaHooks.getInstance().isEnabled()) {
             BlockHitResult packetHitResult = packet.getHitResult();
@@ -318,7 +319,7 @@ public class BlockRotate extends BaseModule {
                             PlayerStateManager.INSTANCE.lastYaw,
                             packetHitResult.getBlockPos(),
                             InteractExtra.INSTANCE.getBlockReachDistance())) {
-                        look.context(Vec3.atCenterOf(packetHitResult.getBlockPos()));
+                        look.context(packetHitResult.getBlockPos());
                     }
                 }
                 handleYawDeceive(litematicaState, yawDeceive.context);
@@ -327,14 +328,38 @@ public class BlockRotate extends BaseModule {
         }
     }
 
-    public void handleInteractCorrectLitematica(BlockPos pos, BlockState newState, Event<PitchYawDeceive> yawDeceive) {
+    public void handleInteractCorrectLitematica(
+            BlockPos pos, BlockState newState, Event<PitchYawDeceive> yawDeceive, Event<BlockPos> look) {
         if (enable2.get() && LitematicaHooks.getInstance().isEnabled()) {
             Level litematicaWorld = LitematicaHooks.getInstance().getSchematicWorld();
             if (!LitematicaHooks.getInstance().isPositionWithinRange(pos)) return;
             BlockState litematicaState = litematicaWorld.getBlockState(pos);
+            if (legal.get()
+                    && !RaycastUtils.canRaycastHit(
+                            mc.player,
+                            PlayerStateManager.INSTANCE.lastPitch,
+                            PlayerStateManager.INSTANCE.lastYaw,
+                            pos,
+                            InteractExtra.INSTANCE.getBlockReachDistance())) {
+                look.context(pos);
+            }
             if (litematicaState.getBlock() == newState.getBlock() && litematicaState != newState) {
                 handleYawInteractDeceive(litematicaState, yawDeceive.context);
             }
+        }
+    }
+
+    public void handleSimpleInteractCorrect(BlockPos interactPos, Event<BlockPos> look) {
+        if (enable4.get()
+                && legal.get()
+                && look.context == null
+                && !RaycastUtils.canRaycastHit(
+                        mc.player,
+                        PlayerStateManager.INSTANCE.lastPitch,
+                        PlayerStateManager.INSTANCE.lastYaw,
+                        interactPos,
+                        InteractExtra.INSTANCE.getBlockReachDistance())) {
+            look.context(interactPos);
         }
     }
 

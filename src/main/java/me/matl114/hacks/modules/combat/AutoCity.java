@@ -12,6 +12,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.interact.AutoSurround;
 import me.matl114.hacks.modules.interact.InteractExtra;
+import me.matl114.hacks.modules.interact.SelfTrap;
 import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.mine.PacketMine;
 import me.matl114.managers.Configs;
@@ -199,6 +200,9 @@ public class AutoCity extends BaseModule {
                 Set<BlockPos> surroundPos = new HashSet<>();
                 if (AutoSurround.INSTANCE.enable.get()) {
                     surroundPos.addAll(AutoSurround.INSTANCE.getTargetingPos());
+                }
+                if (SelfTrap.INSTANCE.enable.get()) {
+                    surroundPos.addAll(SelfTrap.INSTANCE.getTargetingPos());
                 }
                 outerPoses.removeAll(surroundPos);
                 List<BlockPos> selfPosList = selfPoses.stream().toList();

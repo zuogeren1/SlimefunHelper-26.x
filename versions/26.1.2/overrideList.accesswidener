@@ -97,3 +97,6 @@ accessible	method	net/minecraft/client/gui/GuiGraphicsExtractor	innerBlit	(Lcom/
 accessible	field	net/minecraft/client/gui/GuiGraphicsExtractor	guiSprites	Lnet/minecraft/client/renderer/texture/TextureAtlas;
 accessible	field	net/minecraft/core/cauldron/CauldronInteraction$Dispatcher	items	Ljava/util/Map;
 accessible	field	net/minecraft/world/level/block/AbstractCauldronBlock	interactions	Lnet/minecraft/core/cauldron/CauldronInteraction$Dispatcher;
+accessible	class	net/minecraft/client/multiplayer/prediction/BlockStatePredictionHandler$ServerVerifiedState
+accessible	field	net/minecraft/client/multiplayer/prediction/BlockStatePredictionHandler$ServerVerifiedState	sequence	I
+accessible	field	net/minecraft/client/multiplayer/prediction/BlockStatePredictionHandler$ServerVerifiedState	blockState	Lnet/minecraft/world/level/block/state/BlockState;

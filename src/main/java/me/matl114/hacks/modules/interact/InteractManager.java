@@ -38,6 +38,7 @@ import me.matl114.utils.commands.params.types.EntitySelector;
 import me.matl114.utils.commands.params.types.ExecutePos;
 import me.matl114.utils.commands.params.types.ExecuteRotation;
 import me.matl114.versioned.api.VItem;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -129,7 +130,7 @@ public class InteractManager extends BaseModule {
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEventLow, Integer.MIN_VALUE);
         registerListener(Listener.getPostHandleInputEvents(), this::onPostInputEventMonitor, Integer.MAX_VALUE);
         registerListener(Listener.getServerLeavePoint(), this::onServerLeave);
-        registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch);
+        registerListener(Listener.getPlayerRespawnPoint(), this::onWorldSwitch);
         registerListener(Listener.getPostHandleInputEvents(), this::onPostInputEvent, Integer.MIN_VALUE);
         registerListener(
                 Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class), this::onPlayerMoveC2SPacket);
@@ -156,7 +157,7 @@ public class InteractManager extends BaseModule {
         clearRunningRequests(null);
     }
 
-    public void onWorldSwitch(Event<Level> event) {
+    public void onWorldSwitch(Event<LocalPlayer> event) {
         clearRunningRequests(null);
     }
 

@@ -93,7 +93,7 @@ public class InvHelper extends BaseModule {
 
     public final KeyBindRef mergeKey = hotkey(stacking.add("stack-inventory-key"))
             .defaultValue(new MultiKeyBind())
-            .registerHotkey(HotKeyUtils.asNoneInputHandler(this::onMergeInventory))
+            .registerHotkey(HotKeyUtils.asNonInputHandler(this::onMergeInventory))
             .build();
 
     public final ModulePath drop = root.add("auto-drop");

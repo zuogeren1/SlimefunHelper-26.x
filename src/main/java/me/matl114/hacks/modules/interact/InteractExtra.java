@@ -169,8 +169,14 @@ public class InteractExtra extends BaseModule {
 
     public Vec3 getBestInteractEyePos(Vec3 pos, BlockHitResult blockHitResult) {
         BlockPos blockPos = blockHitResult.getBlockPos();
-        //        Vec3d plateCenter = blockPos.toCenterPos().offset(direction, 0.5);
-        //        Vec3d directionVector = Vec3d.of(direction.getVector());
+        //        Vec3 plateCenter = Vec3.atCenterOf(blockPos).offset(direction, 0.5);
+        //        Vec3 directionVector = Vec3.of(direction.getVector());
+        return getBestInteractEyePos(pos, blockPos);
+    }
+
+    public Vec3 getBestInteractEyePos(Vec3 pos, BlockPos blockPos) {
+        //        Vec3 plateCenter = Vec3.atCenterOf(blockPos).offset(direction, 0.5);
+        //        Vec3 directionVector = Vec3.of(direction.getVector());
         AABB blockBox = new AABB(blockPos);
         return getPotentialEyeHeights(pos)
                 .sorted(Comparator.comparingDouble(blockBox::distanceToSqr))
