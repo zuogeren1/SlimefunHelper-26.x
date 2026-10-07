@@ -169,7 +169,7 @@ public class PositionPredict extends BaseModule {
         PredictorImpl impl;
         if (ev instanceof ClientboundMoveEntityPacket packet) {
             synchronized (asyncLoadedPlayerPositionTrackers) {
-                impl = asyncLoadedPlayerPositionTrackers.get(packet.getEntity(mc.level).getId());
+                impl = asyncLoadedPlayerPositionTrackers.get(packet.entityId);
             }
 
             if (impl != null) {

@@ -81,8 +81,7 @@ public class PredictorImpl implements Predictor {
     }
 
     public void onEntityPositionMove(ClientboundMoveEntityPacket packet) {
-        Entity tracked = trackedOwner();
-        if (tracked == null || packet.getEntity(mc.level) != tracked) return;
+        if (packet.entityId != ownerId) return;
         synchronized (this) {
             if (mc.player != null && mc.player.getId() == ownerId || packet.hasPosition()) {
                 Vec3 position = applyDelta(getCurrentPos(), packet.getXa(), packet.getYa(), packet.getZa());
