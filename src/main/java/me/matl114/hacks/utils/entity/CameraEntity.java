@@ -20,7 +20,8 @@ public class CameraEntity extends AbstractClientPlayer {
     public CameraEntity(ClientLevel clientWorld, @Nonnull LocalPlayer player, GameType mode, boolean moveable) {
         super(clientWorld, player.getGameProfile());
         // avoid id collision
-        setId(-getId());
+        // 26.2 起构造期 id 还没分配，getId() 会抛异常；改用自增负数（语义见 ClientEntityIds）
+        setId(ClientEntityIds.next());
         this.mode = mode;
         this.moveable = moveable;
         setUUID(UUID.randomUUID());

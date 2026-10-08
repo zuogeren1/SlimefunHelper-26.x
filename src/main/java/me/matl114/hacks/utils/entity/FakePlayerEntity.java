@@ -20,7 +20,8 @@ public class FakePlayerEntity extends RemotePlayer {
 
     public FakePlayerEntity(ClientLevel clientWorld, GameProfile gameProfile) {
         super(clientWorld, gameProfile);
-        setId(-getId());
+        // 26.2 起构造期 id 还没分配，getId() 会抛异常；改用自增负数（语义见 ClientEntityIds）
+        setId(ClientEntityIds.next());
     }
 
     public void copyDataFrom(Player player) {
