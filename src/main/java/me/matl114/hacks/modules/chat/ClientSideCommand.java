@@ -128,6 +128,11 @@ public class ClientSideCommand extends BaseModule {
     }
 
     private <T extends SharedSuggestionProvider> void onClientCommandReload(Event<ClientboundCommandsPacket> reload) {
+        // 数据包处理抛异常时事件系统仍会派发“处理完”事件（finally 里发），那时客户端往往已经断开，
+        // connection 为 null；这里不能再抛，否则会顶掉原始异常、让真正的错误从日志里消失。
+        if (mc.getConnection() == null) {
+            return;
+        }
         CommandDispatcher<T> clientTree =
                 (CommandDispatcher<T>) mc.getConnection().getCommands();
         RootCommandNode<T> root = clientTree.getRoot();
