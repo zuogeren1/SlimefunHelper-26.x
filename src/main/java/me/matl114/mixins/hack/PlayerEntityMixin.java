@@ -1,7 +1,6 @@
 package me.matl114.mixins.hack;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
-import com.mojang.authlib.GameProfile;
 import me.matl114.accessors.access.LivingEntityAccess;
 import me.matl114.accessors.hacks.EntityInternalAccess;
 import me.matl114.accessors.hacks.PlayerInternalAccess;
@@ -45,18 +44,10 @@ public abstract class PlayerEntityMixin extends LivingEntity
     @Unique
     PredictorImpl predictorImpl;
 
-    @Inject(
-            method = "<init>",
-            at =
-                    @At(
-                            value = "INVOKE",
-                            target =
-                                    "Lnet/minecraft/world/entity/Avatar;<init>(Lnet/minecraft/world/entity/EntityType;Lnet/minecraft/world/level/Level;)V",
-                            shift = At.Shift.AFTER))
-    private void onInit(Level world, GameProfile profile, CallbackInfo ci) {
-        predictorImpl = new PredictorImpl(this);
-    }
-
+    // 26.2 起 Entity#getId() 在 id 未分配（0）时会抛 IllegalStateException，而玩家实体的 id 是
+    // 构造之后才由 ClientPacketListener#handleLogin 调 setId(packet.playerId()) 分配的，
+    // 所以不能在构造器里 new PredictorImpl(this)（会直接打断 LocalPlayer 的构造，进而整个进世界流程）；
+    // 统一走下面的惰性创建，那时 id 一定已经分配好了。
     @Override
     public Predictor getPositionPredictor() {
         if (predictorImpl == null) {
