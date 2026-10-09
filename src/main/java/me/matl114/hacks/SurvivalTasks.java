@@ -63,6 +63,9 @@ public class SurvivalTasks {
     public static XaeroHelper xaeroHelper;
 
     @Getter
+    public static ConfluxMapHelper confluxMapHelper;
+
+    @Getter
     public static XaeroMapScanner xaeroMapScanner;
 
     @Getter
@@ -84,6 +87,7 @@ public class SurvivalTasks {
         pathManager = new PathManager().register(m);
         baritoneFix = new BaritoneFix().register(m);
         xaeroHelper = new XaeroHelper().register(m);
+        confluxMapHelper = new ConfluxMapHelper().register(m);
         xaeroMapScanner = new XaeroMapScanner().register(m);
         pearlESP = new PearlESP().register(m);
     }
