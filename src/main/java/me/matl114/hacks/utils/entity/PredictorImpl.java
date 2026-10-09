@@ -45,7 +45,15 @@ public class PredictorImpl implements Predictor {
             while (positions.size() > MAX_HISTORY) {
                 positions.removeFirst();
             }
-            if (mc.player != null && mc.player.getId() == this.ownerId) {
+            Entity localPlayer = mc.player;
+            // 26.2 起 Entity#getId() 在 id 未分配（0）时会抛 IllegalStateException，而玩家实体的 id 是
+            // ClientPacketListener#handleLogin 先把玩家赋给 this.minecraft.player、随后才 setId(packet.playerId())
+            // 时补上的：集成服务端在另一个线程 tick 自己那个 ServerPlayer 时会走到这里，正好落在
+            // 「mc.player 已非 null、id 还是 0」的窗口里（实测随机崩服/崩客户端）。
+            // 这里本来只想知道「这个预测器跟踪的是不是本地玩家」，改成实体身份比较：owner 就是这个
+            // 预测器所属的实体（PlayerEntityMixin 用 new PredictorImpl(this) 创建），同一世界里 id 与
+            // 实体一一对应，所以与原来的 id 比较等价，且完全不碰 id。
+            if (localPlayer != null && trackedOwner() == localPlayer) {
                 // The local player is moved by client-side input between server packets.
                 // Keep the synchronised position in step with the client entity until a
                 // server position packet supplies a new base position.
