@@ -781,24 +781,6 @@ public abstract class ConfluxMapScreenMixin {
                 slimefunhelper$nativeButtonCount(), rows, mouseX, mouseY);
     }
 
-    /**
-     * 跑第 {@code index} 条我们的动作。
-     *
-     * <p>先把条目与目标抓到<b>局部变量</b>里再执行：我们自己的状态现在是在动作<b>之前</b>
-     * 被 {@code clearLocationMenuState()} 清掉的（对齐原生先 dismiss 再 run 的顺序），
-     * 而 {@code slimefunhelper$locationMenuOptions()} 返回的是那个会被 {@code clear()} 的活列表，
-     * 直接拿着它 {@code get(index)} 会当场 {@code IndexOutOfBoundsException}。
-     */
-    @Unique
-    private void slimefunhelper$runLocationMenuAction(int index) {
-        List<ConfluxMenuContext> options = slimefunhelper$locationMenuOptions();
-        ConfluxMenuContext option = index >= 0 && index < options.size() ? options.get(index) : null;
-        ConfluxMenuTarget target = this.slimefunhelper$locationMenuClickTarget;
-        if (option == null || target == null) {
-            return;
-        }
-        option.accept(target);
-    }
 
     /**
      * 跑我们的动作，并<b>对齐原生</b>地收起位置菜单。
@@ -828,6 +810,12 @@ public abstract class ConfluxMapScreenMixin {
      */
     @Unique
     private void slimefunhelper$dismissLocationMenuThenRunAction(int index) {
+        // 条目与目标必须在 dismiss/clear **之前**抓下来：clearLocationMenuState() 会清空
+        // slimefunhelper$locationMenuOptions() 这个活列表，也会把 locationMenuClickTarget 置 null，
+        // 放到后面再读就是永远读不到东西（点击「菜单照关、动作不执行」的成因）。
+        List<ConfluxMenuContext> options = slimefunhelper$locationMenuOptions();
+        ConfluxMenuContext option = index >= 0 && index < options.size() ? options.get(index) : null;
+        ConfluxMenuTarget target = this.slimefunhelper$locationMenuClickTarget;
         try {
             this.dismissLocationMenu();
         } catch (Exception e) {
@@ -838,10 +826,9 @@ public abstract class ConfluxMapScreenMixin {
         } catch (Exception e) {
             slimefunhelper$warnOnce("clear our location menu state", e);
         }
-        // 无论上面两步结果如何都要尝试执行：clearLocationMenuState() 失败时上面那一步不会真的把
-        // 列表清空，于是下面这次读还能读到条目；真清空了就是正常的“已经收摊、不再响应”，
-        // 由 slimefunhelper$runLocationMenuAction 里的越界判断兜住。
-        slimefunhelper$runLocationMenuAction(index);
+        if (option != null && target != null) {
+            option.accept(target);
+        }
     }
 
     /** dismissLocationMenu 失败只报一次，避免每次点击都刷一条 */
