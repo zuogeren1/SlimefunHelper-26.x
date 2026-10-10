@@ -6,10 +6,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import me.matl114.events.Event;
+import me.matl114.events.Listener;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.move.TravellingControl;
 import me.matl114.hacks.utils.config.*;
 import me.matl114.hooks.ConfluxMapHooks;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuContext;
@@ -18,16 +20,27 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.ChatUtils;
+import me.matl114.utils.CommonUtils;
+import me.matl114.utils.LoadedChunkEdgeCache;
 import me.matl114.utils.ScreenUtils;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.phys.Vec3;
 
 /**
- * 与 conflux-map 联动：在他们的全屏地图右键位置菜单正下方追加一块面板，
- * 提供与 {@link XaeroHelper} 右键菜单等价的“自定义指令 / 自定义补全 / 复制坐标”。
+ * 与 conflux-map 联动的两块功能：
+ * <ul>
+ *   <li><b>右键位置菜单</b>：提供与 {@link XaeroHelper} 右键菜单等价的“自定义指令 / 自定义补全 / 复制坐标”，
+ *       外加一条固定的 {@code /!!travel to <坐标>}（{@code enable-travel-command}）；</li>
+ *   <li><b>全屏地图覆盖层</b>：客户端已加载区块的边界线（{@code loaded-chunk-render} +
+ *       {@code loaded-chunk-render-color}）与当前旅行目标的临时标记（{@code travel-goal-sync}）。</li>
+ * </ul>
  *
- * <p>模块本身只负责把条目收集出来交给 {@link ConfluxMapHooks}，绘制与命中判定在
- * {@code ConfluxMapScreenMixin} + {@code ConfluxMenuOverlay} 里完成。
+ * <p>模块本身只负责收集条目（交给 {@link ConfluxMapHooks}）与维护数据（边界边缓存，
+ * 见 {@link LoadedChunkEdgeCache}）：绘制与命中判定在 {@code ConfluxMapScreenMixin} +
+ * {@code ConfluxMenuOverlay} / {@code ConfluxMapOverlay} 里完成。
  */
 public class ConfluxMapHelper extends BaseModule {
     public static ConfluxMapHelper INSTANCE;
@@ -62,10 +75,76 @@ public class ConfluxMapHelper extends BaseModule {
             .defaultValue(true)
             .build();
 
+    /** 右键菜单里那条固定的 {@code /!!travel to <坐标>}（对齐 XaeroHelper 默认指令列表里的同一条） */
+    public final FlagRef enableTravelCommand =
+            flagBuilder(root.add("enable-travel-command")).defaultValue(true).build();
+
+    /** 在全屏地图上画客户端已加载区块的边界线 */
+    public final FlagRef loadedChunkRender =
+            flagBuilder(root.add("loaded-chunk-render")).build();
+
+    public final NBTRef<WrapColor> loadedChunkColor = builder(root.add("loaded-chunk-render-color"), WrapColor.class)
+            .defaultValue(new WrapColor((ChatFormatting.RED)))
+            .build();
+
+    /** 把当前旅行目标画成地图上的临时标记（不写进 conflux 的路径点存储） */
+    public final FlagRef travelGoalSync =
+            flagBuilder(root.add("travel-goal-sync")).build();
+
+    /** 已加载区块的边界边缓存：数据在这里按 tick 刷新，绘制在 ConfluxMapScreenMixin 里读 */
+    private final LoadedChunkEdgeCache loadedChunkEdges = new LoadedChunkEdgeCache();
+
+    public LoadedChunkEdgeCache loadedChunkEdges() {
+        return loadedChunkEdges;
+    }
+
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(ConfluxMapHooks.getLocationMenuOption(), this::onConfluxMenuCollect);
+        registerListener(Listener.getPostGameTick(), this::onPostGameTick);
+    }
+
+    @Override
+    public <W> void unregisterAll() {
+        super.unregisterAll();
+        loadedChunkEdges.clear();
+    }
+
+    /**
+     * 每个客户端 tick 之后刷新一次边界边缓存（与 {@link XaeroHelper#onTickMapRender} 同一个节奏、同一个数据源）。
+     *
+     * <p>刷新本身很便宜：{@link LoadedChunkEdgeCache#update} 只在区块集合真的变了的时候才重建线段。
+     * {@code mc.level == null}（主菜单 / 断线）必须提前挡掉 —— {@link CommonUtils#chunks(boolean)} 返回的
+     * 迭代器一构造就解引用 {@code mc.level}，不挡会直接 NPE。
+     */
+    public void onPostGameTick(Event<LocalPlayer> event) {
+        if (!loadedChunkRender.get()) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.level == null) {
+            return;
+        }
+        try {
+            loadedChunkEdges.update(CommonUtils.chunks(false));
+        } catch (Throwable ignored) {
+            // 换世界的那一瞬间区块存储可能已经在换引用：跳过这一次即可，下一 tick 会重来
+        }
+    }
+
+    /**
+     * 当前旅行目标的位置；没有任务 / 取不到就返回 null。
+     *
+     * <p>只读 {@link TravellingControl#travelTask}（静态字段），不碰它的任何状态。
+     */
+    public Vec3 currentTravelTarget() {
+        try {
+            var task = TravellingControl.travelTask;
+            return task == null ? null : task.getCurrentFlyingTarget();
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     /** 与 {@link XaeroHelper} 的右键菜单完全一致的占位符说明 */
@@ -97,6 +176,15 @@ public class ConfluxMapHelper extends BaseModule {
                 .put("y", String.valueOf(target.y()))
                 .put("z", String.valueOf(target.z()))
                 .build();
+        // 固定条目放在最前：ConfluxMenuOverlay.MAX_ENTRIES = 4，排在用户自己配的条目后面会被挤掉
+        if (enableTravelCommand.get()) {
+            String travelName = ChatUtils.textToPlainString(Component.translatable(
+                    "message.module.conflux-map-helper.right-click-command.travel",
+                    Component.translatable("message.module.conflux-map-helper.right-click-command.pos")));
+            event.context.add(new ConfluxMenuContext(travelName, (clicked) -> {
+                ChatTasks.sayMessage("/!!travel to " + formatPosition(clicked), false);
+            }));
+        }
         if (enableRightClickCommand.get()) {
             for (var format : rightClickCommand.get().list()) {
                 String name = ChatUtils.textToPlainString(Component.translatable(

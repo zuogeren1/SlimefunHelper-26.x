@@ -239,6 +239,11 @@
 	
 	"widget.click-gui.module-name.Survival.ConfluxMapHelper": "Conflux地图助手",
 	"message.module.conflux-map-helper.location-menu.tooltip": "由 SlimefunHelper 添加的自定义条目",
+	"message.module.conflux-map-helper.right-click-command.travel": "[SFH] 前往 %s",
+	"conflux-map-extra.conflux-map-helper.enable-travel-command": "Conflux地图助手: 启用旅行指令",
+	"conflux-map-extra.conflux-map-helper.loaded-chunk-render": "Conflux地图助手: 渲染已加载区块",
+	"conflux-map-extra.conflux-map-helper.loaded-chunk-render-color": "Conflux地图助手: 已加载区块颜色",
+	"conflux-map-extra.conflux-map-helper.travel-goal-sync": "Conflux地图助手: 同步旅行目标",
 	
 	"widget.click-gui.module-name.Extra.AutoLogout": "自动退出"
 }

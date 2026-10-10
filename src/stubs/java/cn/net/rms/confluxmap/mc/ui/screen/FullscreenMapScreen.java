@@ -23,6 +23,16 @@ public abstract class FullscreenMapScreen extends ConfluxScreen {
     private FullscreenMapLocationMenu.Bounds locationMenuBounds;
     private FullscreenMapLocationMenu.Target locationMenuTarget;
 
+    /**
+     * 全屏地图视口的三个几何字段。javap 实测（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 一致）：
+     * {@code private double centerX;} / {@code private double centerZ;} / {@code private double scale;}
+     * 都是<b>声明在本类自己身上</b>的实例字段（不是从 Screen 继承的），我们的 mixin 直接 @Shadow 它们。
+     * 投影式（他们自己的代码里到处都是）：{@code screenX = width / 2.0 + (worldX - centerX) / scale}。
+     */
+    private double centerX;
+    private double centerZ;
+    private double scale;
+
     public FullscreenMapScreen() {
         super(null);
     }
@@ -37,6 +47,15 @@ public abstract class FullscreenMapScreen extends ConfluxScreen {
 
     private SessionGuard.Session viewSession() {
         return null;
+    }
+
+    /**
+     * 视口是不是「当前存档 + 当前维度」的实时会话。
+     * 真类里的实现是比较 {@code viewSession()} 与 {@code gameBridge.session()} 的 world/dimension；
+     * 三份 jar 里签名都是 {@code ()Z}，我们的地图覆盖层靠它决定画不画。
+     */
+    private boolean viewingLiveSession() {
+        return false;
     }
 
     protected void renderContents(cn.net.rms.confluxmap.mc.ui.GuiDraw draw, int mouseX, int mouseY, float tickDelta) {}
@@ -79,4 +98,12 @@ public abstract class FullscreenMapScreen extends ConfluxScreen {
     private void openLocationMenu(double mouseX, double mouseY) {}
 
     private void dismissLocationMenu() {}
+
+    /**
+     * 他们画右键位置菜单面板的那一句。javap 实测三份 jar 都是
+     * {@code private void drawLocationMenu(cn.net.rms.confluxmap.mc.ui.GuiDraw)}，
+     * 而且是 {@code renderContents} 的<b>最后一句</b>（菜单没打开时也照样调用）——
+     * 我们的地图覆盖层就注入在它的 HEAD（地图内容之后、原版控件之前）。
+     */
+    private void drawLocationMenu(cn.net.rms.confluxmap.mc.ui.GuiDraw draw) {}
 }

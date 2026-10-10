@@ -9,18 +9,22 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
+import me.matl114.hacks.modules.survival.ConfluxMapHelper;
 import me.matl114.hooks.ConfluxMapHooks;
+import me.matl114.hooks.impl.confluxmap.ConfluxMapOverlay;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuButtonSpec;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuContext;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuOverlay;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuTarget;
 import me.matl114.utils.Debug;
+import me.matl114.utils.LoadedChunkEdgeCache;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.Shadow;
@@ -99,6 +103,23 @@ public abstract class ConfluxMapScreenMixin {
     private FullscreenMapLocationMenu.Target locationMenuTarget;
 
     /**
+     * 全屏地图视口的三个几何字段（世界 -> 屏幕投影用）。
+     *
+     * <p>javap 实测（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 的 {@code FullscreenMapScreen}）：
+     * {@code private double centerX;} / {@code private double centerZ;} / {@code private double scale;}
+     * 都是<b>声明在目标类自己身上</b>的实例字段（不是从父类继承来的），名字与描述符三份一致，
+     * 所以 @Shadow 是安全的。语义与投影式见 {@link ConfluxMapOverlay.Viewport}。
+     */
+    @Shadow
+    private double centerX;
+
+    @Shadow
+    private double centerZ;
+
+    @Shadow
+    private double scale;
+
+    /**
      * 他们的绘制入口（真类里声明在 {@code ConfluxScreen} 上，protected；本类是子类所以影得到）。
      * 我们只在它的 {@code RETURN} 上补画面板尾部 —— 那时他们的 {@code drawLocationMenu(draw)}
      * 已经画完面板背景，而原版控件（他们造的按钮）还没画（见 {@code ConfluxScreen.extractRenderState}）。
@@ -114,6 +135,19 @@ public abstract class ConfluxMapScreenMixin {
 
     @Shadow
     private SessionGuard.Session viewSession() {
+        throw new AssertionError();
+    }
+
+    /**
+     * 视口是不是「当前存档 + 当前维度」的实时会话。
+     *
+     * <p>他们的实现就是 {@code viewSession().world()/dimension() 与 gameBridge.session() 的同两项比较}；
+     * 浏览别的存档 / 别的维度时为 false —— 那一刻屏幕上的瓦片与实际世界坐标不是一回事，
+     * 我们那两层覆盖必须整层不画，否则就是错位的线（同 {@code drawPlayerTrail} 等原生覆盖的判据）。
+     * 三份 jar 里签名都是 {@code ()Z}。
+     */
+    @Shadow
+    private boolean viewingLiveSession() {
         throw new AssertionError();
     }
 
@@ -853,4 +887,118 @@ public abstract class ConfluxMapScreenMixin {
 
     @Unique
     private static int slimefunhelper$lastLoggedSignature = -1;
+
+    /**
+     * 全屏地图上的两层覆盖：<b>客户端已加载区块的边界线</b>与<b>当前旅行目标的临时标记</b>。
+     *
+     * <h2>为什么注入在 {@code drawLocationMenu} 的 HEAD</h2>
+     * 时序（{@code ConfluxScreen.extractRenderState} 的字节码，0.1.7 / 0.1.9 相同）：
+     * <pre>
+     *   renderContents(draw, ...)        // 背景 / 瓦片 / 网格 / 路径点 / 各种标签 …… drawLocationMenu(draw) 是最后一句
+     *   Screen.extractRenderState(...)   // 原版控件：他们的按钮、位置菜单按钮在这里画
+     *   renderAfterWidgets(draw, ...)    // 他们的热键提示
+     * </pre>
+     * 于是 HEAD 上正好是「地图内容已画完、他们的面板与所有控件还没画」：
+     * 我们的线落在地图上，他们的面板 / 按钮一定盖在我们上面 —— 既不糊掉他们，也不被他们的面板压住。
+     *
+     * <p>{@code drawLocationMenu} 每帧都会被调用（并不像名字那样只在菜单打开时调用，见
+     * {@code renderContents} 的最后一行），所以这就是「每帧、地图内容之后」的钩子。
+     * 三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2）都有
+     * {@code private void drawLocationMenu(GuiDraw)}，所以 {@code require = 1} 是安全的。
+     *
+     * <h2>画什么</h2>
+     * <ul>
+     *   <li>区块边界：数据来自 {@link ConfluxMapHelper#loadedChunkEdges()}（模块在 post-game-tick 里刷新），
+     *       每条都是轴对齐的 1px 线，几何 / 裁剪 / 性能护栏全在 {@link ConfluxMapOverlay#renderChunkEdges}；</li>
+     *   <li>旅行目标：{@link ConfluxMapHelper#currentTravelTarget()}，只画这一帧的临时标记，
+     *       <b>不写进 conflux 的路径点存储</b>。</li>
+     * </ul>
+     * 两层都只在 {@link #viewingLiveSession()} 为真（当前存档 + 当前维度）时才画。
+     *
+     * <p>整段 {@code try/catch(Throwable)} + 只 warn 一次：我们出问题最多这两层不显示，
+     * 绝不允许影响到他们的地图界面。
+     */
+    @Inject(method = "drawLocationMenu", at = @At("HEAD"), require = 1)
+    private void slimefunhelper$drawMapOverlay(GuiDraw draw, CallbackInfo ci) {
+        try {
+            ConfluxMapHelper module = ConfluxMapHelper.INSTANCE;
+            if (module == null || draw == null) {
+                return;
+            }
+            boolean chunkEdges = module.loadedChunkRender.get();
+            boolean travelGoal = module.travelGoalSync.get();
+            if (!chunkEdges && !travelGoal) {
+                slimefunhelper$logOverlayState(0, "off (loaded-chunk-render=false, travel-goal-sync=false)");
+                return;
+            }
+            if (!this.viewingLiveSession()) {
+                slimefunhelper$logOverlayState(1, "skipped: the map is browsing another world or dimension");
+                return;
+            }
+            Minecraft mc = Minecraft.getInstance();
+            if (mc == null || mc.level == null || mc.font == null) {
+                return;
+            }
+            ConfluxMapOverlay.Viewport view = ConfluxMapOverlay.viewport(
+                    this.centerX,
+                    this.centerZ,
+                    this.scale,
+                    mc.getWindow().getGuiScaledWidth(),
+                    mc.getWindow().getGuiScaledHeight(),
+                    mc.font.lineHeight);
+            if (view == null) {
+                slimefunhelper$logOverlayState(2, "skipped: the viewport geometry is unusable");
+                return;
+            }
+            int drawnEdges = 0;
+            if (chunkEdges) {
+                drawnEdges = ConfluxMapOverlay.renderChunkEdges(
+                        view,
+                        module.loadedChunkEdges(),
+                        module.loadedChunkColor.get().withAlpha(255),
+                        draw::fill);
+            }
+            boolean drawnMarker = false;
+            if (travelGoal) {
+                Vec3 target = module.currentTravelTarget();
+                if (target != null) {
+                    drawnMarker = ConfluxMapOverlay.renderTravelMarker(
+                            view,
+                            target.x,
+                            target.z,
+                            ConfluxMapOverlay.TRAVEL_MARKER_COLOR,
+                            ConfluxMapOverlay.TRAVEL_MARKER_LABEL,
+                            ConfluxMapOverlay.TRAVEL_MARKER_COLOR,
+                            draw::fill,
+                            (text, x, y, color) -> draw.drawTextWithShadow(mc.font, text, x, y, color));
+                }
+            }
+            int state = 4 | (drawnEdges > 0 ? 1 : 0) | (drawnMarker ? 2 : 0);
+            slimefunhelper$logOverlayState(
+                    state,
+                    "drawn: chunkSegments=" + module.loadedChunkEdges().segmentCount() + " chunkLines=" + drawnEdges
+                            + " chunkPixelsPerChunk=" + view.chunkPixels() + " travelMarker=" + drawnMarker);
+        } catch (Throwable e) {
+            slimefunhelper$warnOnce("draw the conflux map overlay", e);
+        }
+    }
+
+    /** 覆盖层日志的去重签名（沿用 {@link #slimefunhelper$lastLoggedSignature} 的写法；-1 = 还没打过） */
+    @Unique
+    private static int slimefunhelper$lastOverlayLogState = -1;
+
+    /**
+     * 覆盖层的状态日志：<b>只在状态真的变了</b>的时候打一行，实机验收按这一行判断两层各自的死活。
+     *
+     * <p>状态位（{@code 0/1/2} 是「没画」的三种原因，{@code 4|1} 是区块线、{@code 4|2} 是旅行标记、
+     * {@code 4|3} 是两层都画了）。数值本身不进日志，日志里给的是可读的那串明细。
+     */
+    @Unique
+    private static void slimefunhelper$logOverlayState(int state, String message) {
+        if (state == slimefunhelper$lastOverlayLogState) {
+            return;
+        }
+        slimefunhelper$lastOverlayLogState = state;
+        Debug.getLogger().info("[ConfluxMapHelper] map overlay: {}", message);
+    }
 }
