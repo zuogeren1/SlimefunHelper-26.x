@@ -192,8 +192,11 @@ public class TpInteract extends BaseModule {
             return;
         }
         BlockPos targetPos = target.getBlockPos();
-        double distance = InteractExtra.INSTANCE.getBlockReachDistance() + ENABLE_NO_TP_DISTANCE;
-        if (new AABB(targetPos).distanceToSqr(mc.player.getEyePosition()) <= MathUtils.s2(distance)) {
+        // ⚠ 判定「原地能不能完成」必须用**服务端**的口径：服务端那次桶射线只有 blockInteractionRange()（默认 4.5），
+        // 客户端的 reach 加成它不认。之前用客户端 reach 判定 → 4~10 格的目标被判成「够得着」，直接原地发不管用。
+        double serverSafeReach = Math.min(InteractExtra.INSTANCE.getBlockReachDistance(), SERVER_SAFE_DISTANCE);
+        double distanceSqr = new AABB(targetPos).distanceToSqr(mc.player.getEyePosition());
+        if (distanceSqr <= MathUtils.s2(serverSafeReach)) {
             // 够得着**也不等于原版能用**：freecam 下玩家朝向被冻结，服务端会沿那个冻结朝向重算 → 打偏。
             // 所以这里只把「朝向」换成瞄向目标（不传送），包仍由我们自己发。
             if (mc.getCameraEntity() == mc.player) {
@@ -208,6 +211,7 @@ public class TpInteract extends BaseModule {
             return;
         }
         boolean[] sent = {false};
+        debugBucket("target=%s dist=%.2f > server-safe %.1f -> teleport", targetPos.toShortString(), Math.sqrt(distanceSqr), serverSafeReach);
         boolean tp = tpCloseToBlock(targetPos, (sel) -> executeTp(sel, () -> {
             sent[0] = fireBucketUse(packet.getHand(), target);
         }));
