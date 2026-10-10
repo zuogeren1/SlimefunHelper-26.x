@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 import me.matl114.accessors.access.ClientPlayerAccess;
-import me.matl114.accessors.access.PlayerInteractItemC2SPacketAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -34,6 +33,8 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.level.block.LiquidBlockContainer;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
@@ -76,6 +77,15 @@ public class TpInteract extends BaseModule {
 
     /** 服务端 {@code BucketItem.use} 的重算射线长度（属性默认 4.5）—— 超过这个距离基本必 MISS，只用于报警。 */
     private static final double SERVER_SAFE_DISTANCE = 4.0D;
+
+    /**
+     * 本次点击的 useItem 已经由 {@link #onInteractBlock} 在**同一次传送**里补发过了（记录 tick）。
+     *
+     * <p>桶的一次右键会发 useItemOn + useItem 两条包，各自触发一次传送 —— 两次传送会互相打架
+     * （服务端把第二趟当异常移动回弹掉），所以远距离时把两条包合并进同一次传送。按 tick 判定，
+     * 天然自清理（原版这两条包一定在同一 tick 内发完）。
+     */
+    private long bucketMergedTick = Long.MIN_VALUE;
 
     @Override
     public void registerAll() {
@@ -124,6 +134,24 @@ public class TpInteract extends BaseModule {
                         return;
                     }
                 }
+                InteractionHand mergeHand = mergeableBucketHand(packetToSend.getHand(), blockPos);
+                if (mergeHand != null) {
+                    // 桶类：useItemOn 之后原版还会跟一条 useItem（BucketItem 的 useOn 永远 PASS），
+                    // 那条包同样要传送 + 正确朝向 —— 合并进这一次传送，避免两次传送互相打架。
+                    BlockHitResult bucketTarget =
+                            BucketInteract.povTarget(mc.player.getItemInHand(mergeHand), BUCKET_TARGET_RANGE);
+                    if (bucketTarget != null
+                            && tpCloseToBlock(blockPos, (sel) -> executeTp(sel, () -> {
+                                Listener.sendPacketNoEvents(packetToSend);
+                                if (fireBucketUse(mergeHand, bucketTarget)) {
+                                    bucketMergedTick = Tasks.getTick();
+                                    debugBucket("merged: useItemOn + useItem both sent from %s", sel.toString());
+                                }
+                            }))) {
+                        event.cancel();
+                        return;
+                    }
+                }
                 if (tpToBlock(blockPos, (sel) -> executeTp(sel, packetToSend))) {
                     event.cancel();
                 }
@@ -147,6 +175,13 @@ public class TpInteract extends BaseModule {
         if (event.isCancelled() || !enable.get()) return;
         // 指令路径（!!useitem）的目标是指令给的坐标、不是准星，别按准星传送
         if (InteractManager.commandUsingItem) return;
+        // 这一次点击的 useItem 已经由 onInteractBlock 在**同一次传送**里补发过了（合并传送，避免服务端位置回弹）
+        if (bucketMergedTick == Tasks.getTick()) {
+            bucketMergedTick = Long.MIN_VALUE;
+            debugBucket("merged into the useItemOn teleport -> drop vanilla packet");
+            event.cancel();
+            return;
+        }
         ServerboundUseItemPacket packet = event.context;
         ItemStack stack = mc.player.getItemInHand(packet.getHand());
         if (!BucketInteract.shouldHandle(stack)) return;
@@ -159,17 +194,42 @@ public class TpInteract extends BaseModule {
         BlockPos targetPos = target.getBlockPos();
         double distance = InteractExtra.INSTANCE.getBlockReachDistance() + ENABLE_NO_TP_DISTANCE;
         if (new AABB(targetPos).distanceToSqr(mc.player.getEyePosition()) <= MathUtils.s2(distance)) {
-            debugBucket("target %s within reach -> vanilla", targetPos.toShortString());
-            return; // 够得着：交给原版
+            // 够得着**也不等于原版能用**：freecam 下玩家朝向被冻结，服务端会沿那个冻结朝向重算 → 打偏。
+            // 所以这里只把「朝向」换成瞄向目标（不传送），包仍由我们自己发。
+            if (mc.getCameraEntity() == mc.player) {
+                debugBucket("target %s within reach, camera == player -> vanilla", targetPos.toShortString());
+                return;
+            }
+            boolean fired = fireBucketUse(packet.getHand(), target);
+            debugBucket("target %s within reach, freecam -> fix aim in place: fired=%s", targetPos.toShortString(), fired);
+            if (fired) {
+                event.cancel();
+            }
+            return;
         }
         boolean[] sent = {false};
         boolean tp = tpCloseToBlock(targetPos, (sel) -> executeTp(sel, () -> {
-            sent[0] = sendBucketUseItem(packet, stack, target);
+            sent[0] = fireBucketUse(packet.getHand(), target);
         }));
         debugBucket("target=%s tp=%s sent=%s", targetPos.toShortString(), tp, sent[0]);
         if (tp && sent[0]) {
             event.cancel();
         }
+    }
+
+    /**
+     * 这条 useItemOn 后面是否还会跟一条同手的 useItem（= 值得合并）：只有**纯建筑方块**上的桶点击才算。
+     * 会被方块自己吃掉的交互（箱子/熔炉/门/炼药锅…）之后原版不会发 useItem，合并会多发一条包。
+     */
+    private InteractionHand mergeableBucketHand(InteractionHand hand, BlockPos pos) {
+        if (!BucketInteract.isFluidBucket(mc.player.getItemInHand(hand))) {
+            return null;
+        }
+        BlockState state = mc.level.getBlockState(pos);
+        boolean plainBlock = state.isCollisionShapeFullBlock(mc.level, pos)
+                && state.getMenuProvider(mc.level, pos) == null
+                && !(state.getBlock() instanceof LiquidBlockContainer);
+        return plainBlock ? hand : null;
     }
 
     /** 桶类专用传送：优先挑一个「贴脸」的落点。
@@ -204,22 +264,25 @@ public class TpInteract extends BaseModule {
         }
     }
 
-    /** 在传送后的位置改包并发出桶类 useItem；成功返回 true。 */
-    private boolean sendBucketUseItem(ServerboundUseItemPacket packet, ItemStack stack, BlockHitResult clicked) {
+    /**
+     * 解出朝向并**自己发**一条 {@code ServerboundUseItemPacket}；成功返回 true。
+     *
+     * <p>为什么不走 {@code mc.gameMode.useItem}：我们此刻正待在原版 {@code startPrediction} 的预测窗口里
+     * （这条包就是那个窗口发的），再嵌一层 {@code startPrediction} 会破坏预测簿记。自己发包 + 由调用方吃掉原包更干净。
+     */
+    private boolean fireBucketUse(InteractionHand hand, BlockHitResult target) {
+        ItemStack stack = mc.player.getItemInHand(hand);
         BlockHitResult solved = BucketInteract.resolveForClick(
-                mc.player, stack, clicked, InteractExtra.INSTANCE.getBlockReachDistance());
+                mc.player, stack, target, InteractExtra.INSTANCE.getBlockReachDistance());
         if (solved == null) return false;
         Vec2 look = BucketInteract.lookAt(mc.player, solved.getLocation());
         if (look == null) return false;
-        // 服务端那次重算射线的长度是 player.blockInteractionRange()（属性默认 4.5）—— 超过了就是白发
         double distance = solved.getLocation().distanceTo(mc.player.getEyePosition());
         if (distance > SERVER_SAFE_DISTANCE) {
             debugBucket("solved hit %.2f blocks away (> %.1f): server will likely MISS", distance, SERVER_SAFE_DISTANCE);
         }
-        PlayerInteractItemC2SPacketAccess access = PlayerInteractItemC2SPacketAccess.of(packet);
-        access.setYaw(look.y);
-        access.setPitch(look.x);
-        Listener.sendPacketNoEvents(packet);
+        Listener.sendPacketNoEvents(
+                new ServerboundUseItemPacket(hand, NetworkUtils.generateNextSequence(), look.y, look.x));
         return true;
     }
 
