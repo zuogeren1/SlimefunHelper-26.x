@@ -3817,6 +3817,7 @@
 	"conflux-map-extra.conflux-map-helper.loaded-chunk-render": "Conflux地图助手: 渲染已加载区块",
 	"conflux-map-extra.conflux-map-helper.loaded-chunk-render-color": "Conflux地图助手: 已加载区块颜色",
 	"conflux-map-extra.conflux-map-helper.travel-goal-sync": "Conflux地图助手: 同步旅行目标",
+	"conflux-map-extra.conflux-map-helper.minimap-blocks-per-pixel": "Conflux地图助手: 小地图缩放(每像素格数, 0=跟随conflux, 0.1~8)",
 	"xaero-map-extra.xaero-scanner.enable": "Xaero地狱路径探索",
 	"xaero-map-extra.xaero-scanner.hotkey": "Xaero地狱路径探索: 快捷键",
 	"xaero-map-extra.xaero-scanner.chunk-range": "Xaero地狱路径探索: 使用区块数据范围",

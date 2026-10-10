@@ -3,9 +3,11 @@ package me.matl114.hooks.mixin.confluxmap;
 import cn.net.rms.confluxmap.bridge.PlayerView;
 import cn.net.rms.confluxmap.mc.ui.GuiDraw;
 import cn.net.rms.confluxmap.mc.ui.hud.MinimapHudRenderer;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import java.lang.reflect.Field;
 import me.matl114.hacks.modules.survival.ConfluxMapHelper;
 import me.matl114.hooks.impl.confluxmap.ConfluxMapOverlay;
+import me.matl114.hooks.impl.confluxmap.ConfluxMinimapZoom;
 import me.matl114.utils.Debug;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -41,6 +43,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p>参数里已经带全了我们需要的几何（见 {@link ConfluxMapOverlay#minimapViewport}）：
  * {@code centerX / centerY} 是内容区中心的屏幕坐标，{@code size} 是内容区边长，
  * {@code mapAngle} 是旋转角（正北朝上时为 0），{@code player} 是视口中心的世界坐标。
+ *
+ * <h2>小地图缩放自定义（{@code conflux-map-extra.conflux-map-helper.minimap-blocks-per-pixel}）</h2>
+ * conflux 的小地图缩放只有 4 个离散档位（{@code BLOCKS_PER_PIXEL = {0.5F, 1.0F, 2.0F, 4.0F}}，由
+ * {@code ConfluxConfig#minimapZoomIndex} 选），而用户要的是 0.1 ~ 8 的任意值。那一层只能改到
+ * <b>他们自己的绘制</b>上：三份 jar 里 {@code BLOCKS_PER_PIXEL[config.minimapZoomIndex]} 共有 8 / 10 / 10 处读取，
+ * 且每一处都是当场重新读表（没有缓存字段），所以本 mixin 在 {@code getstatic} 上做
+ * {@code @ModifyExpressionValue}，把他们那张<b>表</b>换成“每一档都是我们的值”的副本 —— 一个注入点，
+ * 他们的瓦片 / 高亮 / 标记与我们自己那两层全部一起缩放（细节见下面那个注入的注释）。
+ *
+ * <p>我们自己的覆盖层（{@link #slimefunhelper$drawMinimapOverlay}）必须用<b>同一个生效值</b>：
+ * 它现在走 {@link ConfluxMinimapZoom#resolve}，与上面那个注入查询的是同一处配置；配置为 0（默认，
+ * 跟随 conflux）时两者都原样返回他们的值，行为逐字节不变。
  *
  * <h2>为什么全部走反射、@Inject 用 require = 0</h2>
  * 三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2）javap 实测都有
@@ -135,6 +149,10 @@ public abstract class ConfluxMinimapHudMixin {
      *
      * <p>数组是从他们的类里读出来的（而不是我们写死 {0.5, 1, 2, 4}）：他们的表变了我们自动跟上，
      * 越界 / 读不到就返回 0（= 不画），绝不会用错的缩放出错位的线。
+     *
+     * <p>这里给的是 <b>conflux 自己的</b>值；调用方必须再过一道 {@link ConfluxMinimapZoom#resolve}
+     * （覆盖生效时换成我们的值，不覆盖时原样透传），否则覆盖一开，我们的区块边界 / 旅行标记
+     * 就会与他们缩放后的瓦片错位。
      */
     @Unique
     private float slimefunhelper$blocksPerPixel() {
@@ -172,6 +190,89 @@ public abstract class ConfluxMinimapHudMixin {
     }
 
     /**
+     * conflux 每一帧读的缩放表（{@code BLOCKS_PER_PIXEL}）→ 换成我们的表，见 {@link ConfluxMinimapZoom}。
+     *
+     * <h2>为什么换“表”而不是逐处改“值”</h2>
+     * 反编译源码 + javap 实测（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar）：
+     * {@code BLOCKS_PER_PIXEL} 的读取点分别是 <b>8 / 10 / 10 处</b>，形状全都一模一样 ——
+     * <pre>
+     *   getstatic BLOCKS_PER_PIXEL:[F
+     *   aload_0; getfield config; getfield ConfluxConfig.minimapZoomIndex:I
+     *   faload                        // == BLOCKS_PER_PIXEL[config.minimapZoomIndex]
+     * </pre>
+     * 分布在 {@code render / localPlayerMarker / drawPlayerTrail / annotationProjection /
+     * drawWaypointMarkers / drawPortalChunkHighlights / drawPortalMarkers / drawCustomMarkers /
+     * drawTiles / drawRadar} 里（{@code drawPortalChunkHighlights} 与 {@code drawPortalMarkers}
+     * 只有 0.1.9 有）。<b>没有任何一处是“算一次存进字段”</b>：他们每一个画法都自己重新读一遍，
+     * 所以只改某几处就会出现“瓦片缩了、标记没缩”的错位。
+     *
+     * <p>于是这里改的是<b>表本身</b>：{@code @ModifyExpressionValue} 把 {@code getstatic} 的<b>结果</b>
+     * 换成 {@link ConfluxMinimapZoom#substitute} 给的副本（每一档都是我们那个值），他们接下来那次
+     * {@code faload} 就落在我们的数组上 —— 一个注入点覆盖全部读取点，对调用方完全透明，
+     * 连他们将来新增的画法也自动跟上。他们的瓦片、传送门区块高亮、玩家轨迹、方位字母、路径点、
+     * 自定义标记、雷达点、玩家箭头因此<b>一起</b>缩放。
+     *
+     * <p>配置为 0（不覆盖，默认）时 {@link ConfluxMinimapZoom#substitute} <b>直接返回他们那张表的原引用</b>，
+     * 连一次拷贝都不做 —— 他们的行为逐字节不变。
+     *
+     * <h2>为什么带描述符、require = 0、remap = false</h2>
+     * 十个选择器是三份 jar 上 {@code javap -s} 实测<b>逐字一致</b>的描述符（0.1.7 少两个方法，
+     * 那两个在 require = 0 下只是“找不到、跳过”）。带描述符是为了避免将来他们加重载时
+     * “名字唯一”这个前提失效（那种情况 mixin 会在 apply 阶段硬失败 = 崩游戏），
+     * 而描述符不匹配的后果仅仅是这一处不生效 —— 日志里有 {@link ConfluxMinimapZoom} 的状态行可对照。
+     * {@code remap = false}：目标在 conflux 自己的 jar 里，不经过任何 MC 映射。
+     */
+    @ModifyExpressionValue(
+            method = {
+                "render(Lnet/minecraft/client/gui/GuiGraphicsExtractor;Lnet/minecraft/client/DeltaTracker;)V",
+                "localPlayerMarker(Lcn/net/rms/confluxmap/bridge/PlayerView;FFIZF)Ljava/util/Optional;",
+                "drawPlayerTrail(Lcom/mojang/blaze3d/vertex/PoseStack;Lcn/net/rms/confluxmap/bridge/PlayerView;FFIF)V",
+                "annotationProjection(Lcn/net/rms/confluxmap/bridge/PlayerView;FFIF)Lcn/net/rms/confluxmap/core/annotation/AnnotationProjection;",
+                "drawWaypointMarkers(Lcn/net/rms/confluxmap/mc/ui/GuiDraw;FFIFLcn/net/rms/confluxmap/bridge/PlayerView;)V",
+                "drawPortalChunkHighlights(Lcom/mojang/blaze3d/vertex/PoseStack;Lcn/net/rms/confluxmap/bridge/PlayerView;I)V",
+                "drawPortalMarkers(Lcn/net/rms/confluxmap/mc/ui/GuiDraw;FFIFLcn/net/rms/confluxmap/bridge/PlayerView;)V",
+                "drawCustomMarkers(Lcn/net/rms/confluxmap/mc/ui/GuiDraw;FFIFLcn/net/rms/confluxmap/bridge/PlayerView;)V",
+                "drawTiles(Lcom/mojang/blaze3d/vertex/PoseStack;IZFLcn/net/rms/confluxmap/bridge/PlayerView;)V",
+                "drawRadar(Lcn/net/rms/confluxmap/mc/ui/GuiDraw;FFIFLcn/net/rms/confluxmap/bridge/PlayerView;F)V"
+            },
+            at = @At(
+                    value = "FIELD",
+                    target = "Lcn/net/rms/confluxmap/mc/ui/hud/MinimapHudRenderer;BLOCKS_PER_PIXEL:[F"),
+            require = 0,
+            remap = false)
+    private float[] slimefunhelper$overrideBlocksPerPixel(float[] original) {
+        try {
+            slimefunhelper$probeOnce();
+            return ConfluxMinimapZoom.substitute(original, slimefunhelper$confluxBlocksPerPixel(original));
+        } catch (Throwable e) {
+            slimefunhelper$warnOnce("override the conflux minimap zoom", e);
+            return original;
+        }
+    }
+
+    /**
+     * conflux 这一帧会读到的那一格（{@code BLOCKS_PER_PIXEL[config.minimapZoomIndex]}）。
+     *
+     * <p><b>只用来打日志</b>：{@link ConfluxMinimapZoom#substitute} 把整张表填成我们的值，
+     * 压根不需要知道档位。拿不到就返回 {@code NaN}（日志那头会跳过这一行），
+     * 绝不允许为了记一行日志影响他们的渲染。
+     */
+    @Unique
+    private float slimefunhelper$confluxBlocksPerPixel(float[] table) {
+        try {
+            Field zoom = slimefunhelper$zoomIndexField;
+            Object config = slimefunhelper$minimapConfig();
+            if (table == null || zoom == null || config == null) {
+                return Float.NaN;
+            }
+            int index = zoom.getInt(config);
+            return index >= 0 && index < table.length ? table[index] : Float.NaN;
+        } catch (Throwable e) {
+            return Float.NaN;
+        }
+    }
+
+    /**
      * 小地图上的两层覆盖：<b>客户端已加载区块的边界线</b>与<b>当前旅行目标的临时标记</b>。
      *
      * <p>画什么与全屏完全一致（同一份 {@code LoadedChunkEdgeCache}、同一个颜色配置、
@@ -204,7 +305,7 @@ public abstract class ConfluxMinimapHudMixin {
                 return;
             }
             slimefunhelper$probeOnce();
-            float blocksPerPixel = slimefunhelper$blocksPerPixel();
+            float blocksPerPixel = ConfluxMinimapZoom.resolve(slimefunhelper$blocksPerPixel());
             if (!(blocksPerPixel > 0.0F)) {
                 slimefunhelper$logMinimapState(
                         1, "skipped: cannot resolve BLOCKS_PER_PIXEL[config.minimapZoomIndex]");

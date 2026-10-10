@@ -17,6 +17,7 @@ import me.matl114.hooks.ConfluxMapHooks;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuContext;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuTarget;
 import me.matl114.managers.Configs;
+import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.ChatUtils;
@@ -90,6 +91,28 @@ public class ConfluxMapHelper extends BaseModule {
     /** 把当前旅行目标画成地图上的临时标记（不写进 conflux 的路径点存储） */
     public final FlagRef travelGoalSync =
             flagBuilder(root.add("travel-goal-sync")).build();
+
+    /**
+     * conflux <b>HUD 小地图</b>的缩放：<b>每像素多少格</b>（与他们的 {@code BLOCKS_PER_PIXEL} 同一量纲）。
+     *
+     * <p>conflux 自己只给 4 个离散档位（{@code 0.5 / 1 / 2 / 4}，由 {@code ConfluxConfig.minimapZoomIndex} 选），
+     * 这里允许 <b>0.1 ~ 8</b> 的任意值：<b>越大越“缩得远”</b>（0.1 = 放到最大，8 = 缩到最远）。
+     *
+     * <ul>
+     *   <li><b>0（默认）= 不覆盖</b>，完全跟随 conflux 自己的档位 —— 老行为逐字节不变；</li>
+     *   <li>{@code > 0} = 覆盖，超出 0.1 ~ 8 的部分<b>夹紧</b>（12 当 8、0.05 当 0.1），不报错。</li>
+     * </ul>
+     *
+     * <p>生效范围是<b>他们小地图自己的绘制</b>（瓦片 / 传送门区块高亮 / 玩家轨迹 / 方位字母 / 路径点 /
+     * 自定义标记 / 雷达点 / 玩家箭头）<b>加上</b>我们画在同一张小地图上的两层覆盖（见 {@code ConfluxMinimapHudMixin}）——
+     * 两边共用 {@code ConfluxMinimapZoom} 这一个出口，保证不会出现“瓦片缩了、我们的区块边界没缩”的错位。
+     * 全屏地图<b>不受影响</b>（它有自己的 {@code scale}）。
+     *
+     * <p>取值与夹紧都写在 {@code me.matl114.hooks.impl.confluxmap.ConfluxMinimapZoom} 里。
+     */
+    public final DoubleRef minimapBlocksPerPixel = builder(root.add("minimap-blocks-per-pixel"), Double.class)
+            .defaultValue(0.0)
+            .build();
 
     /** 已加载区块的边界边缓存：数据在这里按 tick 刷新，绘制在 ConfluxMapScreenMixin 里读 */
     private final LoadedChunkEdgeCache loadedChunkEdges = new LoadedChunkEdgeCache();
