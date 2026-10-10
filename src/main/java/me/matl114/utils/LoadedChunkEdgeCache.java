@@ -1,5 +1,6 @@
 package me.matl114.utils;
 
+import java.util.Arrays;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.world.level.ChunkPos;
@@ -24,6 +25,12 @@ import net.minecraft.world.level.chunk.ChunkAccess;
  * </pre>
  * 全部是轴对齐线段，长度恒为 16 格；坐标是<b>方块坐标</b>（不是区块坐标）。
  *
+ * <p>解包之后还会再做一步<b>共线合并</b>：同一条世界直线（{@code x = 常数} 或 {@code z = 常数}）上
+ * 首尾相接的边合成一条长线段。一个方形加载区（17x17 区块）的 68 条边界边合并后只剩 4 条 ——
+ * 画的时候不再「每 16 格一段」，旋转模式下的观感与每帧的 fill 次数都靠这一步
+ * （光栅化那边见 {@code me.matl114.hooks.impl.confluxmap.ConfluxMapOverlay}）。
+ * 合并前后的<b>世界覆盖逐区间完全一致</b>：只是把同一时刻相邻的区间接成了一条。
+ *
  * <p>本类自成一体：不依赖 XaeroHelper、不依赖 conflux-map，只吃 {@link ChunkAccess} 的迭代器
  * （{@link CommonUtils#chunks(boolean)} 的返回类型），吐出一组线段。
  * 更新只在区块集合真的变化时重建（内部用打包后的 {@code long} 集合比较，不产生 {@link ChunkPos} 垃圾）。
@@ -36,6 +43,9 @@ public final class LoadedChunkEdgeCache {
     private static final int[] NEIGHBOUR_DZ = {1, 0, -1, 0};
     /** 重建时边集合的预估容量系数（每条边最多出现两次） */
     private static final int EDGE_CAPACITY_FACTOR = 2;
+
+    /** 一条边界边的长度：恒为 16 格（一个区块的边长），合并时靠它累加 */
+    private static final int SEGMENT_LENGTH = 16;
 
     /** 上一次的区块集合（打包成 MathUtils.packInt(x, z) 的 long），只用来判等 */
     private LongSet lastChunks = new LongOpenHashSet();
@@ -126,14 +136,102 @@ public final class LoadedChunkEdgeCache {
                 }
             }
         }
-        int[] result = new int[edges.size() * STRIDE];
+        int edgeCount = edges.size();
+        int[] unpacked = new int[edgeCount * STRIDE];
         int index = 0;
         for (long edge : edges) {
-            index = unpackEdge(edge, result, index);
+            index = unpackEdge(edge, unpacked, index);
         }
-        this.segments = result;
-        this.segmentCount = result.length / STRIDE;
+        // 分成两族：z 恒定的（x 走 16 格）与 x 恒定的（z 走 16 格）。
+        // 每族按「直线坐标 + 区间起点」打包后排序，排完同一条直线上的边就挨在一起了。
+        long[] alongX = new long[edgeCount];
+        long[] alongZ = new long[edgeCount];
+        int alongXCount = 0;
+        int alongZCount = 0;
+        for (int i = 0; i < edgeCount; ++i) {
+            int x1 = unpacked[i * STRIDE];
+            int z1 = unpacked[i * STRIDE + 1];
+            int x2 = unpacked[i * STRIDE + 2];
+            int z2 = unpacked[i * STRIDE + 3];
+            if (z1 == z2) {
+                alongX[alongXCount++] = packRun(z1, Math.min(x1, x2));
+            } else {
+                alongZ[alongZCount++] = packRun(x1, Math.min(z1, z2));
+            }
+        }
+        Arrays.sort(alongX, 0, alongXCount);
+        Arrays.sort(alongZ, 0, alongZCount);
+        // 合并只会让线段变少，先按原始条数开数组，最后按实际长度截断
+        int[] result = new int[(alongXCount + alongZCount) * STRIDE];
+        index = appendMergedRuns(alongX, alongXCount, true, result, 0);
+        index = appendMergedRuns(alongZ, alongZCount, false, result, index);
+        this.segments = Arrays.copyOf(result, index);
+        this.segmentCount = index / STRIDE;
         ++this.version;
+    }
+
+    /**
+     * 把「直线坐标 + 区间起点」打包成一个 long，便于 {@link Arrays#sort(long[], int, int)} 之后顺序合并。
+     *
+     * <p>高 32 位是直线坐标（{@code x = 常数} 或 {@code z = 常数}），低 32 位是区间起点。
+     * 起点先 XOR 掉符号位（{@code 0x8000_0000}）：这样按 long 的<b>有符号</b>顺序排序就等价于
+     * 「先按直线坐标、再按起点」升序（起点可能是负数，直接塞进低位会排到后面去）。
+     */
+    private static long packRun(int line, int start) {
+        return ((long) line << 32) | ((start ^ 0x80000000L) & 0xFFFFFFFFL);
+    }
+
+    /** {@link #packRun} 的高 32 位：直线坐标 */
+    private static int runLine(long packed) {
+        return (int) (packed >> 32);
+    }
+
+    /** {@link #packRun} 的低 32 位：区间起点 */
+    private static int runStart(long packed) {
+        return (int) packed ^ 0x80000000;
+    }
+
+    /**
+     * 把一族排好序的边合并成尽量长的线段，按 {@code x1, z1, x2, z2} 写进 out。
+     *
+     * <p>同一条直线上「下一段的起点 {@code <=} 当前累计终点」就接着并。XOR 出来的边本来就
+     * 互不重叠，所以实际只会在首尾相接（{@code nextStart == end}）时命中；用 {@code <=} 顺带把
+     * 万一出现的重叠也吃掉，保证合并结果的世界覆盖与合并前逐区间一致。
+     *
+     * @param alongX true 表示这一族是 z 恒定、x 走 16 格的边（{@code line} 是 z）；
+     *               false 表示 x 恒定、z 走 16 格（{@code line} 是 x）
+     * @return 下一个可写的下标（{@code index + 合并后的线段数 * STRIDE}）
+     */
+    private static int appendMergedRuns(long[] runs, int count, boolean alongX, int[] out, int index) {
+        int i = 0;
+        while (i < count) {
+            int line = runLine(runs[i]);
+            int start = runStart(runs[i]);
+            int end = start + SEGMENT_LENGTH;
+            ++i;
+            while (i < count && runLine(runs[i]) == line) {
+                int nextStart = runStart(runs[i]);
+                if (nextStart > end) {
+                    // 同一条直线上但中间断开（两段互不相接的边界）：另起一段
+                    break;
+                }
+                end = Math.max(end, nextStart + SEGMENT_LENGTH);
+                ++i;
+            }
+            if (alongX) {
+                out[index] = start;
+                out[index + 1] = line;
+                out[index + 2] = end;
+                out[index + 3] = line;
+            } else {
+                out[index] = line;
+                out[index + 1] = start;
+                out[index + 2] = line;
+                out[index + 3] = end;
+            }
+            index += STRIDE;
+        }
+        return index;
     }
 
     /** 与 XaeroHelper#packEdge 同式：把「区块坐标 + 一个方向」打包成一个 long */

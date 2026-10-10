@@ -1,5 +1,6 @@
 package me.matl114.hooks.impl.confluxmap;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import me.matl114.utils.LoadedChunkEdgeCache;
 
 /**
@@ -50,6 +51,19 @@ import me.matl114.utils.LoadedChunkEdgeCache;
  * 而 {@code drawRadar(draw, centerX, centerY, size, mapAngle, player, tickDelta)} 的参数
  * 恰好把 centerX / centerY / size / mapAngle / player 一次给全 —— 不需要再去读 {@code MinimapPlacement}
  * 或 {@code contentInset}（内容矩形可以从 centerX / centerY / size 无损反推）。
+ *
+ * <h2>已加载区块边界线是怎么画的（三步）</h2>
+ * <ol>
+ *   <li><b>数据</b>：{@link LoadedChunkEdgeCache} 先用异或抵消内部边、只留边界边，
+ *       再把<b>同一条世界直线上首尾相接</b>的边合并成长线段（正北朝上与旋转模式都受益：
+ *       旋转时不再“每 16 格一段”）；</li>
+ *   <li><b>光栅化</b>：{@link #renderChunkEdges} 把合并后的线段投影到屏幕 —— 投影后完全竖直 / 水平的
+ *       用一次 fill 画完整条线，其余走「按列（行）只落一个像素」的阶梯线，端点落在
+ *       {@code floor(投影)} 上与相邻线段共享同一个接点像素；</li>
+ *   <li><b>去重</b>：整条轮廓共用一个「本帧像素集合」，同一个像素只 fill 一次，
+ *       接点处与十字交叉处都不会因为画了两遍而变粗。</li>
+ * </ol>
+ * 目标观感就是 Xaero 小地图上那一圈：均匀 1px、连续、无重影。
  */
 public final class ConfluxMapOverlay {
     /** 画一块矩形，参数与 {@code cn.net.rms.confluxmap.mc.ui.GuiDraw#fill(int,int,int,int,int)} 对齐 */
@@ -86,15 +100,15 @@ public final class ConfluxMapOverlay {
      */
     public static final double MIN_CHUNK_PIXELS = 2.0;
 
-    /** 缓存里线段数的硬上限：超过就整层不画（防御病态数据，正常边界边只有几百条） */
+    /** 缓存里线段数的硬上限：超过就整层不画（防御病态数据；合并共线之后正常只剩几十条） */
     public static final int MAX_CACHED_SEGMENTS = 20000;
 
     /**
      * 一帧最多提交多少次 {@code fill}：超出就停止本帧剩下的线段。
      *
-     * <p>正北朝上时每条边界边只花 1 次 fill，这道闸基本碰不到；但小地图可以旋转
-     * （{@code config.minimapRotate}），旋转后世界轴对齐的线段在屏幕上是斜的，只能逐像素画，
-     * 每条边的 fill 次数变成它的像素长度（16 / scale，最多 32 次）。护栏保证最坏情况只是一帧画得少，
+     * <p>正北朝上时每条<b>合并后的</b>长线只花 1 次 fill（一个方形加载区就 4 条），这道闸基本碰不到；
+     * 但小地图可以旋转（{@code config.minimapRotate}），旋转后世界轴对齐的长线在屏幕上是斜的，
+     * 只能逐像素画，fill 次数就是<b>可见像素数</b>。护栏保证最坏情况只是一帧画得少，
      * 而不是卡住渲染线程。
      */
     public static final int MAX_FILLS_PER_FRAME = 8000;
@@ -115,8 +129,26 @@ public final class ConfluxMapOverlay {
     /** 边长小于这个值的小地图整层不画（几何已经没有意义） */
     public static final int MIN_MINIMAP_SIZE = 8;
 
-    /** 把线段判成“屏幕上的竖线 / 横线”的阈值（px）：屏幕坐标差小于它就按轴对齐处理 */
-    private static final double AXIS_EPSILON = 0.5;
+    /** 本帧像素集合的初始容量（一帧可见的轮廓通常几百到几千像素） */
+    private static final int PAINTED_PIXELS_CAPACITY = 4096;
+
+    /**
+     * 本帧已经画过的像素（打包成 {@code (x << 32) | y}），保证整条轮廓上<b>每个像素只 fill 一次</b>。
+     *
+     * <p>轴对齐的长线一次 fill 画完、逐像素的斜线一个一个填，凡是会被相邻线段重复覆盖的像素
+     * （两条线的接点、以及两条边十字交叉的“捏点”）后画的直接跳过 —— 颜色不透明，跳过与重复涂一次
+     * 的观感完全一致，但少一次 fill、也少一次重复的 alpha 混合。
+     *
+     * <p>{@link ThreadLocal} 包一层：调用点都在渲染线程上（两个 mixin 都注入在绘制路径），
+     * 跨帧复用可以避免每帧重新分配；万一将来有别的线程也来画，各线程各用一份，不会互相清掉。
+     */
+    private static final ThreadLocal<LongOpenHashSet> PAINTED_PIXELS =
+            ThreadLocal.withInitial(() -> new LongOpenHashSet(PAINTED_PIXELS_CAPACITY));
+
+    /** 屏幕像素 -> long（本帧去重用） */
+    private static long packPixel(int x, int y) {
+        return ((long) x << 32) | (y & 0xFFFFFFFFL);
+    }
 
     /**
      * 一帧的投影 + 可画区域。
@@ -290,17 +322,25 @@ public final class ConfluxMapOverlay {
     }
 
     /**
-     * 画已加载区块的边界线（每条都是轴对齐的 16 格线段；正北朝上时进到屏幕上就是 1px 的横线 / 竖线）。
+     * 画已加载区块的边界线。
+     *
+     * <p>输入是 {@link LoadedChunkEdgeCache} 里那组<b>已经合并过共线相邻边</b>的世界轴对齐线段
+     * （每条要么 x 恒定、要么 z 恒定）。投影之后的三种走法：
+     * <ul>
+     *   <li><b>x 逐位相等</b> → 竖线分支，一次 fill 画完整列。正北朝上时恒成立
+     *       （{@link Viewport#screenX} 在 {@code mapAngleDegrees == 0} 时与另一个坐标无关，两次调用逐位相等），
+     *       所以全屏地图与不旋转的小地图<b>与改造前逐像素一致</b>；</li>
+     *   <li><b>y 逐位相等</b> → 横线分支，一次 fill 画完整行；</li>
+     *   <li>其余（小地图旋转之后的斜线）→ {@link #drawSlanted} 逐像素阶梯线。</li>
+     * </ul>
+     * 三个分支共用一个「本帧像素集合」（{@link #PAINTED_PIXELS}），所以同一个像素最多 fill 一次。
      *
      * <p>裁剪规则：竖线按 {@code [top, bottom)} 夹 y、横线按 {@code [left, right)} 夹 x；
      * 完全落在视口外的线段直接跳过，所以“画了多少条 fill”与缓存里有多少条无关。
      * {@code clipRadius > 0}（圆形小地图）时每条线再按圆盘夹一次：
      * 竖线按屏幕 x 求出圆内的 y 区间，横线按屏幕 y 求出圆内的 x 区间 —— 都是解析解，不做逐像素试探。
      *
-     * <p>{@code mapAngleDegrees != 0}（小地图开了旋转）时世界轴对齐的线段在屏幕上是斜的，
-     * 走 Bresenham 阶梯逐像素画；像素数由 {@link #MAX_FILLS_PER_FRAME} 兜底。
-     *
-     * @return 这一帧真的画出去的线段数（0 表示没画，调用方可以据此打日志）
+     * @return 这一帧真的画出去的线段条数（0 表示没画，调用方可以据此打日志）
      */
     public static int renderChunkEdges(
             Viewport view, LoadedChunkEdgeCache cache, int color, RectFiller filler) {
@@ -311,6 +351,8 @@ public final class ConfluxMapOverlay {
         if (count <= 0 || count > MAX_CACHED_SEGMENTS) {
             return 0;
         }
+        LongOpenHashSet painted = PAINTED_PIXELS.get();
+        painted.clear();
         int drawn = 0;
         int budget = MAX_FILLS_PER_FRAME;
         for (int i = 0; i < count; ++i) {
@@ -323,12 +365,12 @@ public final class ConfluxMapOverlay {
             double sx2 = view.screenX(x2, z2);
             double sy2 = view.screenZ(x2, z2);
             int used;
-            if (Math.abs(sx1 - sx2) <= AXIS_EPSILON) {
-                used = drawVertical(view, sx1, sy1, sy2, color, filler, budget);
-            } else if (Math.abs(sy1 - sy2) <= AXIS_EPSILON) {
-                used = drawHorizontal(view, sx1, sx2, sy1, color, filler, budget);
+            if (sx1 == sx2) {
+                used = drawVertical(view, sx1, sy1, sy2, color, filler, painted, budget);
+            } else if (sy1 == sy2) {
+                used = drawHorizontal(view, sx1, sx2, sy1, color, filler, painted, budget);
             } else {
-                used = drawSlanted(view, sx1, sy1, sx2, sy2, color, filler, budget);
+                used = drawSlanted(view, sx1, sy1, sx2, sy2, color, filler, painted, budget);
             }
             if (used < 0) {
                 // 预算耗尽：本帧剩下的线段不再画，下一帧重来（护栏，见 MAX_FILLS_PER_FRAME）
@@ -343,12 +385,13 @@ public final class ConfluxMapOverlay {
     }
 
     /**
-     * 画一条屏幕竖线，做矩形 + 圆盘裁剪。
+     * 画一条屏幕竖线（1px 宽），做矩形 + 圆盘裁剪。
      *
-     * @return 消耗的 fill 次数；0 表示整条在可画区外；-1 表示预算不够（调用方停止本帧）
+     * @return 消耗的 fill 次数；0 表示整条在可画区外（或每个像素本帧都已经画过）；
+     *         -1 表示预算不够（调用方停止本帧）
      */
-    private static int drawVertical(
-            Viewport view, double screenX, double screenY1, double screenY2, int color, RectFiller filler, int budget) {
+    private static int drawVertical(Viewport view, double screenX, double screenY1, double screenY2, int color,
+            RectFiller filler, LongOpenHashSet painted, int budget) {
         int x = (int) Math.floor(screenX);
         if (x < view.left() || x >= view.right()) {
             return 0;
@@ -377,17 +420,16 @@ public final class ConfluxMapOverlay {
         if (budget <= 0) {
             return -1;
         }
-        filler.fill(x, clipTop, x + 1, clipBottom, color);
-        return 1;
+        return fillPixelRun(filler, painted, true, x, clipTop, clipBottom, color);
     }
 
     /**
-     * 画一条屏幕横线，做矩形 + 圆盘裁剪。
+     * 画一条屏幕横线（1px 高），做矩形 + 圆盘裁剪。
      *
      * @return 同 {@link #drawVertical}
      */
-    private static int drawHorizontal(
-            Viewport view, double screenX1, double screenX2, double screenY, int color, RectFiller filler, int budget) {
+    private static int drawHorizontal(Viewport view, double screenX1, double screenX2, double screenY, int color,
+            RectFiller filler, LongOpenHashSet painted, int budget) {
         int y = (int) Math.floor(screenY);
         if (y < view.top() || y >= view.bottom()) {
             return 0;
@@ -414,50 +456,101 @@ public final class ConfluxMapOverlay {
         if (budget <= 0) {
             return -1;
         }
-        filler.fill(clipLeft, y, clipRight, y + 1, color);
-        return 1;
+        return fillPixelRun(filler, painted, false, y, clipLeft, clipRight, color);
     }
 
     /**
-     * 画一条屏幕斜线（只在小地图旋转时出现）：Bresenham 逐像素，每个像素一个 1x1 的 fill。
+     * 画一条屏幕斜线（只在小地图旋转时出现）：按<b>列</b>或按<b>行</b>走一遍，每一列（行）只落一个像素。
      *
-     * <p>线段在屏幕上的长度恒为 {@code 16 / scale} 像素，所以每条边最多 32 次 fill。
+     * <p>这是与改造前差别最大的一处，也正是「旋转之后看起来又粗又乱」的根因：
+     * <ul>
+     *   <li>改造前是<b>每条 16 格的边各画一次</b>：先把两端各自 {@code floor} 成整数点，再用这两个整数点
+     *       算 DDA 的步数。于是每一段的屏幕长度都在真实长度（{@code 16 / scale}）附近抖动 ——
+     *       实测 45°、4 格/区块：真实 4.000px，取整后落在 2.83 ~ 4.24px（平均偏 0.30px），
+     *       而且每一段的阶梯相位都是重新开始的，接点处一格一格地对不齐；</li>
+     *   <li>接点那个像素还会被前后两段<b>各画一次</b>（实测 17x17 区块的加载区一帧 68 次重复 fill），
+     *       观感就是“一段一段、接不齐、有重影”；</li>
+     *   <li>现在把合并后的长线<b>一次性</b>走完（按列或按行只落一个像素），两端吸附到投影端点所在的
+     *       像素，与相邻线段共享同一个接点像素，中间不再有每 16 格一次的相位重置。</li>
+     * </ul>
+     *
+     * <p>线宽恒为 1px：同一列（行）只落一个像素，不会出现两个像素并排的“加粗”。
+     * 两端的像素再<b>吸附到投影端点</b>（{@code floor(端点)}）—— 共用同一个顶点的两条线段于是落在
+     * 同一个像素上，转角处不会出现 2x2 的“加粗块”。
+     * 像素位置反过来用来夹迭代区间，屏外的部分一次循环都不走。
      *
      * @return 同 {@link #drawVertical}
      */
-    private static int drawSlanted(
-            Viewport view, double sx1, double sy1, double sx2, double sy2, int color, RectFiller filler, int budget) {
-        int px1 = (int) Math.floor(sx1);
-        int py1 = (int) Math.floor(sy1);
-        int dx = (int) Math.floor(sx2) - px1;
-        int dy = (int) Math.floor(sy2) - py1;
-        int steps = Math.max(Math.abs(dx), Math.abs(dy));
+    private static int drawSlanted(Viewport view, double sx1, double sy1, double sx2, double sy2, int color,
+            RectFiller filler, LongOpenHashSet painted, int budget) {
+        double dx = sx2 - sx1;
+        double dy = sy2 - sy1;
         int used = 0;
-        int lastX = Integer.MIN_VALUE;
-        int lastY = Integer.MIN_VALUE;
-        for (int k = 0; k <= steps; ++k) {
-            int px = steps == 0 ? px1 : px1 + Math.round((float) dx * k / steps);
-            int py = steps == 0 ? py1 : py1 + Math.round((float) dy * k / steps);
-            if (px == lastX && py == lastY) {
-                continue;
+        if (Math.abs(dx) >= Math.abs(dy)) {
+            // 平缓：一列一个像素（x 覆盖 [x, x + 1)，取列中心 x + 0.5 上的高度）
+            boolean forward = sx1 <= sx2;
+            double xa = forward ? sx1 : sx2;
+            double ya = forward ? sy1 : sy2;
+            double xb = forward ? sx2 : sx1;
+            double yb = forward ? sy2 : sy1;
+            double slope = (yb - ya) / (xb - xa);
+            int xFirst = (int) Math.floor(xa);
+            int xLast = (int) Math.floor(xb);
+            int from = Math.max(xFirst, view.left());
+            int to = Math.min(xLast, view.right() - 1);
+            for (int x = from; x <= to; ++x) {
+                int y = (int) Math.floor(ya + ((x + 0.5) - xa) * slope);
+                if (x == xFirst) {
+                    // 端点像素就是投影端点所在的那个像素：共用这个顶点的相邻线段会落在同一像素上，
+                    // 接点既不会重、也不会因为“按列中心取整”而错开一格
+                    y = (int) Math.floor(ya);
+                } else if (x == xLast) {
+                    y = (int) Math.floor(yb);
+                }
+                int filled = paintPixel(view, x, y, color, filler, painted, budget - used);
+                if (filled < 0) {
+                    return used > 0 ? used : -1;
+                }
+                used += filled;
             }
-            lastX = px;
-            lastY = py;
-            int painted = drawPoint(view, px, py, color, filler, budget - used);
-            if (painted < 0) {
+            return used;
+        }
+        // 陡峭：一行一个像素
+        boolean forward = sy1 <= sy2;
+        double xa = forward ? sx1 : sx2;
+        double ya = forward ? sy1 : sy2;
+        double xb = forward ? sx2 : sx1;
+        double yb = forward ? sy2 : sy1;
+        double slope = (xb - xa) / (yb - ya);
+        int yFirst = (int) Math.floor(ya);
+        int yLast = (int) Math.floor(yb);
+        int from = Math.max(yFirst, view.top());
+        int to = Math.min(yLast, view.bottom() - 1);
+        for (int y = from; y <= to; ++y) {
+            int x = (int) Math.floor(xa + ((y + 0.5) - ya) * slope);
+            if (y == yFirst) {
+                // 同列优先分支：端点吸附到投影端点像素
+                x = (int) Math.floor(xa);
+            } else if (y == yLast) {
+                x = (int) Math.floor(xb);
+            }
+            int filled = paintPixel(view, x, y, color, filler, painted, budget - used);
+            if (filled < 0) {
                 return used > 0 ? used : -1;
             }
-            used += painted;
+            used += filled;
         }
         return used;
     }
 
     /**
-     * 画一个屏幕像素（1x1），做矩形 + 圆盘裁剪。
+     * 画一个屏幕像素（1x1），做矩形 + 圆盘裁剪，并经过本帧像素集合去重。
      *
-     * @return 同 {@link #drawVertical}
+     * @return 消耗的 fill 次数；0 表示这个像素不该画（越界 / 圆盘外 / 本帧已经画过）；
+     *         -1 表示预算不够
      */
-    private static int drawPoint(Viewport view, int x, int y, int color, RectFiller filler, int budget) {
+    private static int paintPixel(Viewport view, int x, int y, int color, RectFiller filler,
+            LongOpenHashSet painted, int budget) {
         if (x < view.left() || x >= view.right() || y < view.top() || y >= view.bottom()) {
             return 0;
         }
@@ -472,10 +565,55 @@ public final class ConfluxMapOverlay {
         if (budget <= 0) {
             return -1;
         }
+        if (!painted.add(packPixel(x, y))) {
+            // 本帧这个像素已经画过（相邻线段的接点、或两条边十字交叉）：跳过，保证整条轮廓不多涂
+            return 0;
+        }
         filler.fill(x, y, x + 1, y + 1, color);
         return 1;
     }
 
+    /**
+     * 把一条 1px 宽的<b>连续</b>像素段登记进本帧集合，并对还没画过的部分各发一次 {@code fill}。
+     *
+     * <p>正常情况整段一次 fill 画完（与改造前一致）；只有当这段跨过一条已经画好的线、中间个别像素
+     * 已经画过时，才把它拆成两三段分别 fill —— 代价是极少数情况下多几次 fill，换来的是
+     * “同一个像素不会被 fill 两次”这个硬保证。
+     *
+     * @param vertical true 表示这段是竖线（{@code fixed} 是 x，像素沿 y 走），false 是横线
+     * @return 这次真的发出的 fill 次数
+     */
+    private static int fillPixelRun(RectFiller filler, LongOpenHashSet painted, boolean vertical, int fixed,
+            int from, int to, int color) {
+        int fills = 0;
+        int runStart = -1;
+        for (int i = from; i < to; ++i) {
+            long key = vertical ? packPixel(fixed, i) : packPixel(i, fixed);
+            if (painted.add(key)) {
+                if (runStart < 0) {
+                    runStart = i;
+                }
+            } else if (runStart >= 0) {
+                fillRun(filler, vertical, fixed, runStart, i, color);
+                ++fills;
+                runStart = -1;
+            }
+        }
+        if (runStart >= 0) {
+            fillRun(filler, vertical, fixed, runStart, to, color);
+            ++fills;
+        }
+        return fills;
+    }
+
+    /** 发一次 1px 宽的 fill（{@code [from, to)} 是像素下标区间，fill 的上界不含） */
+    private static void fillRun(RectFiller filler, boolean vertical, int fixed, int from, int to, int color) {
+        if (vertical) {
+            filler.fill(fixed, from, fixed + 1, to, color);
+        } else {
+            filler.fill(from, fixed, to, fixed + 1, color);
+        }
+    }
     /**
      * 画旅行目标的临时标记：一个 7x7 的方框 + 中心点 + 右边的绿色 {@code [SFH] Travel}。
      *
