@@ -52,53 +52,57 @@ public class ChatCombine extends BaseModule {
         int amount = 0;
         if (hud != null) {
             var visibleHistory = ChatHudAccess.of(hud).getVisibleLines();
-            ListIterator<GuiMessage.Line> lineIterator = visibleHistory.listIterator();
-            List<FormattedCharSequence> textList = new ArrayList<>();
-            while (lineIterator.hasNext()) {
-                var visible = lineIterator.next();
-                textList.add(0, visible.content());
-                String rawLine1 = ChatUtils.getOrderedTextString(textList.toArray(FormattedCharSequence[]::new));
-                // remove all fucking shits
-                if (rawLine1.length() > rawString.length() + 10 + formatCombinedMessage.length()) {
-                    break;
-                }
-                if (rawLine1.startsWith(rawString)) {
-                    String suffix = rawLine1.substring(rawString.length());
-                    if (suffix.isEmpty()) {
-                        // absolutely equals
-                        amount += 1;
-                        lineIterator.remove();
-                        while (lineIterator.hasPrevious()) {
-                            lineIterator.previous();
+            try {
+                ListIterator<GuiMessage.Line> lineIterator = visibleHistory.listIterator();
+                List<FormattedCharSequence> textList = new ArrayList<>();
+                while (lineIterator.hasNext()) {
+                    var visible = lineIterator.next();
+                    textList.add(0, visible.content());
+                    String rawLine1 = ChatUtils.getOrderedTextString(textList.toArray(FormattedCharSequence[]::new));
+                    // remove all fucking shits
+                    if (rawLine1.length() > rawString.length() + 10 + formatCombinedMessage.length()) {
+                        break;
+                    }
+                    if (rawLine1.startsWith(rawString)) {
+                        String suffix = rawLine1.substring(rawString.length());
+                        if (suffix.isEmpty()) {
+                            // absolutely equals
+                            amount += 1;
                             lineIterator.remove();
-                        }
-                        //                       do {
-                        //                           lineIterator.remove();
-                        //                       }while (lineIterator.hasPrevious());
-                        textList.clear();
-                    } else {
-                        // check if with suffix
-                        Matcher matcher = matcherCombinedMessageSuffix.matcher(suffix);
-                        if (matcher.find()) {
-                            try {
-                                // combine amount and remove line
-                                amount += Integer.parseInt(matcher.group(1));
+                            while (lineIterator.hasPrevious()) {
+                                lineIterator.previous();
                                 lineIterator.remove();
-                                while (lineIterator.hasPrevious()) {
-                                    lineIterator.previous();
+                            }
+                            //                       do {
+                            //                           lineIterator.remove();
+                            //                       }while (lineIterator.hasPrevious());
+                            textList.clear();
+                        } else {
+                            // check if with suffix
+                            Matcher matcher = matcherCombinedMessageSuffix.matcher(suffix);
+                            if (matcher.find()) {
+                                try {
+                                    // combine amount and remove line
+                                    amount += Integer.parseInt(matcher.group(1));
                                     lineIterator.remove();
+                                    while (lineIterator.hasPrevious()) {
+                                        lineIterator.previous();
+                                        lineIterator.remove();
+                                    }
+                                    textList.clear();
+                                } catch (Throwable e) {
+                                    // break combine
+                                    continue;
                                 }
-                                textList.clear();
-                            } catch (Throwable e) {
-                                // break combine
-                                continue;
                             }
                         }
+                    } else {
+                        // break combine
+                        continue;
                     }
-                } else {
-                    // break combine
-                    continue;
                 }
+            } catch (UnsupportedOperationException e) {
+                // 该列表不支持迭代器删除（第三方模组可能替换了 trimmedMessages），放弃本次合并，原样放行
             }
         }
         if (amount > 0) {

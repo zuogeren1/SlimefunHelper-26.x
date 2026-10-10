@@ -3,7 +3,6 @@ package me.matl114.mixins.events;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import me.matl114.accessors.events.ChatHudAccess;
@@ -48,8 +47,8 @@ public abstract class ChatHudEvents implements ChatHudAccess {
 
     @Unique
     @Override
-    public ArrayList<GuiMessage.Line> getVisibleLines() {
-        return (ArrayList<GuiMessage.Line>) this.trimmedMessages;
+    public List<GuiMessage.Line> getVisibleLines() {
+        return this.trimmedMessages;
     }
 
     @Inject(
@@ -96,9 +95,13 @@ public abstract class ChatHudEvents implements ChatHudAccess {
     @Unique
     @Override
     public void clearUniqueMessages(String id) {
-        this.trimmedMessages.removeIf(
-                s -> Objects.equals(ChatHudLineAccess.of(s).getUniqueMessageId(), id));
-        this.allMessages.removeIf(s -> Objects.equals(ChatHudLineAccess.of(s).getUniqueMessageId(), id));
+        try {
+            this.trimmedMessages.removeIf(
+                    s -> Objects.equals(ChatHudLineAccess.of(s).getUniqueMessageId(), id));
+            this.allMessages.removeIf(s -> Objects.equals(ChatHudLineAccess.of(s).getUniqueMessageId(), id));
+        } catch (UnsupportedOperationException ignored) {
+            // 列表实现可能被第三方替换成不可变实现：这里静默失效，绝不把异常抛回调用方
+        }
     }
 
     @Inject(method = "addMessageToDisplayQueue", at = @At("HEAD"), cancellable = true)
