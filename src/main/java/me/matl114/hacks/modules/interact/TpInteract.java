@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 import me.matl114.accessors.access.ClientPlayerAccess;
+import me.matl114.accessors.access.PlayerInteractItemC2SPacketAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -26,12 +27,15 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 
 public class TpInteract extends BaseModule {
@@ -64,6 +68,7 @@ public class TpInteract extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPacketPoint().getChannel(ServerboundUseItemOnPacket.class), this::onInteractBlock);
+        registerListener(Listener.getPacketPoint().getChannel(ServerboundUseItemPacket.class), this::onUseItem);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundInteractPacket.class), this::onInteractEntity);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onBlockMine);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
@@ -111,6 +116,50 @@ public class TpInteract extends BaseModule {
                 }
             }
         }
+    }
+
+    /**
+     * 桶类物品的远程右键：真正干活的是 {@link ServerboundUseItemPacket}（{@code BucketItem} 只有 {@code use()}，
+     * {@code useOn} 永远返回 PASS），而这条包以前没有钩子 —— 它是从**远处的玩家位置**发出去的，
+     * 服务端拿包里的朝向自己重算 POV 射线必然 MISS：水桶放不出水、空桶舀不到水。
+     *
+     * <p>这里补上：传送过去 → 重新解一个「真能命中目标」的朝向 → 改包发出 → 传送回来。
+     * 够得着（原版范围内）不干预；解不出命中也不吃原包，保持原行为。
+     */
+    public void onUseItem(Event<ServerboundUseItemPacket> event) {
+        if (event.isCancelled() || !enable.get()) return;
+        // 指令路径（!!useitem）的目标是指令给的坐标、不是准星，别按准星传送
+        if (InteractManager.commandUsingItem) return;
+        if (!(mc.hitResult instanceof BlockHitResult clicked) || clicked.getType() != HitResult.Type.BLOCK) return;
+        ServerboundUseItemPacket packet = event.context;
+        ItemStack stack = mc.player.getItemInHand(packet.getHand());
+        if (!BucketInteract.shouldHandle(stack)) return;
+        BlockPos clickedPos = clicked.getBlockPos();
+        double distance = InteractExtra.INSTANCE.getBlockReachDistance() + ENABLE_NO_TP_DISTANCE;
+        if (new AABB(clickedPos).distanceToSqr(mc.player.getEyePosition()) <= MathUtils.s2(distance)) {
+            return; // 够得着：交给原版
+        }
+        boolean[] sent = {false};
+        if (tpToBlock(clickedPos, (sel) -> executeTp(sel, () -> {
+                    sent[0] = sendBucketUseItem(packet, stack, clicked);
+                }))
+                && sent[0]) {
+            event.cancel();
+        }
+    }
+
+    /** 在传送后的位置改包并发出桶类 useItem；成功返回 true。 */
+    private boolean sendBucketUseItem(ServerboundUseItemPacket packet, ItemStack stack, BlockHitResult clicked) {
+        BlockHitResult solved = BucketInteract.resolveForClick(
+                mc.player, stack, clicked, InteractExtra.INSTANCE.getBlockReachDistance());
+        if (solved == null) return false;
+        Vec2 look = BucketInteract.lookAt(mc.player, solved.getLocation());
+        if (look == null) return false;
+        PlayerInteractItemC2SPacketAccess access = PlayerInteractItemC2SPacketAccess.of(packet);
+        access.setYaw(look.y);
+        access.setPitch(look.x);
+        Listener.sendPacketNoEvents(packet);
+        return true;
     }
 
     public void onInteractEntity(Event<ServerboundInteractPacket> event) {

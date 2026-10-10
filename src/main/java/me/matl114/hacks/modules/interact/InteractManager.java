@@ -49,6 +49,7 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
@@ -69,6 +70,14 @@ import me.matl114.hacks.utils.EntityUtils;
 
 public class InteractManager extends BaseModule {
     public static InteractManager INSTANCE;
+
+    /**
+     * 指令路径（{@code !!useitem} / {@code !!holduse}）正在用物品。
+     *
+     * <p>期间 {@link TpInteract} 的 useItem 钩子必须跳过：那条路的目标是指令给的坐标，不是准星，
+     * 按准星去传送会跑到完全不相干的地方。
+     */
+    public static boolean commandUsingItem = false;
 
     private static final List<String> HAND_TABS = List.of("mainhand", "offhand");
     private static final List<String> SCHEDULE_TABS = List.of("once", "inf", "1", "4", "10", "20");
@@ -971,6 +980,19 @@ public class InteractManager extends BaseModule {
         }
     }
 
+    /**
+     * 指令路径用物品的统一入口：期间置 {@link #commandUsingItem}，
+     * 让 {@link TpInteract} 的 useItem 钩子跳过（那条路的目标是坐标、不是准星，按准星传送会跑偏）。
+     */
+    private static InteractionResult useItemGuarded(boolean useOnBlock, InteractionHand hand, BlockHitResult hit) {
+        commandUsingItem = true;
+        try {
+            return useOnBlock ? mc.gameMode.useItemOn(mc.player, hand, hit) : mc.gameMode.useItem(mc.player, hand);
+        } finally {
+            commandUsingItem = false;
+        }
+    }
+
     public record UseItemContext(UseContextSelector hand, LookSupplier target) implements InteractContext {
         @Override
         public String type() {
@@ -1011,9 +1033,7 @@ public class InteractManager extends BaseModule {
                         player.setXRot(supply.x);
                         player.setYRot(supply.y);
                         InteractionHand hand = shouldUseOffHand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
-                        var result = useOnBlock
-                                ? mc.gameMode.useItemOn(mc.player, hand, bucketHit)
-                                : mc.gameMode.useItem(player, hand);
+                        var result = useItemGuarded(useOnBlock, hand, bucketHit);
                         if (InteractManager.INSTANCE.logA.get()) {
                             Component text = VItem.getInstance().getFormattedName(entry.val());
                             manager.logI18NSub("Interact", "message.module.interact-manager.interact.use", text);
@@ -1058,7 +1078,7 @@ public class InteractManager extends BaseModule {
                 var runnable = InvExtra.INSTANCE.swapItemToHand(entry.index(), offhand, manager.ghostHand.get());
                 if (runnable != null) {
                     InteractionHand hand = offhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
-                    var result = mc.gameMode.useItem(player, hand);
+                    var result = useItemGuarded(false, hand, null);
                     if (InteractManager.INSTANCE.logA.get()) {
                         Component text = VItem.getInstance().getFormattedName(entry.val());
                         manager.logI18NSub("Interact", "message.module.interact-manager.interact.use", text);

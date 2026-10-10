@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.SolidBucketItem;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.block.LiquidBlockContainer;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -118,6 +119,38 @@ public final class BucketInteract {
             if (hit != null && pos.equals(hit.getBlockPos())) {
                 return hit;
             }
+        }
+        return null;
+    }
+
+    /**
+     * 右键路径（freecam / TpInteract 这类"人不在场"的远程交互）用：准星已经命中 {@code clicked}，
+     * 需要换算成「传送过去之后该朝哪看」，服务端重算射线才能得到和玩家点击一致的落点。
+     *
+     * @return {@code null} = 这次点击对桶类本来就没有可做的事（例如空桶点实体方块、或点的是流动水）
+     */
+    public static BlockHitResult resolveForClick(Player player, ItemStack stack, BlockHitResult clicked, double range) {
+        if (mc.level == null) {
+            return null;
+        }
+        BlockPos clickedPos = clicked.getBlockPos();
+        Direction face = clicked.getDirection();
+        if (isFluidBucket(stack) && stack.getItem() instanceof BucketItem bucket) {
+            if (bucket.getContent() == Fluids.EMPTY) {
+                // 空桶：只有准星那一格是流体源才舀得动（原版 SOURCE_ONLY 的口径，流动水不给舀）
+                return mc.level.getFluidState(clickedPos).isSource() ? findPickupHit(player, clickedPos, range) : null;
+            }
+            // 有内容：原版落点是「点击面外侧那一格」；含水方块（LiquidBlockContainer + 水）则是点击格本身
+            BlockPos dest =
+                    bucket.getContent() == Fluids.WATER
+                                    && mc.level.getBlockState(clickedPos).getBlock() instanceof LiquidBlockContainer
+                            ? clickedPos
+                            : clickedPos.relative(face);
+            return findPlaceHit(player, dest, range);
+        }
+        if (isSolidBucket(stack)) {
+            // 细雪桶这类 BlockItem：落点同样由点击面决定（走 useItemOn，命中点直接给服务端）
+            return findPlaceHit(player, clickedPos.relative(face), range);
         }
         return null;
     }
