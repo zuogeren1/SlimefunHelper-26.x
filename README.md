@@ -4,6 +4,8 @@
 
 由 zuogeren 将版本移植到26.1.2和26.2
 
+会增加一些其他上游没有的功能，在上游更新时会同步更改
+
 该模组旨在**为[粘液科技游戏](https://slimefun-wiki.guizhanss.cn/)和普通生存/各类无规则生存提供更多便利和增强游戏与开发体验**
 
 该模组最新版只支持1.21.1, 1.21.4, 1.21.11
@@ -52,6 +54,7 @@
 - IMBlocker
 - Meteor
 - XaeroMap系列(XaeroWorldMap, XaeroMiniMap, XaeroPlus)
+- ConfluxMap(与Xaero二选一，虽然一起装也不会出问题)
 
 如果遇到了和其他客户端同时使用导致的异常行为或者崩溃,请联系作者或者提出issue
 
