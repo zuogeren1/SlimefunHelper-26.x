@@ -64,6 +64,16 @@ public class TpInteract extends BaseModule {
             .defaultValue(new MultiKeyBind())
             .build();
 
+    /** 桶类远程交互的调试输出（默认开，问题定位完成后关掉）。 */
+    public final FlagRef debugLog = flagBuilder(tpInteract.add("debug-log")).build();
+
+    /** 找目标时用的射线长度：要覆盖 freecam 的观察距离（找到目标后我们会传送过去，不受交互距离限制）。 */
+    private static final double BUCKET_TARGET_RANGE = 128.0D;
+
+    /** 桶类传送的落点距离：服务端 {@code BucketItem.use} 的射线只有 {@code blockInteractionRange()}（默认 4.5），
+     *  所以必须站得比它更近，否则传过去服务端照样 MISS。 */
+    private static final double BUCKET_CLOSE_DISTANCE = 3.0D;
+
     @Override
     public void registerAll() {
         super.registerAll();
@@ -125,26 +135,69 @@ public class TpInteract extends BaseModule {
      *
      * <p>这里补上：传送过去 → 重新解一个「真能命中目标」的朝向 → 改包发出 → 传送回来。
      * 够得着（原版范围内）不干预；解不出命中也不吃原包，保持原行为。
+     *
+     * <p><b>目标不能取 {@code mc.hitResult}</b>：准星那次 pick 是 {@code withLiquids = false}（26.2 的
+     * {@code LiquidBlock.getShape()} 还返回空），瞄水面时它命中的是水后面 / 水下的方块；而 freecam 期间
+     * 玩家朝向被 Freecam 冻结。所以目标一律用 {@link BucketInteract#povTarget} 按<b>相机实体</b>自己算。
      */
     public void onUseItem(Event<ServerboundUseItemPacket> event) {
         if (event.isCancelled() || !enable.get()) return;
         // 指令路径（!!useitem）的目标是指令给的坐标、不是准星，别按准星传送
         if (InteractManager.commandUsingItem) return;
-        if (!(mc.hitResult instanceof BlockHitResult clicked) || clicked.getType() != HitResult.Type.BLOCK) return;
         ServerboundUseItemPacket packet = event.context;
         ItemStack stack = mc.player.getItemInHand(packet.getHand());
         if (!BucketInteract.shouldHandle(stack)) return;
-        BlockPos clickedPos = clicked.getBlockPos();
+        // 目标自己按相机实体的 POV 算（空桶 SOURCE_ONLY）—— 见方法头注释：准星看不见水源，且 freecam 下玩家朝向是冻结的
+        BlockHitResult target = BucketInteract.povTarget(stack, BUCKET_TARGET_RANGE);
+        if (target == null) {
+            debugBucket("no target: camera POV clip miss");
+            return;
+        }
+        BlockPos targetPos = target.getBlockPos();
         double distance = InteractExtra.INSTANCE.getBlockReachDistance() + ENABLE_NO_TP_DISTANCE;
-        if (new AABB(clickedPos).distanceToSqr(mc.player.getEyePosition()) <= MathUtils.s2(distance)) {
+        if (new AABB(targetPos).distanceToSqr(mc.player.getEyePosition()) <= MathUtils.s2(distance)) {
+            debugBucket("target %s within reach -> vanilla", targetPos.toShortString());
             return; // 够得着：交给原版
         }
         boolean[] sent = {false};
-        if (tpToBlock(clickedPos, (sel) -> executeTp(sel, () -> {
-                    sent[0] = sendBucketUseItem(packet, stack, clicked);
-                }))
-                && sent[0]) {
+        boolean tp = tpCloseToBlock(targetPos, (sel) -> executeTp(sel, () -> {
+            sent[0] = sendBucketUseItem(packet, stack, target);
+        }));
+        debugBucket("target=%s tp=%s sent=%s", targetPos.toShortString(), tp, sent[0]);
+        if (tp && sent[0]) {
             event.cancel();
+        }
+    }
+
+    /** 桶类专用传送：优先挑一个「贴脸」的落点。
+     *  {@link #tpToBlock} 的第一选择是相机位（freecam 时可能离目标 5 格开外），而服务端的
+     *  {@code BucketItem.use} 射线只有 {@code blockInteractionRange()}（属性默认 4.5）—— 传过去也照样 MISS。 */
+    private boolean tpCloseToBlock(BlockPos pos, Predicate<Vec3> callBack) {
+        Vec3 spot = findCloseSpot(pos);
+        if (spot != null) {
+            return callBack.test(spot);
+        }
+        debugBucket("no close spot, fallback to tpToBlock");
+        return tpToBlock(pos, callBack);
+    }
+
+    /** 在目标方块周围找一个「眼位距它不超过 {@link #BUCKET_CLOSE_DISTANCE}」且不撞环境的落脚点。 */
+    private Vec3 findCloseSpot(BlockPos pos) {
+        double eyeHeight = mc.player.getEyeHeight(mc.player.getPose());
+        for (var deltaPos : InteractExtra.INSTANCE.getBlocksAround()) {
+            Vec3 checkPos = Vec3.atBottomCenterOf(pos.offset(deltaPos)).add(0, 1E-4, 0);
+            if (new AABB(pos).distanceToSqr(checkPos.add(0, eyeHeight, 0))
+                            <= MathUtils.s2(BUCKET_CLOSE_DISTANCE)
+                    && !MovTasks.ENGIN.checkEnvironmentCollision(mc.player, checkPos, true)) {
+                return checkPos;
+            }
+        }
+        return null;
+    }
+
+    private void debugBucket(String fmt, Object... args) {
+        if (debugLog.get()) {
+            Debug.chat("[TpBucket] " + String.format(fmt, args));
         }
     }
 

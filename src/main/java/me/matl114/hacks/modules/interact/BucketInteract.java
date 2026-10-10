@@ -4,6 +4,7 @@ import me.matl114.hacks.utils.EntityUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
@@ -153,6 +154,39 @@ public final class BucketInteract {
             return findPlaceHit(player, clickedPos.relative(face), range);
         }
         return null;
+    }
+
+    /**
+     * 远程（freecam）下的「准星目标」必须自己按 <b>相机实体</b> 的 POV 算，不能用 {@code mc.hitResult}：
+     *
+     * <ul>
+     *   <li>准星那次 pick 是 {@code Entity.pick(range, f, withLiquids = false)}（{@code LocalPlayer.pick}），
+     *       而 26.2 的 {@code LiquidBlock.getShape()} 返回空 —— <b>准星永远打不到水源方块本身</b>，
+     *       瞄水面拿到的是水后面 / 水下的方块；</li>
+     *   <li>freecam 期间玩家的 {@code getXRot()/getYRot()} 被 Freecam 冻结（鼠标只转相机），
+     *       而 {@code BucketItem.use} 只认「玩家眼睛 + 玩家朝向」—— 所以包里的朝向与准星目标天然不一致。</li>
+     * </ul>
+     *
+     * <p>这里用「相机实体的眼睛 + 视线」做与 {@code Item.getPlayerPOVHitResult} 同参数的 clip：
+     * 空桶 {@code SOURCE_ONLY}（原版口径），其余 {@code NONE}。非 freecam 时相机实体就是玩家，一份代码通用。
+     */
+    public static BlockHitResult povTarget(ItemStack stack, double range) {
+        if (mc.level == null) {
+            return null;
+        }
+        Entity pov = mc.getCameraEntity() != null ? mc.getCameraEntity() : mc.player;
+        if (pov == null) {
+            return null;
+        }
+        ClipContext.Fluid fluid = ClipContext.Fluid.NONE;
+        if (isFluidBucket(stack) && stack.getItem() instanceof BucketItem bucket && bucket.getContent() == Fluids.EMPTY) {
+            fluid = ClipContext.Fluid.SOURCE_ONLY;
+        }
+        Vec3 from = pov.getEyePosition();
+        Vec3 to = from.add(EntityUtils.pitchYawToRotation(pov.getXRot(), pov.getYRot())
+                .scale(Math.max(range, 1.0E-3D)));
+        BlockHitResult hit = mc.level.clip(new ClipContext(from, to, ClipContext.Block.OUTLINE, fluid, pov));
+        return hit.getType() == HitResult.Type.BLOCK ? hit : null;
     }
 
     /** 把「看向某点」换算成朝向（pitch / yaw）；点与眼睛重合时返回 null。 */

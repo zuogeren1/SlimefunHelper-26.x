@@ -1070,6 +1070,7 @@
 	"tp-interact.enable-hotkey": "TP交互: 快捷键",
 	"tp-interact.mine-interact-use-fail-mine": "TP交互: 自动终止挖掘",
 	"tp-interact.try-tp-steal-chest-key": "TP交互: 自动偷取物品栏快捷键",
+	"tp-interact.debug-log": "TP交互: 桶类远程交互调试日志",
 	"tp-interact.try-tp-steal-chest-key.tooltips": "当尝试TP打开原版容器时候\n正常情况下屏幕无法一直打开\n按下当前按键之后可以尝试直接偷走内容物",
 	"interaction-tweaks.air-place.enable": "隔空放置",
 	"interaction-tweaks.air-place.hotkey": "隔空放置: 热键",
