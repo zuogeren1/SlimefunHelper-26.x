@@ -59,6 +59,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.Potion;
 import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.stream.Streams;
@@ -982,6 +983,26 @@ public class InteractManager extends BaseModule {
             if (supply != null) {
                 var entry = hand.getUseContext();
                 if (entry != null) {
+                    // 桶类（水桶 / 空桶 / 岩浆桶 / 鱼桶 / 细雪桶…）在 pos 模式下要做目标感知：
+                    // 只给朝向是不够的 —— 服务端按包里的 pitch/yaw 自己重算射线，「朝方块几何中心」会让
+                    // 水桶的射线穿过流体、落点跑到别的格子上，空桶在流动水上也会 MISS。
+                    // 这里先把「真能命中目标格」的命中解出来；解不出来就退回原来的「转头 + useItem」，保证不回归。
+                    BlockHitResult bucketHit = null;
+                    BlockPos bucketTarget = target.getTargetBlockPos();
+                    if (bucketTarget != null && BucketInteract.shouldHandle(entry.val())) {
+                        bucketHit = BucketInteract.resolve(
+                                player, entry.val(), bucketTarget, InteractExtra.INSTANCE.getBlockReachDistance());
+                        if (bucketHit != null) {
+                            Vec2 bucketLook = BucketInteract.lookAt(player, bucketHit.getLocation());
+                            if (bucketLook != null) {
+                                supply = bucketLook;
+                            } else {
+                                bucketHit = null;
+                            }
+                        }
+                    }
+                    // 细雪桶是 BlockItem，放置走 useOn，只有它必须发 useItemOn（BucketItem 家族的 useOn 永远是 PASS）
+                    boolean useOnBlock = bucketHit != null && BucketInteract.isSolidBucket(entry.val());
                     boolean shouldUseOffHand = InteractManager.shouldUseOffhandByDefault() || entry.index() == 40;
                     var runnable =
                             InvExtra.INSTANCE.swapItemToHand(entry.index(), shouldUseOffHand, manager.ghostHand.get());
@@ -990,7 +1011,9 @@ public class InteractManager extends BaseModule {
                         player.setXRot(supply.x);
                         player.setYRot(supply.y);
                         InteractionHand hand = shouldUseOffHand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
-                        var result = mc.gameMode.useItem(player, hand);
+                        var result = useOnBlock
+                                ? mc.gameMode.useItemOn(mc.player, hand, bucketHit)
+                                : mc.gameMode.useItem(player, hand);
                         if (InteractManager.INSTANCE.logA.get()) {
                             Component text = VItem.getInstance().getFormattedName(entry.val());
                             manager.logI18NSub("Interact", "message.module.interact-manager.interact.use", text);
@@ -1141,14 +1164,33 @@ public class InteractManager extends BaseModule {
     public interface LookSupplier {
         Vec2 getLook(Player pl);
 
+        /**
+         * pos 模式下的<b>目标方块</b>（look / entity 模式返回 null）。
+         *
+         * <p>桶类需要它做目标感知：光有朝向不够 —— 原版 {@code BucketItem} 靠服务端按包里的朝向<b>自己重算射线</b>，
+         * 「朝方块几何中心」会让射线穿透流体或落到别的面，放水 / 舀水都会失败。详见 {@link BucketInteract}。
+         */
+        default BlockPos getTargetBlockPos() {
+            return null;
+        }
+
         static LookSupplier of(InputArgument<?> inputArgument) {
             if (inputArgument instanceof PosArgumentResult pos) {
                 ExecutePos pos2 = pos.nonnullResult();
-                return (pl) -> {
-                    CommandExecution execution = PlayerStateManager.createServer();
-                    Vector3d vector3d = pos2.getPosition(execution);
-                    vector3d = vector3d.sub(execution.getExecuteEyePos());
-                    return EntityUtils.rotationToPitchYaw(new Vec3(vector3d.x(), vector3d.y(), vector3d.z()));
+                return new LookSupplier() {
+                    @Override
+                    public Vec2 getLook(Player pl) {
+                        CommandExecution execution = PlayerStateManager.createServer();
+                        Vector3d vector3d = pos2.getPosition(execution);
+                        vector3d = vector3d.sub(execution.getExecuteEyePos());
+                        return EntityUtils.rotationToPitchYaw(new Vec3(vector3d.x(), vector3d.y(), vector3d.z()));
+                    }
+
+                    @Override
+                    public BlockPos getTargetBlockPos() {
+                        Vector3d vector3d = pos2.getPosition(PlayerStateManager.createServer());
+                        return BlockPos.containing(new Vec3(vector3d.x(), vector3d.y(), vector3d.z()));
+                    }
                 };
             } else if (inputArgument instanceof RotationArgumentResult rot) {
                 ExecuteRotation executeRotation = rot.nonnullResult();
