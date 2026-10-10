@@ -113,9 +113,78 @@ public class ConfluxMapHooks implements IHooks {
                 return;
             }
             enable = true;
+            String minimapProblem = probeMinimapOverlay();
+            if (minimapProblem != null) {
+                // 小地图那层是独立的一条链路（ConfluxMinimapHudMixin，注入 require = 0）：它够不到成员时
+                // 只是不画那两层，**不应该**把整个 conflux 模块（含全屏地图那两层）停掉，所以这里只 WARN。
+                Debug.getLogger().warn("ConfluxMapHelper: the conflux minimap overlay stays disabled: "
+                        + minimapProblem);
+            }
         } catch (Throwable e) {
             unsupportedReason = "conflux-map probe failed: " + e;
             Debug.getLogger().warn("ConfluxMapHelper disabled: " + unsupportedReason);
+        }
+    }
+
+    /** 小地图渲染器（用字符串而不是类字面量：conflux 没装时也不会连累类加载） */
+    private static final String MINIMAP_RENDERER_CLASS = "cn.net.rms.confluxmap.mc.ui.hud.MinimapHudRenderer";
+
+    /**
+     * 小地图覆盖层（{@code ConfluxMinimapHudMixin}）要够到的那几个成员还在不在。
+     *
+     * <p>它注入的是 {@code MinimapHudRenderer#drawRadar(GuiDraw, float, float, int, float, PlayerView, float)}，
+     * javap 实测三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2）签名逐字一致；它另外还反射读
+     * {@code MinimapHudRenderer#config}、{@code ConfluxConfig#minimapZoomIndex / #minimapShape} 与
+     * {@code MinimapHudRenderer#BLOCKS_PER_PIXEL}。注入与这些读取全都是<b>软失败</b>（require = 0 + try/catch），
+     * 所以改名的后果是“这两层不画”而不是“游戏起不来”—— 代价是它在日志里必须留下痕迹，本方法就是那行痕迹。
+     *
+     * @return {@code null} 表示小地图那层可用；否则是给日志看的原因
+     */
+    static String probeMinimapOverlay() {
+        try {
+            Class<?> renderer = Class.forName(MINIMAP_RENDERER_CLASS);
+            // 反射读的两个字段：缺一个都算不出来缩放 / 圆形，直接判为不可用（getDeclaredField 抛异常由外层兜住）
+            if (!renderer.getDeclaredField("config")
+                    .getType()
+                    .getName()
+                    .equals("cn.net.rms.confluxmap.core.config.ConfluxConfig")) {
+                return "MinimapHudRenderer#config is not a ConfluxConfig";
+            }
+            if (renderer.getDeclaredField("BLOCKS_PER_PIXEL").getType() != float[].class) {
+                return "MinimapHudRenderer#BLOCKS_PER_PIXEL is not a float[]";
+            }
+            // 期望的参数类型名（逐个比对，光看方法名会在将来加/减参数时误判）
+            String[] expected = {
+                "cn.net.rms.confluxmap.mc.ui.GuiDraw",
+                "float",
+                "float",
+                "int",
+                "float",
+                "cn.net.rms.confluxmap.bridge.PlayerView",
+                "float"
+            };
+            for (Method method : renderer.getDeclaredMethods()) {
+                if (!method.getName().equals("drawRadar")) {
+                    continue;
+                }
+                Class<?>[] parameters = method.getParameterTypes();
+                if (parameters.length != expected.length || method.getReturnType() != void.class) {
+                    continue;
+                }
+                boolean matches = true;
+                for (int i = 0; i < expected.length; ++i) {
+                    if (!parameters[i].getName().equals(expected[i])) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    return null;
+                }
+            }
+            return "MinimapHudRenderer#drawRadar(GuiDraw,float,float,int,float,PlayerView,float) not found";
+        } catch (Throwable e) {
+            return "cannot inspect " + MINIMAP_RENDERER_CLASS + ": " + e;
         }
     }
 
