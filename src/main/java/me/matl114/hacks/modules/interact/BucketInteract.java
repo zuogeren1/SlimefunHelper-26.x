@@ -93,10 +93,38 @@ public final class BucketInteract {
             if (mc.level.isEmptyBlock(support)) {
                 continue; // 空块点不到
             }
-            Vec3 point = Vec3.atCenterOf(support).relative(face, 0.5);
-            BlockHitResult hit = clipTo(player, point, range, ClipContext.Fluid.NONE);
-            if (hit != null && support.equals(hit.getBlockPos()) && hit.getDirection() == face) {
+            BlockHitResult hit = probeFace(player, support, face, range, ClipContext.Fluid.NONE);
+            if (hit != null) {
                 return hit;
+            }
+        }
+        return null;
+    }
+
+    /** 面上多点试射用的切向偏移（面中心 + 四个象限中心）：只试面中心时容易被邻块的边角挡住。 */
+    private static final double[] FACE_OFFSETS = {0.0D, 0.25D, -0.25D};
+
+    /** 面平面上的一点：面中心 + 两个切向轴上的偏移。 */
+    private static Vec3 facePoint(BlockPos support, Direction face, double u, double v) {
+        Vec3 center = Vec3.atCenterOf(support).relative(face, 0.5D);
+        if (u == 0.0D && v == 0.0D) {
+            return center;
+        }
+        Direction.Axis axis = face.getAxis();
+        Vec3 axisU = axis == Direction.Axis.X ? new Vec3(0.0D, 1.0D, 0.0D) : new Vec3(1.0D, 0.0D, 0.0D);
+        Vec3 axisV = axis == Direction.Axis.Y ? new Vec3(0.0D, 0.0D, 1.0D) : new Vec3(0.0D, 1.0D, 0.0D);
+        return center.add(axisU.scale(u)).add(axisV.scale(v));
+    }
+
+    /** 在 {@code support} 的 {@code face} 面上多点试射，要求「射线真的先打到这个面」。 */
+    private static BlockHitResult probeFace(
+            Player player, BlockPos support, Direction face, double range, ClipContext.Fluid fluid) {
+        for (double u : FACE_OFFSETS) {
+            for (double v : FACE_OFFSETS) {
+                BlockHitResult hit = clipTo(player, facePoint(support, face, u, v), range, fluid);
+                if (hit != null && support.equals(hit.getBlockPos()) && hit.getDirection() == face) {
+                    return hit;
+                }
             }
         }
         return null;
@@ -115,10 +143,13 @@ public final class BucketInteract {
             return hit;
         }
         for (Direction face : Direction.values()) {
-            Vec3 point = Vec3.atCenterOf(pos).relative(face, 0.5);
-            hit = clipTo(player, point, range, ClipContext.Fluid.SOURCE_ONLY);
-            if (hit != null && pos.equals(hit.getBlockPos())) {
-                return hit;
+            for (double u : FACE_OFFSETS) {
+                for (double v : FACE_OFFSETS) {
+                    hit = clipTo(player, facePoint(pos, face, u, v), range, ClipContext.Fluid.SOURCE_ONLY);
+                    if (hit != null && pos.equals(hit.getBlockPos())) {
+                        return hit;
+                    }
+                }
             }
         }
         return null;

@@ -74,6 +74,9 @@ public class TpInteract extends BaseModule {
      *  所以必须站得比它更近，否则传过去服务端照样 MISS。 */
     private static final double BUCKET_CLOSE_DISTANCE = 3.0D;
 
+    /** 服务端 {@code BucketItem.use} 的重算射线长度（属性默认 4.5）—— 超过这个距离基本必 MISS，只用于报警。 */
+    private static final double SERVER_SAFE_DISTANCE = 4.0D;
+
     @Override
     public void registerAll() {
         super.registerAll();
@@ -208,6 +211,11 @@ public class TpInteract extends BaseModule {
         if (solved == null) return false;
         Vec2 look = BucketInteract.lookAt(mc.player, solved.getLocation());
         if (look == null) return false;
+        // 服务端那次重算射线的长度是 player.blockInteractionRange()（属性默认 4.5）—— 超过了就是白发
+        double distance = solved.getLocation().distanceTo(mc.player.getEyePosition());
+        if (distance > SERVER_SAFE_DISTANCE) {
+            debugBucket("solved hit %.2f blocks away (> %.1f): server will likely MISS", distance, SERVER_SAFE_DISTANCE);
+        }
         PlayerInteractItemC2SPacketAccess access = PlayerInteractItemC2SPacketAccess.of(packet);
         access.setYaw(look.y);
         access.setPitch(look.x);
