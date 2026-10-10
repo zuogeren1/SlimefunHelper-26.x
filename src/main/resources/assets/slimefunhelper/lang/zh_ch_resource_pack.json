@@ -238,6 +238,7 @@
 	"widget.click-gui.module-name.Survival.XaeroHelper": "Xaero助手",
 	
 	"widget.click-gui.module-name.Survival.ConfluxMapHelper": "Conflux地图助手",
+	"message.module.conflux-map-helper.location-menu.tooltip": "由 SlimefunHelper 添加的自定义条目",
 	
 	"widget.click-gui.module-name.Extra.AutoLogout": "自动退出"
 }

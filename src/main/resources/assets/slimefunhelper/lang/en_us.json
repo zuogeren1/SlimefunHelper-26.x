@@ -2563,6 +2563,7 @@
 	"message.module.conflux-map-helper.right-click-command.pos_x": "<x>",
 	"message.module.conflux-map-helper.right-click-command.pos_y": "<y>",
 	"message.module.conflux-map-helper.right-click-command.pos_z": "<z>",
+	"message.module.conflux-map-helper.location-menu.tooltip": "由 SlimefunHelper 添加的自定义条目",
 	"message.module.travelling-control.pull-up-to-max-height": "请拉升到MaxHeight以启动: %s",
 	"message.module.travelling-control.start-working": "开始工作!",
 	"message.module.travelling-control.out-of-control": "失控了!",

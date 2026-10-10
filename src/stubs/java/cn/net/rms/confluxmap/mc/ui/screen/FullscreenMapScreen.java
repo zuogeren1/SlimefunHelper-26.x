@@ -39,6 +39,43 @@ public abstract class FullscreenMapScreen extends ConfluxScreen {
         return null;
     }
 
+    protected void renderContents(cn.net.rms.confluxmap.mc.ui.GuiDraw draw, int mouseX, int mouseY, float tickDelta) {}
+
+    /**
+     * 真类里由 {@code FullscreenMapScreen} 覆写（声明在基类 {@code ConfluxScreen} 上），
+     * javap 实测 0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 都有、签名一致。
+     * 他们的热键提示（0.1.9 的 {@code drawHotkeyHints}）就画在这里。
+     */
+    protected void renderAfterWidgets(
+            cn.net.rms.confluxmap.mc.ui.GuiDraw draw, int mouseX, int mouseY, float tickDelta) {}
+
+    /**
+     * <b>0.1.9 独有</b>（0.1.7 没有，javap 实测三份 jar）：嵌入模式里由 {@code ConfluxScreen.keyPressed}
+     * 直接调用的那条热键捷径。我们的 mixin 在它上面挂的是 {@code require = 0} 的 HEAD 注入 ——
+     * 这个桩只是让签名有据可查，<b>不要</b>因为它存在就写成 require = 1 或 @Shadow。
+     */
+    protected boolean embeddedMenuHotkeyPressed(int keyCode) {
+        return false;
+    }
+
+    /**
+     * 真签名（javap 实测 0.1.7-26.2 与 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 一致）：
+     * {@code java.util.List<FullscreenMapLocationMenu$ButtonSpec> locationMenuButtonSpecs(
+     * FullscreenMapLocationMenu$Target, WaypointRenderEntry, java.util.UUID, boolean)}。
+     *
+     * <p>这里返回 raw {@code java.util.List}：{@code ButtonSpec} 是**包级私有**类型，
+     * 签名里点名它 javac 会直接报错；泛型在字节码里本来就被擦成 {@code Ljava/util/List;}，
+     * 所以 raw 签名与真方法描述符完全一致（mixin 的 @Shadow 也按这个描述符匹配）。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private java.util.List locationMenuButtonSpecs(
+            FullscreenMapLocationMenu.Target target,
+            cn.net.rms.confluxmap.core.waypoint.WaypointRenderEntry waypoint,
+            java.util.UUID playerId,
+            boolean deletePending) {
+        return null;
+    }
+
     private void openLocationMenu(double mouseX, double mouseY) {}
 
     private void dismissLocationMenu() {}
