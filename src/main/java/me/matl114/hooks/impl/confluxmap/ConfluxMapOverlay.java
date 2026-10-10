@@ -617,8 +617,11 @@ public final class ConfluxMapOverlay {
     /**
      * 画旅行目标的临时标记：一个 7x7 的方框 + 中心点 + 右边的绿色 {@code [SFH] Travel}。
      *
-     * <p>只画这一帧，<b>不写进 conflux 的路径点存储</b>（这是与 XaeroHelper 版的有意差异：
-     * 那边是真的往路径点集合里塞了一个临时点，用多了会污染用户的路径点列表）。
+     * <p>这是 {@code travel-goal-sync} 的<b>兜底形态</b>：conflux 的路径点 API 可用时，
+     * 目标由我们在他们存储里建出来的真路径点（{@code [SFH] Travel} / 绿色 / 标记 {@code T}）表示，
+     * 这一层就不画了（见 {@code ConfluxMapHelper#shouldDrawTravelMarker()}），免得同一个目标两份；
+     * 只有拿不到 API（conflux 太老）或那条路建点失败时，才由这里顶上去 —— 只画这一帧，
+     * 不写任何存储。
      *
      * <p>标记落在可画区之外时整块不画（小地图上就是“超出这一圈就不显示”，不做边缘指示器 ——
      * conflux 自己给路径点做的边缘指示是另一套图标，我们不去碰）。

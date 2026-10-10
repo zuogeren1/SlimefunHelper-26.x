@@ -273,7 +273,9 @@ public abstract class ConfluxMinimapHudMixin {
     }
 
     /**
-     * 小地图上的两层覆盖：<b>客户端已加载区块的边界线</b>与<b>当前旅行目标的临时标记</b>。
+     * 小地图上的两层覆盖：<b>客户端已加载区块的边界线</b>与<b>当前旅行目标的临时标记</b>
+     * （后者只在那条路没走成时画 —— conflux 的路径点 API 可用且点已建好时，目标由他们自己画，
+     * 见 {@link ConfluxMapHelper#shouldDrawTravelMarker()}）。
      *
      * <p>画什么与全屏完全一致（同一份 {@code LoadedChunkEdgeCache}、同一个颜色配置、
      * 同一个 {@code [SFH] Travel} 绿标），只有几何不同：
@@ -339,7 +341,9 @@ public abstract class ConfluxMinimapHudMixin {
                         draw::fill);
             }
             boolean drawnMarker = false;
-            if (travelGoal) {
+            boolean markerSuppressed = false;
+            // API 可用且路径点已建好时不再画我们自己那份（同一个目标只能出现一份）
+            if (travelGoal && module.shouldDrawTravelMarker()) {
                 Vec3 target = module.currentTravelTarget();
                 if (target != null) {
                     drawnMarker = ConfluxMapOverlay.renderTravelMarker(
@@ -352,6 +356,9 @@ public abstract class ConfluxMinimapHudMixin {
                             draw::fill,
                             (text, x, y, color) -> draw.drawTextWithShadow(mc.font, text, x, y, color));
                 }
+            } else {
+                // 同全屏那一层：开关关着 / 目标已由 conflux 的路径点表示，日志里分开报
+                markerSuppressed = travelGoal;
             }
             int state = 4 | (drawnEdges > 0 ? 1 : 0) | (drawnMarker ? 2 : 0);
             slimefunhelper$logMinimapState(
@@ -362,7 +369,8 @@ public abstract class ConfluxMinimapHudMixin {
                             + " chunkPixelsPerChunk=" + view.chunkPixels()
                             + " mapAngle=" + mapAngle
                             + " circular=" + circular
-                            + " travelMarker=" + drawnMarker);
+                            + " travelMarker=" + drawnMarker
+                            + (markerSuppressed ? " (suppressed: the travel goal is drawn as a conflux waypoint)" : ""));
         } catch (Throwable e) {
             slimefunhelper$warnOnce("draw the conflux minimap overlay", e);
         }

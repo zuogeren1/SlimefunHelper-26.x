@@ -10,6 +10,7 @@ import me.matl114.events.annotations.ExtraArgs;
 import me.matl114.events.channels.EventChannel;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuContext;
 import me.matl114.hooks.impl.confluxmap.ConfluxMenuTarget;
+import me.matl114.hooks.impl.confluxmap.ConfluxTravelWaypointSyncHolder;
 import me.matl114.utils.Debug;
 import net.fabricmc.loader.api.FabricLoader;
 
@@ -35,6 +36,18 @@ public class ConfluxMapHooks implements IHooks {
 
     /** conflux-map 的模组 id */
     public static final String MOD_ID = "confluxmap";
+
+    /**
+     * conflux 的<b>路径点 API</b>（{@code META-INF/jars/api-x.y.z.jar}）能不能用。
+     *
+     * <p>只有它为真时，「同步旅行目标」才会走<b>真路径点</b>那条路、并把我们覆盖层上的临时标记收起来；
+     * 为假（conflux 太老 / 探测不过）就整条留在覆盖层上，行为与以前逐字一致。
+     * 判断与缓存都在 {@link ConfluxTravelWaypointSyncHolder} 里（那边只碰字符串 + 反射，
+     * 真的 API 类型在它之后才被加载）。
+     */
+    public static boolean isTravelWaypointSyncSupported() {
+        return ConfluxTravelWaypointSyncHolder.isAvailable();
+    }
 
     /** 被我们盯上的那个界面（用字符串而不是类字面量，缺依赖时也不会连累类加载） */
     private static final String SCREEN_CLASS = "cn.net.rms.confluxmap.mc.ui.screen.FullscreenMapScreen";

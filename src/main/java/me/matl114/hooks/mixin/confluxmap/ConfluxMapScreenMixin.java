@@ -897,8 +897,10 @@ public abstract class ConfluxMapScreenMixin {
      * <ul>
      *   <li>区块边界：数据来自 {@link ConfluxMapHelper#loadedChunkEdges()}（模块在 post-game-tick 里刷新），
      *       每条都是轴对齐的 1px 线，几何 / 裁剪 / 性能护栏全在 {@link ConfluxMapOverlay#renderChunkEdges}；</li>
-     *   <li>旅行目标：{@link ConfluxMapHelper#currentTravelTarget()}，只画这一帧的临时标记，
-     *       <b>不写进 conflux 的路径点存储</b>。</li>
+     *   <li>旅行目标：{@link ConfluxMapHelper#currentTravelTarget()}。conflux 的路径点 API 可用时
+     *       这一层<b>不画</b> —— 目标已经由 {@code travel-goal-sync} 建出来的真路径点负责，
+     *       两处同时画就是同一个目标两份（见 {@link ConfluxMapHelper#shouldDrawTravelMarker()}）；
+     *       拿不到 API（老版本 conflux）时才由这一层顶上。</li>
      * </ul>
      * 两层都只在 {@link #viewingLiveSession()} 为真（当前存档 + 当前维度）时才画。
      *
@@ -946,7 +948,9 @@ public abstract class ConfluxMapScreenMixin {
                         draw::fill);
             }
             boolean drawnMarker = false;
-            if (travelGoal) {
+            boolean markerSuppressed = false;
+            // API 可用且路径点已建好时不再画我们自己那份（同一个目标只能出现一份）
+            if (travelGoal && module.shouldDrawTravelMarker()) {
                 Vec3 target = module.currentTravelTarget();
                 if (target != null) {
                     drawnMarker = ConfluxMapOverlay.renderTravelMarker(
@@ -959,12 +963,18 @@ public abstract class ConfluxMapScreenMixin {
                             draw::fill,
                             (text, x, y, color) -> draw.drawTextWithShadow(mc.font, text, x, y, color));
                 }
+            } else {
+                // 这里有两种情况：开关本来就是关的（那没什么好说），或者开关开着、但目标已经由
+                // conflux 的路径点表示（{@code shouldDrawTravelMarker()} 为假）。日志里分开报，
+                // 实机验收时一眼能看出「没画」到底是哪一种。
+                markerSuppressed = travelGoal;
             }
             int state = 4 | (drawnEdges > 0 ? 1 : 0) | (drawnMarker ? 2 : 0);
             slimefunhelper$logOverlayState(
                     state,
                     "drawn: chunkSegments=" + module.loadedChunkEdges().segmentCount() + " chunkLines=" + drawnEdges
-                            + " chunkPixelsPerChunk=" + view.chunkPixels() + " travelMarker=" + drawnMarker);
+                            + " chunkPixelsPerChunk=" + view.chunkPixels() + " travelMarker=" + drawnMarker
+                            + (markerSuppressed ? " (suppressed: the travel goal is drawn as a conflux waypoint)" : ""));
         } catch (Throwable e) {
             slimefunhelper$warnOnce("draw the conflux map overlay", e);
         }
