@@ -71,6 +71,12 @@ targetVersions.each { v ->
 	tasks.register("server${suffix}") { dependsOn(":${v}:runServer") }
 }
 
+// 让根 `gradlew build` 也产出汇总产物：默认情况下 build 只把 jar 留在
+// versions/<版本>/build/libs，根 build/libs 里可能一直躺着**上一次**的旧包（发错包的实际原因）。
+tasks.register('build') {
+	dependsOn 'buildAndGather'
+}
+
 tasks.register('buildAndGather') {
 
 	subprojects {
