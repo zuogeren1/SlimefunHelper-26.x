@@ -21,6 +21,9 @@ import net.minecraft.world.phys.Vec3;
 /**
  * 远程交互里「桶类物品对流体 / 方块」的目标感知（2026-10-11 加）。
  *
+ * <p><b>状态：WIP</b> —— 目前「能用但不好用」（部分场景仍舀不到：流动水、水面被挡、距离边界），
+ * 暂不发版、攒到下次更新；已知不足与后续事项见 CHANGELOG 的「未发布（WIP）」段。
+ *
  * <p>为什么需要它：26.2 的 {@link BucketItem} <b>只实现 {@code use()}，从不覆写 {@code useOn()}</b> ——
  * 装 / 放流体完全靠服务端拿到包里的 yaw / pitch <b>自己重算一次 POV 射线</b>。
  * 而 {@code !!useitem pos} 给的朝向是「方块的<b>几何中心</b>」：水桶那次 clip 用 {@code Fluid.NONE} 会

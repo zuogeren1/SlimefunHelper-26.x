@@ -167,6 +167,8 @@ public class TpInteract extends BaseModule {
      * <p>这里补上：传送过去 → 重新解一个「真能命中目标」的朝向 → 改包发出 → 传送回来。
      * 够得着（原版范围内）不干预；解不出命中也不吃原包，保持原行为。
      *
+     * <p><b>状态：WIP</b>（2026-10-11）—— 能用但不好用，暂不发版；已知不足见 CHANGELOG 的「未发布（WIP）」段。
+     *
      * <p><b>目标不能取 {@code mc.hitResult}</b>：准星那次 pick 是 {@code withLiquids = false}（26.2 的
      * {@code LiquidBlock.getShape()} 还返回空），瞄水面时它命中的是水后面 / 水下的方块；而 freecam 期间
      * 玩家朝向被 Freecam 冻结。所以目标一律用 {@link BucketInteract#povTarget} 按<b>相机实体</b>自己算。
