@@ -71,6 +71,20 @@ public class LocatorTracker {
      */
     private static final double AZIMUTH_MIN_DISTANCE = 250.0D;
 
+    /**
+     * 服务端方位角的量化台阶（{@code EntityAzimuthConnection.update} 的补发阈值 0.5°）。
+     * 它是反推不确定度的主项，也是系统性下限：不会随观测条数变多而变小。
+     */
+    private static final double ANGLE_SIGMA_RAD = 0.008726646D;
+
+    /** 由服务端距离直接换算的极点解的不确定度（区块型 waypoint 的粒度量级）。 */
+    private static final double DISTANCE_SIGMA = 16.0D;
+
+    /** σ 下限与算 σ 时的最小跨度（避免除零）。 */
+    private static final double MIN_SIGMA = 4.0D;
+
+    private static final double MIN_SPAN_FOR_SIGMA = 0.5D;
+
     /** 一次观测：观测点 XZ + 当时的绝对朝向（度）。 */
     public static class Observation {
         public final double x;
@@ -96,6 +110,9 @@ public class LocatorTracker {
         public final int tick;
         public final boolean fromDistance;
 
+        /** 估算不确定度（格）：σ ≈ R × 0.5° / sin(跨度)，由 {@code solveAll} 在解算后填。 */
+        public final double sigma;
+
         public Estimate(
                 double x,
                 double z,
@@ -103,7 +120,8 @@ public class LocatorTracker {
                 double span,
                 double baseline,
                 int tick,
-                boolean fromDistance) {
+                boolean fromDistance,
+                double sigma) {
             this.x = x;
             this.z = z;
             this.samples = samples;
@@ -111,6 +129,7 @@ public class LocatorTracker {
             this.baseline = baseline;
             this.tick = tick;
             this.fromDistance = fromDistance;
+            this.sigma = sigma;
         }
 
         public double distanceTo(double px, double pz) {
@@ -334,7 +353,8 @@ public class LocatorTracker {
                             0.0D,
                             0.0D,
                             now,
-                            true);
+                            true,
+                            Double.NaN);
                 }
             } else if (Double.isNaN(finiteDistance)) {
                 // 方位角型只能靠交会：服务端只在目标 &gt; 332 格时才这么发，结果明显更近就是几何退化解歪了
@@ -352,20 +372,33 @@ public class LocatorTracker {
             if (solved == null) {
                 continue;
             }
+            double sigma = this.sigmaOf(solved, Double.isNaN(finiteDistance) ? playerPos : camPos);
+            double x = solved.x;
+            double z = solved.z;
             Estimate previous = this.estimates.get(id);
-            if (previous != null && previous.distanceTo(solved.x, solved.z) <= SMOOTH_SNAP) {
-                solved = new Estimate(
-                        previous.x + (solved.x - previous.x) * SMOOTH_ALPHA,
-                        previous.z + (solved.z - previous.z) * SMOOTH_ALPHA,
-                        solved.samples,
-                        solved.span,
-                        solved.baseline,
-                        solved.tick,
-                        solved.fromDistance);
+            if (previous != null && previous.distanceTo(x, z) <= SMOOTH_SNAP) {
+                x = previous.x + (x - previous.x) * SMOOTH_ALPHA;
+                z = previous.z + (z - previous.z) * SMOOTH_ALPHA;
             }
-            this.estimates.put(id, solved);
+            this.estimates.put(id, new Estimate(
+                    x, z, solved.samples, solved.span, solved.baseline, solved.tick, solved.fromDistance, sigma));
         }
         this.prune(now, maxAgeTicks);
+    }
+
+    /**
+     * 估算不确定度（格）：σ ≈ R × 角度误差 / sin(观测跨度)。
+     *
+     * <p>角度误差取服务端量化台阶 0.5°：它不会随观测条数变多而变小，而且跨度越小放大越猛
+     * （span 2° 时放大 28 倍）—— 这就是"跑得越远越只能定方向"的量化原因。
+     */
+    private double sigmaOf(Estimate estimate, Vec3 origin) {
+        if (estimate.fromDistance) {
+            return DISTANCE_SIGMA;
+        }
+        double range = estimate.distanceTo(origin.x, origin.z);
+        double sinSpan = Math.sin(Math.toRadians(Math.max(estimate.span, MIN_SPAN_FOR_SIGMA)));
+        return Math.max(MIN_SIGMA, range * ANGLE_SIGMA_RAD / sinSpan);
     }
 
     /** 最小二乘解：最小化各观测点到各自方位射线的垂距平方和，法方程 2x2 直接求解。 */
@@ -414,7 +447,7 @@ public class LocatorTracker {
         if (!Double.isFinite(x) || !Double.isFinite(z)) {
             return null;
         }
-        return new Estimate(x, z, queue.size(), span, baseline, last.tick, false);
+        return new Estimate(x, z, queue.size(), span, baseline, last.tick, false, Double.NaN);
     }
 
     private void prune(int now, int maxAgeTicks) {
