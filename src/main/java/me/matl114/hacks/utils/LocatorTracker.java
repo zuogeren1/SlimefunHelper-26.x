@@ -65,6 +65,12 @@ public class LocatorTracker {
     /** 法方程退化判定：方位几乎共线时行列式会趋近 0。 */
     private static final double DET_EPS = 1.0e-6D;
 
+    /**
+     * 方位角型 waypoint 的距离下限：服务端只在目标 &gt; 332 格（{@code isReallyFar}）时才发这种连接，
+     * 交会结果明显更近就说明两条射线近于平行、解歪了。
+     */
+    private static final double AZIMUTH_MIN_DISTANCE = 250.0D;
+
     /** 一次观测：观测点 XZ + 当时的绝对朝向（度）。 */
     public static class Observation {
         public final double x;
@@ -112,12 +118,42 @@ public class LocatorTracker {
         }
     }
 
+    /** 调试用：一个 waypoint 当前的追踪状态。 */
+    public static class Status {
+        public final Either<UUID, String> id;
+        public final int samples;
+        public final double span;
+        public final double baseline;
+        public final boolean finiteDistance;
+        public final double distance;
+        public final Estimate estimate;
+
+        public Status(
+                Either<UUID, String> id,
+                int samples,
+                double span,
+                double baseline,
+                boolean finiteDistance,
+                double distance,
+                Estimate estimate) {
+            this.id = id;
+            this.samples = samples;
+            this.span = span;
+            this.baseline = baseline;
+            this.finiteDistance = finiteDistance;
+            this.distance = distance;
+            this.estimate = estimate;
+        }
+    }
+
     private final Map<Either<UUID, String>, ArrayDeque<Observation>> observations = new HashMap<>();
     private final Map<Either<UUID, String>, Estimate> estimates = new HashMap<>();
     private final Map<Either<UUID, String>, double[]> distances = new HashMap<>();
     private final Map<Either<UUID, String>, Integer> lastSeen = new HashMap<>();
     private final Map<Either<UUID, String>, Boolean> finiteType = new HashMap<>();
     private int lastTick = Integer.MIN_VALUE;
+    private int waypointCount;
+    private int lastStatusTick = Integer.MIN_VALUE;
 
     /** 换世界 / 断线时清空，避免把上一个世界的观测带过来。 */
     public void clear() {
@@ -135,6 +171,49 @@ public class LocatorTracker {
 
     public List<Map.Entry<Either<UUID, String>, Estimate>> snapshot() {
         return new ArrayList<>(this.estimates.entrySet());
+    }
+
+    /** 上一刻收到的定位栏 waypoint 数量（未过滤自己之前的口径之外：这里就是可用的条数）。 */
+    public int getWaypointCount() {
+        return this.waypointCount;
+    }
+
+    /**
+     * 调试快照：每个正在追踪的 waypoint 现在攒了多少观测、跨度/基线够不够、有没有解出来。
+     *
+     * <p>“跑了很远还是没结果”时靠它区分三种情况：根本没有 waypoint、观测几何不够、解算被校验挡掉。
+     */
+    public List<Status> statuses() {
+        List<Status> list = new ArrayList<>();
+        for (Map.Entry<Either<UUID, String>, ArrayDeque<Observation>> entry : this.observations.entrySet()) {
+            ArrayDeque<Observation> queue = entry.getValue();
+            if (queue.isEmpty()) {
+                continue;
+            }
+            Observation first = queue.peekFirst();
+            Observation last = queue.peekLast();
+            double minHeading = 0.0D;
+            double maxHeading = 0.0D;
+            double baseline = 0.0D;
+            for (Observation observation : queue) {
+                double delta = Mth.wrapDegrees(observation.heading - first.heading);
+                minHeading = Math.min(minHeading, delta);
+                maxHeading = Math.max(maxHeading, delta);
+                baseline = Math.max(baseline, Math.hypot(observation.x - last.x, observation.z - last.z));
+            }
+            double[] dist = this.distances.get(entry.getKey());
+            boolean finite = dist != null;
+            list.add(new Status(
+                    entry.getKey(),
+                    queue.size(),
+                    maxHeading - minHeading,
+                    baseline,
+                    finite,
+                    finite ? dist[0] : Double.NaN,
+                    this.estimates.get(entry.getKey())));
+        }
+        list.sort((a, b) -> Double.compare(b.span, a.span));
+        return list;
     }
 
     /**
@@ -186,7 +265,8 @@ public class LocatorTracker {
                     now,
                     maxAgeTicks);
         });
-        this.solveAll(camPos, minSpanDeg, minBaseline, maxAgeTicks, now, seen);
+        this.waypointCount = seen.size();
+        this.solveAll(camPos, playerPos, minSpanDeg, minBaseline, maxAgeTicks, now, seen);
     }
 
     private void record(
@@ -226,6 +306,7 @@ public class LocatorTracker {
 
     private void solveAll(
             Vec3 camPos,
+            Vec3 playerPos,
             double minSpanDeg,
             double minBaseline,
             int maxAgeTicks,
@@ -255,8 +336,14 @@ public class LocatorTracker {
                             now,
                             true);
                 }
-            } else if (!Double.isNaN(finiteDistance)) {
-                // 交叉校验：交会出的距离必须与服务端给的距离对得上，否则这次交会不可信
+            } else if (Double.isNaN(finiteDistance)) {
+                // 方位角型只能靠交会：服务端只在目标 &gt; 332 格时才这么发，结果明显更近就是几何退化解歪了
+                double distance = solved.distanceTo(playerPos.x, playerPos.z);
+                if (distance < AZIMUTH_MIN_DISTANCE) {
+                    solved = null;
+                }
+            } else {
+                // 坐标型：交会出的距离必须与服务端给的距离对得上，否则这次交会不可信
                 double error = Math.abs(solved.distanceTo(camPos.x, camPos.z) - finiteDistance);
                 if (error > Math.max(CHECK_ABSOLUTE, CHECK_RELATIVE * finiteDistance)) {
                     solved = null;

@@ -1471,6 +1471,7 @@
 	"player-info.name-list.locator-track-min-span": "玩家列表: 反推最小方位跨度",
 	"player-info.name-list.locator-track-min-baseline": "玩家列表: 反推最小基线",
 	"player-info.name-list.locator-track-max-age": "玩家列表: 反推观测保留时长",
+	"player-info.name-list.locator-track-debug": "玩家列表: 定位栏反推调试日志",
 	"combat-info.combat-log.enable": "战斗提示",
 	"combat-info.combat-log.enable.tooltips": "可以在你成功攻击对方的时候提示你",
 	"combat-info.combat-log.log-me-hit-other": "战斗提示: 击中提示",
