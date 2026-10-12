@@ -183,8 +183,7 @@ public class NameList extends INameTag {
                     null));
         }
         if (!extra.isEmpty()) {
-            // 放最前面：列表有长度上限（player-list-max-length），反推行不能被截掉
-            nameTagInfos.addAll(0, extra);
+            nameTagInfos.addAll(extra);
         }
         if (locatorDebug.get()) {
             nameTagInfos.add(debugLine());
