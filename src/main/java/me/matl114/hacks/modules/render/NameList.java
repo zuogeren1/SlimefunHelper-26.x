@@ -58,12 +58,15 @@ public class NameList extends INameTag {
                 .build();
         locatorMinSpan = doubleBuilder(nameTag.add("locator-track-min-span"))
                 .defaultValue(1.0D)
+                .validator(Configs.doubleRange(0.2D, 30.0D))
                 .build();
         locatorMinBaseline = doubleBuilder(nameTag.add("locator-track-min-baseline"))
                 .defaultValue(16.0D)
+                .validator(Configs.doubleRange(1.0D, 1000.0D))
                 .build();
         locatorMaxAge = builder(nameTag.add("locator-track-max-age"), IntRef.TYPE)
                 .defaultValue(1200)
+                .validator(Configs.intRange(40, 12000))
                 .build();
         locatorDebug = flagBuilder(nameTag.add("locator-track-debug")).build();
     }
@@ -89,7 +92,7 @@ public class NameList extends INameTag {
     /** 调试：HUD 加一行状态、聊天按 2 秒节流打印每个点的样本/跨度/基线。 */
     public FlagRef locatorDebug;
 
-    private int lastLocatorDebugTick;
+    private int lastLocatorDebugTick = -1000;
 
     @Override
     public void onRender(Event<Render2D> event) {
@@ -181,6 +184,12 @@ public class NameList extends INameTag {
             }
             line.append(Component.literal(" n=%d".formatted(estimate.samples))
                     .withColor(infoColor.get().asRGB()));
+            int ageTicks = Tasks.getTick() - estimate.tick;
+            if (ageTicks > 60) {
+                // 超过 3 秒没刷新（对方潜行/下线/解算被门槛挡住）→ 标出这是旧值
+                line.append(Component.literal(" +%ds".formatted(ageTicks / 20))
+                        .withColor(infoColor.get().asRGB()));
+            }
             extra.add(new PlayerNameTagInfo(
                     null,
                     Component.literal(displayName(id)).withColor(nameColor.get().asRGB()),

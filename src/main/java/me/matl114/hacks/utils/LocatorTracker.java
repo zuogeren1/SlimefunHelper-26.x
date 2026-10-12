@@ -54,9 +54,23 @@ public class LocatorTracker {
     /** 观测条数不足该值时不做几何门槛，先攒够样本。 */
     private static final int MIN_SAMPLES = 3;
 
-    /** 解算结果与上一次相差不超过该值时做平滑，避免数字跳动。 */
-    private static final double SMOOTH_SNAP = 32.0D;
+    /**
+     * 平滑判定：新解与上次相差不超过 {@code max(下限, 倍数 × σ)} 时才平滑。
+     *
+     * <p>阈值跟着 σ 走而不是固定格数：长距离下 σ 上千格、相邻解跳动上百格，
+     * 固定阈值会让平滑恰好在这种最需要它的场景失效。
+     */
+    private static final double SMOOTH_MIN = 16.0D;
+
+    private static final double SMOOTH_SIGMA_FACTOR = 2.0D;
     private static final double SMOOTH_ALPHA = 0.5D;
+
+    /**
+     * σ 里的「观测点滞后」项：方位角是服务端按它自己那份玩家位置算的，
+     * 我们记的却是当刻客户端位置，差 ≈ 单向延迟 × 速度；
+     * 而观测点整体平移会 1:1 平移到最小二乘解上，所以必须计进 σ。
+     */
+    private static final double LATENCY_TICKS = 2.0D;
 
     /** 用有限距离交叉校验解算结果时允许的误差（相对 + 绝对）。 */
     private static final double CHECK_RELATIVE = 0.25D;
@@ -106,7 +120,6 @@ public class LocatorTracker {
         public final double z;
         public final int samples;
         public final double span;
-        public final double baseline;
         public final int tick;
         public final boolean fromDistance;
 
@@ -118,7 +131,6 @@ public class LocatorTracker {
                 double z,
                 int samples,
                 double span,
-                double baseline,
                 int tick,
                 boolean fromDistance,
                 double sigma) {
@@ -126,7 +138,6 @@ public class LocatorTracker {
             this.z = z;
             this.samples = samples;
             this.span = span;
-            this.baseline = baseline;
             this.tick = tick;
             this.fromDistance = fromDistance;
             this.sigma = sigma;
@@ -172,6 +183,10 @@ public class LocatorTracker {
     private final Map<Either<UUID, String>, Boolean> finiteType = new HashMap<>();
     private int lastTick = Integer.MIN_VALUE;
     private int waypointCount;
+    private double lastPlayerX;
+    private double lastPlayerZ;
+    private int lastPlayerTick = Integer.MIN_VALUE;
+    private double lagSigma;
 
     /** 换世界 / 断线时清空，避免把上一个世界的观测带过来。 */
     public void clear() {
@@ -181,6 +196,8 @@ public class LocatorTracker {
         this.lastSeen.clear();
         this.finiteType.clear();
         this.lastTick = Integer.MIN_VALUE;
+        this.lastPlayerTick = Integer.MIN_VALUE;
+        this.lagSigma = 0.0D;
     }
 
     public Estimate get(Either<UUID, String> id) {
@@ -191,7 +208,7 @@ public class LocatorTracker {
         return new ArrayList<>(this.estimates.entrySet());
     }
 
-    /** 上一刻收到的定位栏 waypoint 数量（未过滤自己之前的口径之外：这里就是可用的条数）。 */
+    /** 上一刻收到的、可用（已排除自己、方位角有效）的定位栏 waypoint 数量。 */
     public int getWaypointCount() {
         return this.waypointCount;
     }
@@ -203,32 +220,38 @@ public class LocatorTracker {
      */
     public List<Status> statuses() {
         List<Status> list = new ArrayList<>();
-        for (Map.Entry<Either<UUID, String>, ArrayDeque<Observation>> entry : this.observations.entrySet()) {
-            ArrayDeque<Observation> queue = entry.getValue();
-            if (queue.isEmpty()) {
-                continue;
-            }
-            Observation first = queue.peekFirst();
-            Observation last = queue.peekLast();
-            double minHeading = 0.0D;
-            double maxHeading = 0.0D;
+        Set<Either<UUID, String>> ids = new HashSet<>(this.observations.keySet());
+        // 观测已被清、只剩旧解的点也要列出来，否则「列表有行、调试行没这个点」
+        ids.addAll(this.estimates.keySet());
+        for (Either<UUID, String> key : ids) {
+            ArrayDeque<Observation> queue = this.observations.get(key);
+            int samples = 0;
+            double span = 0.0D;
             double baseline = 0.0D;
-            for (Observation observation : queue) {
-                double delta = Mth.wrapDegrees(observation.heading - first.heading);
-                minHeading = Math.min(minHeading, delta);
-                maxHeading = Math.max(maxHeading, delta);
-                baseline = Math.max(baseline, Math.hypot(observation.x - last.x, observation.z - last.z));
+            if (queue != null && !queue.isEmpty()) {
+                Observation first = queue.peekFirst();
+                Observation last = queue.peekLast();
+                double minHeading = 0.0D;
+                double maxHeading = 0.0D;
+                for (Observation observation : queue) {
+                    double delta = Mth.wrapDegrees(observation.heading - first.heading);
+                    minHeading = Math.min(minHeading, delta);
+                    maxHeading = Math.max(maxHeading, delta);
+                    baseline = Math.max(baseline, Math.hypot(observation.x - last.x, observation.z - last.z));
+                }
+                samples = queue.size();
+                span = maxHeading - minHeading;
             }
-            double[] dist = this.distances.get(entry.getKey());
+            double[] dist = this.distances.get(key);
             boolean finite = dist != null;
             list.add(new Status(
-                    entry.getKey(),
-                    queue.size(),
-                    maxHeading - minHeading,
+                    key,
+                    samples,
+                    span,
                     baseline,
                     finite,
                     finite ? dist[0] : Double.NaN,
-                    this.estimates.get(entry.getKey())));
+                    this.estimates.get(key)));
         }
         list.sort((a, b) -> Double.compare(b.span, a.span));
         return list;
@@ -257,6 +280,7 @@ public class LocatorTracker {
         // 服务端的方位角是按“服务端已知的玩家位置”算的，而坐标型 waypoint 的方位角按相机算：
         // 观测点必须跟着口径走，否则 freecam / 第三人称会整体错位。
         Vec3 playerPos = mc.player.position();
+        this.updateLagSigma(playerPos, now);
         Level level = mc.level;
         Set<Either<UUID, String>> seen = new HashSet<>();
         mc.player.connection.getWaypointManager().forEachWaypoint(from, waypoint -> {
@@ -264,7 +288,7 @@ public class LocatorTracker {
             if (id.left().map(uuid -> uuid.equals(from.getUUID())).orElse(false)) {
                 return;
             }
-            // 第三参数只用于实体位置插值，方位角型 waypoint 根本不读它
+            // 第三参数只影响实体位置插值（Vec3i 型在目标实体 ≤3 格时会读它；方位角型不读）
             double rel = waypoint.yawAngleToCamera(level, camera, ignored -> 0.0F);
             if (Double.isNaN(rel) || Double.isInfinite(rel)) {
                 return;
@@ -285,6 +309,19 @@ public class LocatorTracker {
         });
         this.waypointCount = seen.size();
         this.solveAll(camPos, playerPos, minSpanDeg, minBaseline, maxAgeTicks, now, seen);
+    }
+
+    /** 观测点滞后估计：上一刻到这一刻的位移 ÷ 间隔 × 延迟刻数。 */
+    private void updateLagSigma(Vec3 playerPos, int now) {
+        if (this.lastPlayerTick != Integer.MIN_VALUE) {
+            int delta = Math.max(1, now - this.lastPlayerTick);
+            double speed =
+                    Math.hypot(playerPos.x - this.lastPlayerX, playerPos.z - this.lastPlayerZ) / delta;
+            this.lagSigma = speed * LATENCY_TICKS;
+        }
+        this.lastPlayerX = playerPos.x;
+        this.lastPlayerZ = playerPos.z;
+        this.lastPlayerTick = now;
     }
 
     private void record(
@@ -350,7 +387,6 @@ public class LocatorTracker {
                             last.z + Math.cos(theta) * finiteDistance,
                             1,
                             0.0D,
-                            0.0D,
                             now,
                             true,
                             Double.NaN);
@@ -375,12 +411,13 @@ public class LocatorTracker {
             double x = solved.x;
             double z = solved.z;
             Estimate previous = this.estimates.get(id);
-            if (previous != null && previous.distanceTo(x, z) <= SMOOTH_SNAP) {
+            if (previous != null
+                    && previous.distanceTo(x, z) <= Math.max(SMOOTH_MIN, SMOOTH_SIGMA_FACTOR * sigma)) {
                 x = previous.x + (x - previous.x) * SMOOTH_ALPHA;
                 z = previous.z + (z - previous.z) * SMOOTH_ALPHA;
             }
             this.estimates.put(id, new Estimate(
-                    x, z, solved.samples, solved.span, solved.baseline, solved.tick, solved.fromDistance, sigma));
+                    x, z, solved.samples, solved.span, solved.tick, solved.fromDistance, sigma));
         }
         this.prune(now, maxAgeTicks);
     }
@@ -392,12 +429,17 @@ public class LocatorTracker {
      * （span 2° 时放大 28 倍）—— 这就是"跑得越远越只能定方向"的量化原因。
      */
     private double sigmaOf(Estimate estimate, Vec3 origin) {
+        // 观测点滞后是沿运动方向的系统性平移，按平方和并入两种解
         if (estimate.fromDistance) {
-            return DISTANCE_SIGMA;
+            return Math.hypot(DISTANCE_SIGMA, this.lagSigma);
         }
         double range = estimate.distanceTo(origin.x, origin.z);
-        double sinSpan = Math.sin(Math.toRadians(Math.max(estimate.span, MIN_SPAN_FOR_SIGMA)));
-        return Math.max(MIN_SIGMA, range * ANGLE_SIGMA_RAD / sinSpan);
+        // 跨度扫过 ±180° 时 sin 会变负，取绝对值并设下限，否则 σ 会被算成"极小值"
+        double sinSpan = Math.max(
+                Math.abs(Math.sin(Math.toRadians(Math.max(estimate.span, MIN_SPAN_FOR_SIGMA)))),
+                Math.sin(Math.toRadians(MIN_SPAN_FOR_SIGMA)));
+        double sigma = Math.max(MIN_SIGMA, range * ANGLE_SIGMA_RAD / sinSpan);
+        return Math.hypot(sigma, this.lagSigma);
     }
 
     /** 最小二乘解：最小化各观测点到各自方位射线的垂距平方和，法方程 2x2 直接求解。 */
@@ -446,7 +488,7 @@ public class LocatorTracker {
         if (!Double.isFinite(x) || !Double.isFinite(z)) {
             return null;
         }
-        return new Estimate(x, z, queue.size(), span, baseline, last.tick, false, Double.NaN);
+        return new Estimate(x, z, queue.size(), span, last.tick, false, Double.NaN);
     }
 
     private void prune(int now, int maxAgeTicks) {
