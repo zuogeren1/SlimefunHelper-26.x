@@ -172,7 +172,6 @@ public class LocatorTracker {
     private final Map<Either<UUID, String>, Boolean> finiteType = new HashMap<>();
     private int lastTick = Integer.MIN_VALUE;
     private int waypointCount;
-    private int lastStatusTick = Integer.MIN_VALUE;
 
     /** 换世界 / 断线时清空，避免把上一个世界的观测带过来。 */
     public void clear() {
@@ -266,7 +265,7 @@ public class LocatorTracker {
                 return;
             }
             // 第三参数只用于实体位置插值，方位角型 waypoint 根本不读它
-            double rel = waypoint.yawAngleToCamera(level, camera, entity -> 0.0F);
+            double rel = waypoint.yawAngleToCamera(level, camera, ignored -> 0.0F);
             if (Double.isNaN(rel) || Double.isInfinite(rel)) {
                 return;
             }
