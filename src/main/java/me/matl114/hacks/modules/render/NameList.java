@@ -2,7 +2,6 @@ package me.matl114.hacks.modules.render;
 
 import com.mojang.datafixers.util.Either;
 import java.util.ArrayList;
-import me.matl114.accessors.access.PlayerMoveC2SPacketAccess;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,7 +25,6 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffect;
@@ -132,18 +130,6 @@ public class NameList extends INameTag {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch);
-        registerListener(Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class), this::onPlayerMove);
-    }
-
-    /**
-     * 服务端把我们的位置拉回时（SET_BACK），在途的方位角是按拉回前的位置算的，
-     * 观测口径已经不一致 → 全部作废重来。
-     */
-    public void onPlayerMove(Event<ServerboundMovePlayerPacket> event) {
-        if (PlayerMoveC2SPacketAccess.of(event.context).getCause()
-                == PlayerMoveC2SPacketAccess.Cause.SET_BACK) {
-            LocatorTracker.INSTANCE.clear();
-        }
     }
 
     /** 换世界（含换维度）时坐标系整体改变，旧观测必须作废。 */
@@ -193,6 +179,8 @@ public class NameList extends INameTag {
                 line.append(Component.literal(" ±%dm".formatted((int) Math.round(estimate.sigma)))
                         .withColor(distColor.get().asRGB()));
             }
+            line.append(Component.literal(" n=%d".formatted(estimate.samples))
+                    .withColor(infoColor.get().asRGB()));
             extra.add(new PlayerNameTagInfo(
                     null,
                     Component.literal(displayName(id)).withColor(nameColor.get().asRGB()),
