@@ -194,7 +194,8 @@ public class DrawContext_v1_21_11 implements VDrawContext {
         TextDrawer current = TextRenderers.resolve(textDrawer);
         if (current.getClass() == VanillaTextDrawer.class) {
             drawContext.text(((VanillaTextDrawer) current).unwrap(), text, x, y, getShaderRGB(color), shadow);
-        } else if (current instanceof ResourceFontTextDrawer resourceFontTextDrawer) {
+        } else if (current instanceof ResourceFontTextDrawer resourceFontTextDrawer
+                && resourceFontTextDrawer.isAvailable()) {
             addTextState(
                     resourceFontTextDrawer.unwrap(),
                     resourceFontTextDrawer.withFont(text),
@@ -216,7 +217,8 @@ public class DrawContext_v1_21_11 implements VDrawContext {
         TextDrawer current = TextRenderers.resolve(textDrawer);
         if (current.getClass() == VanillaTextDrawer.class) {
             drawContext.text(((VanillaTextDrawer) current).unwrap(), text, x, y, getShaderRGB(color), shadow);
-        } else if (current instanceof ResourceFontTextDrawer resourceFontTextDrawer) {
+        } else if (current instanceof ResourceFontTextDrawer resourceFontTextDrawer
+                && resourceFontTextDrawer.isAvailable()) {
             addTextState(
                     resourceFontTextDrawer.unwrap(),
                     resourceFontTextDrawer.formattedString(text, true),

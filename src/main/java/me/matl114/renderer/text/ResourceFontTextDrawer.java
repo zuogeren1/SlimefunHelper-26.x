@@ -3,6 +3,9 @@ package me.matl114.renderer.text;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.StringSplitter;
 import net.minecraft.client.gui.Font;
@@ -12,6 +15,7 @@ import net.minecraft.network.chat.FontDescription;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.Style;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.StringDecomposer;
 
@@ -22,8 +26,10 @@ import net.minecraft.util.StringDecomposer;
  * 字符的样式都塞上 {@link FontDescription.Resource}，再交给同一套 {@link Font} 处理。
  */
 public class ResourceFontTextDrawer extends VanillaTextDrawer {
+    private static final Set<Identifier> WARNED_IDS = ConcurrentHashMap.newKeySet();
     private final Identifier fontId;
     private final Style fontStyle;
+    private final boolean available;
 
     public ResourceFontTextDrawer(Identifier fontId) {
         this(Minecraft.getInstance().font, fontId);
@@ -32,7 +38,32 @@ public class ResourceFontTextDrawer extends VanillaTextDrawer {
     public ResourceFontTextDrawer(Font delegate, Identifier fontId) {
         super(delegate);
         this.fontId = fontId;
-        this.fontStyle = Style.EMPTY.withFont(new FontDescription.Resource(fontId));
+        // 26.2: FontManager 对不认识的字体 id 直接回落到 minecraft:missing（每个字符都是空心方块），
+        // 而自定义字体的装载链（尤其 SYSTEM 风格的本地 ttf）当前版本还没落地，所以先确认资源真的存在；
+        // 不存在就按原版字体绘制——宁可丢自定义字体，也不能整屏不可读。
+        this.available = fontExists(fontId);
+        this.fontStyle = this.available ? Style.EMPTY.withFont(new FontDescription.Resource(fontId)) : Style.EMPTY;
+        if (!this.available && WARNED_IDS.add(fontId)) {
+            Debug.info("Font " + fontId + " is not loaded, falling back to the vanilla font");
+        }
+    }
+
+    /** 字体资源是否存在；不存在时本门面的绘制与测量全部退回原版字体。 */
+    public boolean isAvailable() {
+        return available;
+    }
+
+    private static boolean fontExists(Identifier id) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) {
+            return false;
+        }
+        ResourceManager manager = minecraft.getResourceManager();
+        if (manager == null) {
+            return false;
+        }
+        return manager.getResource(Identifier.fromNamespaceAndPath(id.getNamespace(), "font/" + id.getPath() + ".json"))
+                .isPresent();
     }
 
     public Identifier fontId() {
@@ -150,7 +181,7 @@ public class ResourceFontTextDrawer extends VanillaTextDrawer {
     }
 
     private Style withFont(Style style) {
-        return style.withFont(new FontDescription.Resource(fontId));
+        return available ? style.withFont(new FontDescription.Resource(fontId)) : style;
     }
 
     private record FormattedCharacter(int index, Style style, int codePoint) {}

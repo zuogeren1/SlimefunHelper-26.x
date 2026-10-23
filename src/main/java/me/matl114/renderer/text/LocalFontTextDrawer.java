@@ -57,7 +57,8 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
 
     @Override
     public float getTextHeight() {
-        return fontSize;
+        // 装载链没落地时本门面实际画的是原版字体，行高必须跟着原版走，否则排版会错位。
+        return isAvailable() ? fontSize : super.getTextHeight();
     }
 
     @Override
