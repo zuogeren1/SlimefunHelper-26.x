@@ -94,6 +94,17 @@ public class ItemDisplay extends BaseModule {
         super("ItemDisplay");
         portConfigs(makePath(Configs.RENDER_CONFIG, "itemstack-display.storage-display"), modelConfig);
         portConfigs(makePath(Configs.RENDER_CONFIG, "itemstack-display.enchantment-display"), enchantmentConfig);
+    }
+
+    /**
+     * 26.2: 建表过程要 new ItemStack，而模块构造发生在 onInitialize（数据组件未绑定），
+     * 那时构造会抛 "Components not bound yet"。改为首次用到时再建表。
+     */
+    private boolean checkTablesBuilt = false;
+
+    private void ensureCheckTables() {
+        if (checkTablesBuilt) return;
+        checkTablesBuilt = true;
         for (var item : BuiltInRegistries.ITEM) {
             if (item instanceof MaceItem) {
                 checkList.put(item, List.of(Enchantments.DENSITY, Enchantments.BREACH));
@@ -136,21 +147,28 @@ public class ItemDisplay extends BaseModule {
             .defaultValue(Mode.ALL)
             .build();
 
-    private static final Map<EntityType<?>, ItemStack> spawnEggNewStyleItem = new HashMap<>();
+    // 26.2: 建表过程要 new ItemStack，数据组件未绑定时构造会抛 "Components not bound yet"，
+    // 而模块注册发生在 onInitialize（组件绑定之前），所以不能在 static 块里建，改为首次访问时构建。
+    private static Map<EntityType<?>, ItemStack> spawnEggNewStyleItem = null;
 
-    static {
-        for (EntityType<?> types : BuiltInRegistries.ENTITY_TYPE) {
-            Item optionalEgg = EntityUtils.entityToSpawnEgg(types);
-            if (optionalEgg != null && optionalEgg != Items.AIR) {
-                spawnEggNewStyleItem.put(types, NewStyleModel.ofNewVersion(new ItemStack(optionalEgg)));
+    private static Map<EntityType<?>, ItemStack> spawnEggNewStyleItems() {
+        Map<EntityType<?>, ItemStack> map = spawnEggNewStyleItem;
+        if (map == null) {
+            map = new HashMap<>();
+            for (EntityType<?> types : BuiltInRegistries.ENTITY_TYPE) {
+                Item optionalEgg = EntityUtils.entityToSpawnEgg(types);
+                if (optionalEgg != null && optionalEgg != Items.AIR) {
+                    map.put(types, NewStyleModel.ofNewVersion(new ItemStack(optionalEgg)));
+                }
             }
+            spawnEggNewStyleItem = map;
         }
+        return map;
     }
 
     public static ItemStack getRenderingEntityContent(EntityType<?> typed) {
-        return spawnEggNewStyleItem.containsKey(typed)
-                ? spawnEggNewStyleItem.get(typed).copy()
-                : null;
+        ItemStack egg = spawnEggNewStyleItems().get(typed);
+        return egg == null ? null : egg.copy();
     }
 
     @Override
@@ -182,6 +200,7 @@ public class ItemDisplay extends BaseModule {
     private void onInfoAttached(Event<List<GuiModel>> event) {
         if (!enable.get()) return;
         ItemStack stack = event.getArgs(0);
+        ensureCheckTables();
         if (stack.isEmpty() || !checkList.containsKey(stack.getItem())) return;
         FlagRef checkFlag = checkFlags.get(stack.getItem());
         if (checkFlag == null || !checkFlag.get()) return;
@@ -623,7 +642,14 @@ public class ItemDisplay extends BaseModule {
             put("BBCCDDFFssww", "slime_ball_chicken");
         }
     };
-    public static HashMap<String, ItemStack> dnaOutput = new HashMap<>() {
+    // 26.2: 表里要 newItem（内部会 new ItemStack），组件未绑定时构造会抛 "Components not bound yet"，
+    // 而模块在 onInitialize 阶段就会被类初始化，所以改成首次访问时建表。
+    public static HashMap<String, ItemStack> dnaOutputCache = null;
+
+    public static HashMap<String, ItemStack> dnaOutput() {
+        HashMap<String, ItemStack> map = dnaOutputCache;
+        if (map == null) {
+            map = new HashMap<>() {
         {
             put("bbccddffSSWW", newItem("blackstone", null));
             put("bbccddffSSww", newItem("end_stone", null));
@@ -690,7 +716,11 @@ public class ItemDisplay extends BaseModule {
             put("BBCCDDFFssWW", newItem("sand", null));
             put("BBCCDDFFssww", newItem("slime_ball", null));
         }
-    };
+            };
+            dnaOutputCache = map;
+        }
+        return map;
+    }
 
     public static <T extends Object> List<T> ofNullableList(T... values) {
         var re = Arrays.stream(values).filter(Objects::nonNull).toList();
@@ -700,7 +730,7 @@ public class ItemDisplay extends BaseModule {
     public static ItemStack getOptionalChickenOutput(ItemStack item) {
         String val = handlePureChickenDNAInfo(item);
         if (val != null) {
-            return dnaOutput.get(val).copy();
+            return dnaOutput().get(val).copy();
         }
         return null;
     }
@@ -1165,7 +1195,13 @@ public class ItemDisplay extends BaseModule {
                             Items.DRIPSTONE_BLOCK));
         }
     };
-    protected static final HashMap<String, List<ItemStack>> CLT_BUSH_OUT = new HashMap<>() {
+    // 26.2: 同 dnaOutput，表内 newItem 会构造 ItemStack，必须延后到组件绑定之后。
+    protected static HashMap<String, List<ItemStack>> CLT_BUSH_OUTCache = null;
+
+    protected static HashMap<String, List<ItemStack>> CLT_BUSH_OUT() {
+        HashMap<String, List<ItemStack>> map = CLT_BUSH_OUTCache;
+        if (map == null) {
+            map = new HashMap<>() {
         {
             put("CLT_BUSH_BAY_LEAF", ofNullableList(newItem("LILY_PAD", "CLT_BAY_LEAF")));
             put(
@@ -1465,7 +1501,11 @@ public class ItemDisplay extends BaseModule {
                             "PLAYER_HEAD$91b0fb313d90ddafd4fd7c95ef0d51b2ff9cc13013f1d318b11d87aa002fbaa0",
                             "CLT_ORANGE")));
         }
-    };
+            };
+            CLT_BUSH_OUTCache = map;
+        }
+        return map;
+    }
 
     public static Item handleCLTOutput(String sfid) {
         var re = CLT_OUTPUT.get(sfid);
@@ -1477,7 +1517,7 @@ public class ItemDisplay extends BaseModule {
     }
 
     public static ItemStack handleCLTBushOut(String id) {
-        var re = CLT_BUSH_OUT.get(id);
+        var re = CLT_BUSH_OUT().get(id);
 
         if (re == null) {
             return null;

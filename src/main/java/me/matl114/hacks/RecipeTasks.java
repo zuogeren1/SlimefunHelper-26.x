@@ -43,14 +43,25 @@ public class RecipeTasks {
         return BuiltInRegistries.ITEM.getOptional(Identifier.tryParse(rid)).isPresent();
     }
 
-    private static final Map<String, ItemStack> SUPPORT_VANILLA_RTYPE = Map.of(
-            "minecraft:crafting", new ItemStack(Items.CRAFTING_TABLE),
-            "minecraft:smelting", new ItemStack(Items.FURNACE),
-            "minecraft:blasting", new ItemStack(Items.BLAST_FURNACE),
-            "minecraft:smoking", new ItemStack(Items.SMOKER),
-            "minecraft:campfire_cooking", new ItemStack(Items.CAMPFIRE),
-            "minecraft:stonecutting", new ItemStack(Items.STONECUTTER),
-            "minecraft:smithing", new ItemStack(Items.SMITHING_TABLE));
+    // 26.2: 这里要 new ItemStack，而 Tasks 体系在类初始化阶段就会被加载（此时数据组件还没绑定），
+    // 构造函数会抛 "Components not bound yet"，所以改成首次访问时构建。
+    private static Map<String, ItemStack> SUPPORT_VANILLA_RTYPE = null;
+
+    private static Map<String, ItemStack> supportVanillaRType() {
+        Map<String, ItemStack> map = SUPPORT_VANILLA_RTYPE;
+        if (map == null) {
+            map = Map.of(
+                    "minecraft:crafting", new ItemStack(Items.CRAFTING_TABLE),
+                    "minecraft:smelting", new ItemStack(Items.FURNACE),
+                    "minecraft:blasting", new ItemStack(Items.BLAST_FURNACE),
+                    "minecraft:smoking", new ItemStack(Items.SMOKER),
+                    "minecraft:campfire_cooking", new ItemStack(Items.CAMPFIRE),
+                    "minecraft:stonecutting", new ItemStack(Items.STONECUTTER),
+                    "minecraft:smithing", new ItemStack(Items.SMITHING_TABLE));
+            SUPPORT_VANILLA_RTYPE = map;
+        }
+        return map;
+    }
 
     public static ItemStack getVanillaRecipeTypeIcon(String rid) {
         return BuiltInRegistries.ITEM
