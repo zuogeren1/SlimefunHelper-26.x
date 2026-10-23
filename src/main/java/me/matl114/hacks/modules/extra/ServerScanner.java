@@ -1,5 +1,6 @@
 package me.matl114.hacks.modules.extra;
 
+import me.matl114.renderer.TextRenderers;
 import me.matl114.utils.ClientUtils;
 
 import com.google.gson.*;
@@ -157,7 +158,7 @@ public class ServerScanner extends BaseModule {
                 .setElementHandler(new ButtonElement(
                         TextProvider.of(Component.literal("AScan")), ButtonAction.run(this::startScanTaskAsync))));
         subScreenWidget.addDrawableChild(ExecutableWidget.instance(320, 0, 80, 20)
-                .setElementHandler(new LabelElement((s) -> logInfo, CommonColors.WHITE, 0)));
+                .setElementHandler(new LabelElement((s) -> logInfo, CommonColors.WHITE, TextAlign.MIDDLE)));
         return subScreenWidget;
     }
 
@@ -618,6 +619,8 @@ public class ServerScanner extends BaseModule {
     private static final int updateInterval = 200;
 
     public DrawableWidget createJoinServerWidget(String ip) {
+        int textHeight = Math.round(TextRenderers.get().getTextHeight() + 1.0F);
+        int textLineStep = Math.round(TextRenderers.get().getTextHeight());
         SubScreenWidget subScreenWidget = new SubScreenWidget(0, 0, 310, 40);
         // draw a highlight frame when mouse is over
         AtomicInteger firstRenderTime = new AtomicInteger(0);
@@ -651,9 +654,9 @@ public class ServerScanner extends BaseModule {
                             }
                         }))));
 
-        subScreenWidget.addDrawableChild(ExecutableWidget.instance(45, 0, 100, 9)
+        subScreenWidget.addDrawableChild(ExecutableWidget.instance(45, 0, 100, textHeight)
                 .setElementHandler(RawTextElement.instance(Component.literal(ip))
-                        .setAlignment(-1)
+                        .setAlignment(TextAlign.LEFT)
                         .withInputHandler(new ButtonElement(TextProvider.of(Component.empty()), ButtonAction.run(() -> {
                             mc.keyboardHandler.setClipboard(ip);
                             logInfo("成功拷贝ip");
@@ -668,19 +671,20 @@ public class ServerScanner extends BaseModule {
                     ExecutableWidget.instance(1, 1, 310, 38).setElementHandler(createJoinServerInteract(info)));
             subScreenWidget.addDrawableChild(DisplayWidget.instance(260, 0, 50, 40)
                     .setRenderHandler(TooltipHandler.of(() -> getServerInfoHover(info))));
-            subScreenWidget.addDrawableChild(DisplayWidget.instance(260, 8, 50, 9)
+            subScreenWidget.addDrawableChild(DisplayWidget.instance(260, textLineStep, 50, textHeight)
                     .setRenderHandler(RawTextElement.instance((b) -> getStatusDisplay(info.state()))
-                            .setAlignment(1)));
-            subScreenWidget.addDrawableChild(DisplayWidget.instance(260, 16, 50, 9)
+                            .setAlignment(TextAlign.RIGHT)));
+            subScreenWidget.addDrawableChild(DisplayWidget.instance(260, textLineStep * 2, 50, textHeight)
                     .setRenderHandler(RawTextElement.instance((b) -> getPlayerListDisplay(info))
-                            .setAlignment(1)));
+                            .setAlignment(TextAlign.RIGHT)));
 
-            subScreenWidget.addDrawableChild(DisplayWidget.instance(260, 24, 50, 9)
+            subScreenWidget.addDrawableChild(DisplayWidget.instance(260, textLineStep * 3, 50, textHeight)
                     .setRenderHandler(RawTextElement.instance((b) -> getServerBrandInfoDisplay(info))
-                            .setAlignment(1)));
+                            .setAlignment(TextAlign.RIGHT)));
             // motd
             subScreenWidget.addDrawableChild(DisplayWidget.instance(50, 10, 270, 30)
-                    .setRenderHandler(new MultiLineTextElement((s) -> getServerMotd(info), CommonColors.WHITE, -1)));
+                    .setRenderHandler(
+                            new MultiLineTextElement((s) -> getServerMotd(info), CommonColors.WHITE, TextAlign.LEFT)));
         } else {
             subScreenWidget.addDrawableChild(
                     DisplayWidget.instance(2, 2, 36, 36).setRenderHandler(LabelElement.instance(Component.empty())));

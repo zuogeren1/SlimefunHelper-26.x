@@ -1,7 +1,10 @@
 package me.matl114.mixins.events;
 
-import com.llamalad7.mixinextras.sugar.Local;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import me.matl114.events.RenderListener;
+import me.matl114.events.impl.RenderSlot;
+import me.matl114.versioned.api.VDrawContext;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -12,7 +15,6 @@ import net.minecraft.world.inventory.Slot;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(AbstractContainerScreen.class)
@@ -23,26 +25,25 @@ public abstract class HandledScreenEvents extends Screen {
         super(title);
     }
 
-    @Inject(
-            method = "extractContents",
-            at =
-                    @At(
-                            value = "INVOKE",
-                            target = "Lorg/joml/Matrix3x2fStack;translate(FF)Lorg/joml/Matrix3x2f;",
-                            shift = At.Shift.AFTER))
-    public void onRenderBegin(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-        RenderListener.renderHandledScreen(context, (AbstractContainerScreen<?>) (Object) this, mouseX, mouseY, delta);
-    }
-
-    @Inject(
+    @WrapOperation(
             method = "extractSlots",
             at =
                     @At(
                             value = "INVOKE",
                             target =
                                     "Lnet/minecraft/client/gui/screens/inventory/AbstractContainerScreen;extractSlot(Lnet/minecraft/client/gui/GuiGraphicsExtractor;Lnet/minecraft/world/inventory/Slot;II)V"))
-    public void onRenderSlot(GuiGraphicsExtractor context, int mouseX, int mouseY, CallbackInfo ci, @Local Slot slot) {
-        RenderListener.renderSlotInScreen(context, (AbstractContainerScreen<?>) (Object) this, slot);
+    public void onRenderSlot(
+            AbstractContainerScreen instance,
+            GuiGraphicsExtractor context,
+            Slot slot,
+            int mouseX,
+            int mouseY,
+            Operation<Void> original) {
+        if (!RenderListener.getRenderSlot()
+                .fireEvent(new RenderSlot(VDrawContext.of(context), instance, slot, mouseX, mouseY))) {
+            return;
+        }
+        original.call(instance, context, slot, mouseX, mouseY);
     }
 
     // fix mouse scroll dispatch

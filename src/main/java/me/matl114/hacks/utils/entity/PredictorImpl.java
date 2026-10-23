@@ -19,6 +19,8 @@ public class PredictorImpl implements Predictor {
     private Entity owner;
     private final Deque<KnownPosition> positions = new ArrayDeque<>();
     private static final int MAX_HISTORY = 80;
+    private Vec3 lastSyncPosition;
+    private int lastSyncTick = 0;
     private Vec3 currentTrackedPosition;
     private float currentSyncedPitch;
     private float currentSyncedYaw;
@@ -36,6 +38,7 @@ public class PredictorImpl implements Predictor {
     public void initializeTrackedPosition(int owner, double x, double y, double z, float pitch, float yaw) {
         this.ownerId = owner;
         this.currentTrackedPosition = new Vec3(x, y, z);
+        lastSyncPosition = this.currentTrackedPosition;
         this.currentSyncedPitch = pitch;
         this.currentSyncedYaw = yaw;
     }
@@ -133,20 +136,11 @@ public class PredictorImpl implements Predictor {
     }
 
     private void setSyncedPosition(Vec3 position) {
+        lastSyncPosition = getCurrentPos();
         if (position != null) {
             currentTrackedPosition = position;
         }
-    }
-
-    private Entity trackedOwner() {
-        if (owner != null) {
-            return owner;
-        }
-        Entity resolved = mc.level == null ? null : mc.level.getEntity(ownerId);
-        if (resolved != null) {
-            owner = resolved;
-        }
-        return resolved;
+        lastSyncTick = Tasks.getTick();
     }
 
     /**
@@ -173,6 +167,13 @@ public class PredictorImpl implements Predictor {
     }
 
     @Override
+    public Vec3 getCurrentSyncedPos() {
+        synchronized (this) {
+            return getCurrentPos();
+        }
+    }
+
+    @Override
     public Vec3 getCurrentPos() {
         synchronized (this) {
             if (currentTrackedPosition == null) {
@@ -183,6 +184,17 @@ public class PredictorImpl implements Predictor {
             }
             return currentTrackedPosition == null ? Vec3.ZERO : currentTrackedPosition;
         }
+    }
+
+    private Entity trackedOwner() {
+        if (owner != null) {
+            return owner;
+        }
+        Entity resolved = mc.level == null ? null : mc.level.getEntity(ownerId);
+        if (resolved != null) {
+            owner = resolved;
+        }
+        return resolved;
     }
 
     /**

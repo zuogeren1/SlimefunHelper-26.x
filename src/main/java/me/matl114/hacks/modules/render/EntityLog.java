@@ -2,6 +2,8 @@ package me.matl114.hacks.modules.render;
 
 import java.util.*;
 import lombok.AllArgsConstructor;
+import me.matl114.hacks.modules.survival.XaeroHelper;
+import me.matl114.hooks.impl.xaerowaypoints.IXWaypoint;
 import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.impl.Render2D;
@@ -46,6 +48,12 @@ import net.minecraft.world.phys.Vec3;
 
 public class EntityLog extends BaseModule {
     public final ModulePath entityLog = makePath(Configs.RENDER_CONFIG, "detect-entity.entity-log");
+    public Map<UUID, Entry> offLinePos = new LinkedHashMap<>();
+    private final Map<UUID, Entry> logSpotEntries = new LinkedHashMap<>();
+    private final Map<UUID, List<IXWaypoint>> xaeroLogPoints = new HashMap<>();
+    private final Map<UUID, List<TemporaryXaeroWaypoint>> xaeroFarawayPoints = new HashMap<>();
+    private final Object xaeroFarawayWaypointOwner = new Object();
+    private boolean worldDirty;
 
     public EntityLog() {
         super("EntityLog");
@@ -71,6 +79,16 @@ public class EntityLog extends BaseModule {
 
     public final FlagRef renderLogPosition =
             flagBuilder(entityLog.add("render-log-players")).build();
+
+    public final FlagRef addLogPointToXaero = flagBuilder(entityLog.add("add-log-point-to-xaero-map"))
+            .updateListener(this::onXaeroLogPointSettingChanged)
+            .build();
+
+    public final NBTRef<OptionalPrimitive<Integer>> farawayPointToXaero = builder(
+                    entityLog.add("add-faraway-point-to-xaero-map"), OptionalPrimitive.INT_TYPE)
+            .defaultValue(new OptionalPrimitive<>(false, NBTTypes.INT_TYPE, 100))
+            .validator(ticks -> ticks.getValue() > 0)
+            .build();
 
     public final NBTRef<TracingOption> option = builder(entityLog.add("render-options"), TracingOption.class)
             .defaultValue(new TracingOption(true, false))
@@ -131,8 +149,6 @@ public class EntityLog extends BaseModule {
                     true))
             .build();
 
-    public Map<UUID, Entry> offLinePos = new LinkedHashMap<>();
-
     public void registerAll() {
         super.registerAll();
         registerListener(
@@ -142,6 +158,8 @@ public class EntityLog extends BaseModule {
                 this::onEntityRemove);
         registerListener(Listener.getServerDisconnectPoint(), this::onServerExit);
         registerListener(Listener.getPostTick(), this::onUpdate);
+        registerListener(Listener.getPostGameTick(), this::onPostGameTick);
+        registerListener(XaeroHelper.getWorldSwitchPoint(), this::onXaeroWorldSwitch);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(Listener.getOtherPlayerJoinPoint(), this::onPlayerListEntryAdd);
         registerListener(Listener.getOtherPlayerEntryUpdate(), this::onPlayerListEntryModify);
@@ -152,8 +170,9 @@ public class EntityLog extends BaseModule {
     public void onEntitySpawn(Event<ClientboundAddEntityPacket> packetEvent) {
         // Debug.info("check entity", packet.getType());
         if (checkNull()) return;
-        if (loginServerCheck()) return;
         var packet = packetEvent.context();
+        if (packet.getType() == EntityTypes.PLAYER) onPlayerAppear(packet.getUUID());
+        if (loginServerCheck()) return;
         if (enable.get()) {
             if (whiteList.get().test(packet.getType())) {
                 EntityType<?> type = packet.getType();
@@ -178,7 +197,6 @@ public class EntityLog extends BaseModule {
                                                         packet.getX(), packet.getY(), packet.getZ()),
                                                 formatDistance(packet.getX(), packet.getY(), packet.getZ())));
                     }
-                    onPlayerAppear(packet.getUUID());
                 } else {
                     // if(LivingEntity.class.isAssignableFrom( packet.getType().getBaseClass())){
                     // only log the living Entity; the common Entities are mostly functional and are noisy
@@ -261,7 +279,9 @@ public class EntityLog extends BaseModule {
     }
 
     public void onPlayerAppear(UUID playerUUID) {
-        offLinePos.remove(playerUUID);
+        Entry entry = offLinePos.remove(playerUUID);
+        if (entry != null) entry.logoutCheckActive = false;
+        clearXaeroPointsFromXaero(playerUUID);
     }
 
     public void onPlayerDisappear(Player player) {
@@ -280,17 +300,23 @@ public class EntityLog extends BaseModule {
                 player.getDisplayName(),
                 player.getScoreboardName(),
                 mc.level.dimension(),
-                0);
+                0,
+                false,
+                player);
         if (mc.player.position().subtract(player.position()).horizontalDistanceSqr() > MathUtils.s2(48)) {
             entry.exitCode = 1;
         } else {
             entry.exitCode = 2;
+            entry.logoutCheckActive = true;
             Tasks.scheduleRepeated(
                     () -> {
                         if (checkNull()) return true;
+                        if (offLinePos.get(playerUUID) != entry || !entry.logoutCheckActive) return true;
                         var pe = mc.getConnection().getPlayerInfo(playerUUID);
                         if (pe == null) {
+                            entry.logoutCheckActive = false;
                             entry.exitCode = 0;
+                            markAsLogPoint(entry);
                             if (logLog.get()) {
                                 logSub(
                                         "Entity",
@@ -305,6 +331,7 @@ public class EntityLog extends BaseModule {
                             }
                             return true;
                         } else if (pe.getGameMode() == GameType.SPECTATOR) {
+                            entry.logoutCheckActive = false;
                             entry.exitCode = 0;
                             if (logLog.get()) {
                                 logSub(
@@ -328,22 +355,143 @@ public class EntityLog extends BaseModule {
                     1,
                     20);
         }
+        clearXaeroPointsFromXaero(playerUUID);
         offLinePos.put(playerUUID, entry);
+        if (entry.exitCode == 1) {
+            OptionalPrimitive<Integer> farawayTicks = farawayPointToXaero.get();
+            if (farawayTicks.isPresent()) addFarawayPointToXaero(entry, farawayTicks.getValue());
+        }
     }
 
-    public void onServerExit(Event<Void> eventLeave) {
+    private void onXaeroLogPointSettingChanged(boolean enabled) {
+        XaeroHelper xaeroHelper = XaeroHelper.INSTANCE;
+        if (xaeroHelper == null) return;
+        if (enabled) {
+            xaeroHelper.removeSub(this);
+            xaeroLogPoints.clear();
+            for (Entry entry : logSpotEntries.values()) addLogPointToXaero(entry);
+        } else {
+            xaeroHelper.removeSub(this);
+            xaeroLogPoints.clear();
+        }
+    }
+
+    private void addLogPointToXaero(Entry entry) {
+        XaeroHelper xaeroHelper = XaeroHelper.INSTANCE;
+        if (xaeroHelper == null || mc.level == null || !Objects.equals(entry.leaveWorld, mc.level.dimension()))
+            return;
+        boolean relogin = entry.exitCode == 4;
+        IXWaypoint waypoint = xaeroHelper.submitWaypoint(
+                this,
+                (int) Math.floor(entry.leavePos.x),
+                (int) Math.floor(entry.leavePos.y),
+                (int) Math.floor(entry.leavePos.z),
+                "[SFH] " + (relogin ? "ReLogin: " : "Log: ") + ChatUtils.textToPlainString(entry.displayName),
+                relogin ? "R" : "L",
+                (relogin ? ChatFormatting.GREEN : ChatFormatting.LIGHT_PURPLE).ordinal(),
+                0,
+                true,
+                true);
+        if (waypoint != null) {
+            xaeroLogPoints
+                    .computeIfAbsent(entry.uuid, uuid -> new ArrayList<>())
+                    .add(waypoint);
+        }
+    }
+
+    private void clearXaeroPointsFromXaero(UUID uuid) {
+        logSpotEntries.remove(uuid);
+        removeXaeroLogPoint(uuid);
+        List<TemporaryXaeroWaypoint> farawayPoints = xaeroFarawayPoints.remove(uuid);
+        if (farawayPoints != null) {
+            for (TemporaryXaeroWaypoint point : farawayPoints) {
+                point.xaeroHelper.removeWaypoint(point.waypoint);
+            }
+        }
+    }
+
+    private void removeXaeroLogPoint(UUID uuid) {
+        List<IXWaypoint> waypoints = xaeroLogPoints.remove(uuid);
+        if (waypoints != null && XaeroHelper.INSTANCE != null) {
+            for (IXWaypoint waypoint : waypoints) {
+                XaeroHelper.INSTANCE.removeWaypoint(waypoint);
+            }
+        }
+    }
+
+    private void markAsLogPoint(Entry entry) {
+        if (logSpotEntries.get(entry.uuid) == entry) return;
+        logSpotEntries.put(entry.uuid, entry);
+        if (addLogPointToXaero.get()) addLogPointToXaero(entry);
+    }
+
+    private void addFarawayPointToXaero(Entry entry, int ticks) {
+        XaeroHelper xaeroHelper = XaeroHelper.INSTANCE;
+        if (xaeroHelper == null) return;
+        IXWaypoint waypoint = xaeroHelper.submitWaypoint(
+                xaeroFarawayWaypointOwner,
+                (int) Math.floor(entry.leavePos.x),
+                (int) Math.floor(entry.leavePos.y),
+                (int) Math.floor(entry.leavePos.z),
+                "[SFH] Faraway: " + ChatUtils.textToPlainString(entry.displayName),
+                "F",
+                ChatFormatting.GRAY.ordinal(),
+                0,
+                true,
+                true);
+        if (waypoint != null) {
+            xaeroFarawayPoints
+                    .computeIfAbsent(entry.uuid, uuid -> new ArrayList<>())
+                    .add(new TemporaryXaeroWaypoint(xaeroHelper, waypoint, ticks));
+        }
+    }
+
+    public void onPostGameTick() {
+        if (worldDirty && !checkNull()) {
+            XaeroHelper xaeroHelper = XaeroHelper.INSTANCE;
+            if (xaeroHelper != null) {
+                xaeroHelper.removeSub(this);
+                xaeroLogPoints.clear();
+                if (addLogPointToXaero.get()) {
+                    ResourceKey<Level> currentWorld = mc.level.dimension();
+                    for (Entry entry : logSpotEntries.values()) {
+                        if (Objects.equals(entry.leaveWorld, currentWorld)) addLogPointToXaero(entry);
+                    }
+                }
+                worldDirty = false;
+            }
+        }
+        for (Iterator<Map.Entry<UUID, List<TemporaryXaeroWaypoint>>> entries =
+                        xaeroFarawayPoints.entrySet().iterator();
+                entries.hasNext(); ) {
+            List<TemporaryXaeroWaypoint> points = entries.next().getValue();
+            for (Iterator<TemporaryXaeroWaypoint> pointIterator = points.iterator(); pointIterator.hasNext(); ) {
+                TemporaryXaeroWaypoint point = pointIterator.next();
+                if (--point.ticksRemaining <= 0) {
+                    point.xaeroHelper.removeWaypoint(point.waypoint);
+                    pointIterator.remove();
+                }
+            }
+            if (points.isEmpty()) entries.remove();
+        }
+    }
+
+    private void onXaeroWorldSwitch() {
+        worldDirty = true;
+    }
+
+    public void onServerExit() {
         offLinePos.clear();
     }
 
     static final String[] LEAVE_REASON = {"Log", "Faraway", "Teleport", "Queuing", "ReLogin"};
 
-    RenderCollector<AABB> boxing = RenderCollectors.createBoxCollector(false, true, false);
-    RenderCollector<AABB> boxingFrame = RenderCollectors.createBoxCollector(true, false, false);
+    RenderCollector<Entity> entityFace = RenderCollectors.createEntityFaceCollector();
     RenderCollector<Vec3> tracing = RenderCollectors.createTracerCollector();
     RenderCollector<RenderElements.Text> texting = RenderCollectors.createTextCollector();
 
-    public void onUpdate(Event<Void> eventUpdate) {
-        boxing.clear();
+    public void onUpdate() {
+        entityFace.clear();
         tracing.clear();
         texting.clear();
         if (checkNull()) return;
@@ -372,9 +520,8 @@ public class EntityLog extends BaseModule {
                     if (op.line()) {
                         tracing.submit(box.getCenter(), color.withAlpha(255));
                     }
-                    if (op.box()) {
-                        boxing.submit(box, color.withAlpha(64));
-                        boxingFrame.submit(box, color.withAlpha(255));
+                    if (op.box() && re.leaveEntity != null) {
+                        entityFace.submit(re.leaveEntity, color.withAlpha(64));
                     }
                     var builder = ChatUtils.builder();
                     builder.withText(re.displayName, Style.EMPTY.withBold(true));
@@ -393,8 +540,8 @@ public class EntityLog extends BaseModule {
         if (enable.get() && renderLogPosition.get()) {
             RenderUtils.startDrawVirtual(eventMatrixStack.context.stack());
             try {
-                boxing.render3D(eventMatrixStack.context.stack());
-                tracing.render3D(eventMatrixStack.context.stack());
+                entityFace.render3D(eventMatrixStack.context.stack(), 0.0F);
+                tracing.render3D(eventMatrixStack.context.stack(), eventMatrixStack.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(eventMatrixStack.context.stack());
             }
@@ -403,7 +550,7 @@ public class EntityLog extends BaseModule {
 
     public void onRender2D(Event<Render2D> eventVDraw) {
         if (enable.get() && renderLogPosition.get()) {
-            texting.render2D(eventVDraw.context.drawContext());
+            texting.render2D(eventVDraw.context.drawContext(), eventVDraw.context.partialTicks());
         }
     }
 
@@ -477,9 +624,13 @@ public class EntityLog extends BaseModule {
     }
 
     public void handleReLogin(UUID uuid) {
-        var entry = offLinePos.remove(uuid);
-        if (entry != null && (entry.exitCode == 0 || entry.exitCode == 3)) {
+        var entry = offLinePos.get(uuid);
+        if (entry != null && entry.exitCode != 4) {
+            boolean hasLogSpot = logSpotEntries.get(uuid) == entry;
+            if (hasLogSpot) removeXaeroLogPoint(uuid);
             entry.exitCode = 4;
+            entry.logoutCheckActive = false;
+            if (hasLogSpot && addLogPointToXaero.get()) addLogPointToXaero(entry);
             if (logLogReconnect.get()) {
                 logSub(
                         "Entity",
@@ -498,6 +649,7 @@ public class EntityLog extends BaseModule {
         if (entry != null) {
             if (entry.exitCode == 3) {
                 entry.exitCode = 0;
+                markAsLogPoint(entry);
             }
         }
     }
@@ -525,5 +677,19 @@ public class EntityLog extends BaseModule {
         String scoreboardName;
         ResourceKey<Level> leaveWorld;
         int exitCode;
+        boolean logoutCheckActive;
+        Player leaveEntity;
+    }
+
+    private static class TemporaryXaeroWaypoint {
+        final XaeroHelper xaeroHelper;
+        final IXWaypoint waypoint;
+        int ticksRemaining;
+
+        TemporaryXaeroWaypoint(XaeroHelper xaeroHelper, IXWaypoint waypoint, int ticksRemaining) {
+            this.xaeroHelper = xaeroHelper;
+            this.waypoint = waypoint;
+            this.ticksRemaining = ticksRemaining;
+        }
     }
 }

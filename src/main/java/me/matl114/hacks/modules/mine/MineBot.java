@@ -7,7 +7,6 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.MineTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -105,8 +104,7 @@ public class MineBot extends BaseModule {
             .defaultValue(true)
             .build();
 
-    public final FlagRef autoSwap =
-            flagBuilder(mineBot.add("auto-swap")).defaultValue(true).build();
+    public final FlagRef autoSwap = flagBuilder(mineBot.add("auto-swap")).build();
 
     public final FlagRef swing = flagBuilder(mineBot.add("swing-hand")).build();
 
@@ -130,7 +128,7 @@ public class MineBot extends BaseModule {
 
     public BlockPos lastMinePos = null;
 
-    public void onTick(Event<LocalPlayer> player) {
+    public void onTick() {
         if (isActive()) {
             onMineBotTick();
         }
@@ -227,8 +225,7 @@ public class MineBot extends BaseModule {
                     bestStack = InventoryUtils.getSelectedItem();
                 }
             }
-            InvExtra.INSTANCE.swapItemToHand(bestStack.index(), false, ghostHand.get());
-            AttributeUtils.updateAttribute(mc.player);
+            Runnable runnable = InvExtra.INSTANCE.swapItemToHand(bestStack.index(), false, ghostHand.get());
             float speed = MineExtra.INSTANCE.predictBlockBreakingSpeedAt(lastMinePos);
             tryMine += 1;
             // use real Direction

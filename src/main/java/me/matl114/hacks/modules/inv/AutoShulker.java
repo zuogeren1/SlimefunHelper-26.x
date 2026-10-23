@@ -3,11 +3,11 @@ package me.matl114.hacks.modules.inv;
 import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.hacks.ACTasks;
 import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.task.PostManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.FlagRef;
@@ -55,7 +55,7 @@ public class AutoShulker extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(
-                Listener.getPacketPostSendPoint().getChannel(ServerboundUseItemOnPacket.class),
+                Listener.getPacketPostScheduleSendPoint().getChannel(ServerboundUseItemOnPacket.class),
                 this::onClickShulkerBoxOrPlaceShulkerBox);
     }
 
@@ -121,8 +121,8 @@ public class AutoShulker extends BaseModule {
 
                 if (placedState.getBlock() instanceof ShulkerBoxBlock) {
                     BlockHitResult hitResult1 = RaycastUtils.createRealHitResult(placedBlock);
-                    // mc.gameMode.interactBlock(mc.player, Hand.MAIN_HAND, hitResult1);
-                    ACTasks.addPostTransactionAction((ch) -> {
+                    // mc.gameMode.interactBlock(mc.player, InteractionHand.MAIN_HAND, hitResult1);
+                    PostManager.INSTANCE.addNextTransactionAction((ch) -> {
                         InteractionTasks.interactBlock(InteractionHand.MAIN_HAND, hitResult1, true);
                     });
                 }

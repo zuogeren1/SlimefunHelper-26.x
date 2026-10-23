@@ -10,6 +10,11 @@ public record LocalEntityPredictor(Entity entity) implements Predictor {
     }
 
     @Override
+    public Vec3 getCurrentSyncedPos() {
+        return entity.position();
+    }
+
+    @Override
     public Vec3 getCurrentPos() {
         return entity.position();
     }

@@ -5,7 +5,6 @@ import me.matl114.hacks.api.ModuleGroup;
 import me.matl114.hacks.api.ModuleManager;
 import me.matl114.hacks.modules.HackModules;
 import me.matl114.hacks.modules.survival.*;
-import org.jetbrains.annotations.ApiStatus;
 
 public class SurvivalTasks {
     public static void init() {}
@@ -50,11 +49,10 @@ public class SurvivalTasks {
     private static SearchLabel searchLabel;
 
     @Getter
-    private static PathManager pathManager;
+    private static StructureLabel structureLabel;
 
-    @ApiStatus.Experimental
     @Getter
-    private static ElytraFinder elytraFinder;
+    private static PathManager pathManager;
 
     @Getter
     private static BaritoneFix baritoneFix;
@@ -84,6 +82,7 @@ public class SurvivalTasks {
         walkControl = new WalkControl().register(m);
         searchControl = new SearchControl().register(m);
         searchLabel = new SearchLabel().register(m);
+        structureLabel = new StructureLabel().register(m);
         pathManager = new PathManager().register(m);
         baritoneFix = new BaritoneFix().register(m);
         xaeroHelper = new XaeroHelper().register(m);

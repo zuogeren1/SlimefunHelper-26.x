@@ -75,6 +75,9 @@ public class Zoom extends BaseModule {
     }
 
     private void onScroll(Event<MouseScrollAction> eventMouseScroll) {
+        if (ClientUtils.getScreen(mc) != null) {
+            return;
+        }
         if (currentScale == null) {
             currentScale = defaultZoom.get();
         }

@@ -1,5 +1,7 @@
 package me.matl114.hacks.modules.slimefun;
 
+import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
 import me.matl114.utils.ClientUtils;
 
@@ -14,15 +16,15 @@ import me.matl114.accessors.access.HandledScreenAccess;
 import me.matl114.accessors.interfaces.TileInventory;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.impl.EventContainer;
 import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.gui.basic.ContentDelegateWidget;
 import me.matl114.gui.complex.slimefun.SlimefunDispensorSuggestBookWidget;
 import me.matl114.hacks.SlimefunTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
-import me.matl114.hacks.modules.move.PlayerStateManager;
-import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.multiblock.BlockMatcher;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
@@ -87,8 +89,13 @@ public class MultiBlockHelper extends BaseModule {
         registerListener(Listener.getPostPlayerUseItemOnBlock(), this::onBlockClick);
         registerListener(Listener.getPreGameTick(), this::onTick);
         registerListener(Listener.getServerLeavePoint(), this::onExit);
-        registerListener(
-                Listener.getPostInitializeScreen().getChannel(AbstractContainerScreen.class), this::onScreenInit);
+        registerListener(Listener.getPostInitializeScreen().getChannel(AbstractContainerScreen.class), this::onScreenInit);
+        registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
+    }
+
+    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        if (event.context().getValue().isOptionPreset()) return;
+        legalMode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
     }
 
     private int lastChatTimestamp = 0;
@@ -129,7 +136,7 @@ public class MultiBlockHelper extends BaseModule {
         }
     }
 
-    public void onExit(Event<Void> event) {
+    public void onExit() {
         screens.clear();
         executeCursor = 0;
     }

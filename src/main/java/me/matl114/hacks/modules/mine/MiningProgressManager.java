@@ -8,12 +8,14 @@ import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.managers.Tasks;
+import me.matl114.utils.ItemStackUtils;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
 import java.util.Comparator;
 import me.matl114.hacks.modules.interact.InteractExtra;
@@ -52,7 +54,7 @@ public class MiningProgressManager extends BaseModule {
         trackedMap.remove(event.context.getId());
     }
 
-    public void onWorldChange(Event<Level> world) {
+    public void onWorldChange() {
         trackedMap.clear();
     }
 
@@ -70,7 +72,7 @@ public class MiningProgressManager extends BaseModule {
         }
     }
 
-    public void onUpdate(Event<LocalPlayer> eventUpdate) {
+    public void onUpdate() {
         if (checkNull()) return;
         for (var re : trackedMap.values()) {
             re.tickWorld(mc.level);

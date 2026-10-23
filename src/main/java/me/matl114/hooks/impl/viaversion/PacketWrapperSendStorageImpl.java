@@ -11,7 +11,7 @@ import net.minecraft.network.protocol.PacketType;
 import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 
-public class PacketWrapperSendStorageImpl implements PacketStorage {
+public class PacketWrapperSendStorageImpl implements PacketStorage.Send {
     long timeStamp;
     PacketType<?> type0;
 
@@ -53,12 +53,7 @@ public class PacketWrapperSendStorageImpl implements PacketStorage {
     }
 
     @Override
-    public void send() {
+    public void send(boolean forceFlush) {
         this.sendOperation.accept(channel.eventLoop().inEventLoop());
-    }
-
-    @Override
-    public void handle() {
-        throw new UnsupportedOperationException("Not supported side.");
     }
 }

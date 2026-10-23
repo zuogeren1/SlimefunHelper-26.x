@@ -3,7 +3,6 @@ package me.matl114.hacks.modules.survival;
 import it.unimi.dsi.fastutil.longs.Long2LongMap;
 import java.util.*;
 import java.util.function.Supplier;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -45,11 +44,15 @@ public class XaeroMapScanner extends BaseModule {
     public final KeyBindRef hotkey =
             moduleEntry(root.addHotkey(), new MultiKeyBind(), root.addEnable()).build();
 
-    public final IntRef chunkRange =
-            intBuilder(root.add("chunk-range")).defaultValue(24).build();
+    public final IntRef chunkRange = intBuilder(root.add("chunk-range"))
+            .defaultValue(24)
+            .validator(Configs.intRange(0, 36))
+            .build();
 
-    public final IntRef rescheduleRange =
-            intBuilder(root.add("reschedule-range")).defaultValue(8).build();
+    public final IntRef rescheduleRange = intBuilder(root.add("reschedule-range"))
+            .defaultValue(8)
+            .validator(Configs.intRange(0, 36))
+            .build();
 
     public final EnumRef<Mode> mode = builder(root.add("mode"), Mode.class)
             .defaultValue(Mode.LIQUID)
@@ -60,8 +63,10 @@ public class XaeroMapScanner extends BaseModule {
             .show(() -> mode.get().isIn(Mode.LIQUID))
             .build();
 
-    public final DoubleRef unloadedRatio =
-            doubleBuilder(root.add("new-chunk-ratio")).defaultValue(0.25D).build();
+    public final DoubleRef unloadedRatio = doubleBuilder(root.add("new-chunk-ratio"))
+            .defaultValue(0.25D)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
+            .build();
 
     public final FlagRef render =
             builder(root.add("render"), Boolean.class).defaultValue(true).build();
@@ -73,7 +78,7 @@ public class XaeroMapScanner extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPostGameTick(), this::onTickPost);
-        registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch);
+        registerListener(Listener.getWorldSwitchPoint(), this::reset);
         currentGoals = new HashMap<>();
         currentGoals.put(Mode.LIQUID, newInstance(() -> new GoalLiquidImpl(this)));
     }
@@ -138,13 +143,9 @@ public class XaeroMapScanner extends BaseModule {
         currentGoals.values().forEach(Goal::reset);
     }
 
-    public void onWorldSwitch(Event<Level> event) {
-        reset();
-    }
-
     Map<Mode, Goal> currentGoals;
 
-    public void onTickPost(Event<LocalPlayer> event) {
+    public void onTickPost() {
         if (enable.get()) {
             if (!XaeroHooks.getInstance().isXaeroWorldMapEnable()
                     || !XaeroHooks.getInstance().isXaeroPlusEnable()

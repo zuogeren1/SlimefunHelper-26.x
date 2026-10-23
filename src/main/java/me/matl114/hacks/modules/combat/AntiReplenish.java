@@ -8,11 +8,14 @@ import java.util.function.Consumer;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.BlockUpdate;
+import me.matl114.events.impl.EventContainer;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.interact.Interact;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
@@ -38,7 +41,6 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
-import net.minecraft.world.level.Level;
 
 public class AntiReplenish extends BaseModule {
     public AntiReplenish() {
@@ -58,7 +60,10 @@ public class AntiReplenish extends BaseModule {
             .updateListener(s -> blockSeq = MathUtils.create3DPointListAroundPlayer(s))
             .build();
 
-    public final IntRef delay = intBuilder(root.add("delay")).defaultValue(10).build();
+    public final IntRef delay = intBuilder(root.add("delay"))
+            .defaultValue(10)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final FlagRef zeroTick = flagBuilder(root.add("zero-tick")).build();
 
@@ -89,20 +94,31 @@ public class AntiReplenish extends BaseModule {
         registerListener(Listener.getPreHandleInputEvents(), this::onPreHandleEvent);
         registerListener(Listener.getBlockUpdateListener(), this::onBlockUpdate);
         registerListener(Listener.getWorldSwitchPoint(), this::onSwitchWorld);
+        registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
+    }
+
+    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        ModulePreset preset = event.context.getValue();
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
-        acceptor.accept(createTitle("widget.queue-mine.mine.use-argument", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
+        acceptor.accept(factory.createTitle("widget.queue-mine.mine.use-argument", 0, dblank, dx, dy));
     }
 
     final Set<BlockPos> cachedStolenPoses = new HashSet<>();
     boolean pendingWaitingScreen = false;
     TimerExecutor timerExecutor = new TimerExecutor();
 
-    public void onPreHandleEvent(Event<Void> event) {
+    public void onPreHandleEvent() {
         if (enable.get()) {
             cachedStolenPoses.removeIf(s -> !(mc.level.getBlockState(s).getBlock() instanceof ShulkerBoxBlock));
             if (eatingAbort.get() && mc.player.isUsingItem()) return;
@@ -161,7 +177,7 @@ public class AntiReplenish extends BaseModule {
         return InventoryUtils.streamInventory(blockEntity).anyMatch(s -> !s.isEmpty());
     }
 
-    private void onSwitchWorld(Event<Level> event) {
+    private void onSwitchWorld() {
         cachedStolenPoses.clear();
     }
 

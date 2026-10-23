@@ -98,7 +98,7 @@ public class WrapEnum<T extends ConfigEnum> implements NBTParsable<WrapEnum<T>> 
         return new NBTType<WrapEnum<T>>(
                 "wrapenum",
                 (Codec) Codec.STRING.comapFlatMap(WrapEnum::fromString, WrapEnum::asString),
-                (s, x, y, dx, dy) -> {
+                (elementFactory, s, x, y, dx, dy) -> {
                     WrapEnum<T> wrapEnum = s.get();
                     if (!wrapEnum.resolved) {
                         wrapEnum.tryResolve();
@@ -108,8 +108,9 @@ public class WrapEnum<T extends ConfigEnum> implements NBTParsable<WrapEnum<T>> 
                         Map<T, String> inversedMap = configEnumType.entrySet().stream()
                                 .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
                         WrapperFactory<String, T> factory = WrapperFactory.of(configEnumType::get, inversedMap::get);
-                        return EnumAttrKeyValue.createFiniteLookupWidgetGenerator(configEnumType)
+                        return EnumAttrKeyValue.createFiniteLookupWidgetFactory(configEnumType)
                                 .generateWidget(
+                                        elementFactory,
                                         new TypeConvertAttrKeyValue<WrapEnum<T>, T>(
                                                 (AttrKeyValue) s,
                                                 WrapperFactory.of(WrapEnum::new, WrapEnum::get),

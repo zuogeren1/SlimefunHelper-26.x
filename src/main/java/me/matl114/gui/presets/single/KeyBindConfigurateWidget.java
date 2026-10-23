@@ -1,15 +1,20 @@
 package me.matl114.gui.presets.single;
 
+import com.mojang.datafixers.util.Pair;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import me.matl114.gui.Constants;
+import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.*;
-import me.matl114.gui.elements.ButtonElement;
+import me.matl114.gui.elements.IconElement;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.config.AttrKeyValue;
+import me.matl114.utils.config.ValueAccessor;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
@@ -18,73 +23,75 @@ public class KeyBindConfigurateWidget extends SubScreenWidget {
     AttrKeyValue<MultiKeyBind> multiKeyBind;
     // todo: can not sync with attributeKeyValue
     MultiKeyBind keyBind;
+    ElementFactory factory;
 
-    public KeyBindConfigurateWidget(int x, int y, int dx, int dy, AttrKeyValue<MultiKeyBind> config) {
+    public KeyBindConfigurateWidget(
+            ElementFactory factory, int x, int y, int dx, int dy, AttrKeyValue<MultiKeyBind> config) {
         super(x, y, dx, dy);
+        this.factory = factory;
         multiKeyBind = config;
         keyBind = multiKeyBind.get();
         init();
     }
 
     ExecutableWidget keyInputWidget;
-    ExecutableWidget deleteKeyInputWidget;
 
     private void init() {
-        keyInputWidget = ExecutableWidget.instance(0, 1, dx - 3 * dy - 2, dy - 2)
-                .setElementHandler(new ButtonElement(this::createKeyDisplay, ((element, widget, mouseButton) -> {
-                            // select the widget for the first press, and set code for the second
-                            if (this.isFocused() && widget == this.selected) {
-                                onAnyKeyPressed(KeyCode.getKeyCodeFromMouseAction(mouseButton));
-                            }
-                            return true;
-                        }))
-                        .setHighLightColor(((widget, isFocused) -> {
-                            if (multiKeyBind.isValidate()) {
-                                return isFocused ? CommonColors.WHITE : null;
-                            } else {
-                                return CommonColors.RED;
-                            }
-                        }))
+        ExecutableWidget.instance(0, 0, dx - dy, dy)
+                .setElementHandler(new AbstractElement()
+                        .withElement(factory.createExecuteButton(
+                                (TextProvider) this::createKeyDisplay,
+                                TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
+                                        "widget.gui.key-bind-configurate-widget.keycode-configure.tooltips", "")),
+                                (ButtonAction) ((element, widget, mouseButton) -> {
+                                    // select the widget for the first press, and set code for the second
+                                    if (this.isFocused() && widget == this.selected) {
+                                        onAnyKeyPressed(KeyCode.getKeyCodeFromMouseAction(mouseButton));
+                                    }
+                                    return true;
+                                })))
                         .withInputHandler(InputHandler.keyboard((widget, keyCode, scanCode, modifiers, isPress) -> {
                             if (this.isFocused() && widget == this.selected && isPress) {
                                 onAnyKeyPressed(keyCode);
                                 return true;
                             }
                             return false;
-                        }))
-                        .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                "widget.gui.key-bind-configurate-widget.keycode-configure.tooltips", ""))))
+                        })))
                 .addToSub(this);
-        ExecutableWidget.instance(dx - 3 * dy - 1, 1, dy - 2, dy - 2)
-                .setElementHandler(
-                        new ButtonElement(TextProvider.of(Component.literal("T")), ((element, widget, mouseButton) -> {
-                                    onSwitchToggleOnRelease();
-                                    return false;
-                                }))
-                                .setActivePredicate((v) -> multiKeyBind.get().isToggleOnRelease())
-                                .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                        "widget.gui.key-bind-configurate-widget.keycode-t.tooltips", ""))))
+        factory.createElement(
+                        IconElement.fixedGui(Constants.EDITOR_SPRITE, ButtonAction.isLeft(left -> {
+                            if (left) {
+                                clear();
+                            } else {
+                                openEditor();
+                            }
+                        })),
+                        TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
+                                "widget.gui.key-bind-configurate-widget.keycode-d.tooltips", "")),
+                        null,
+                        dx - dy,
+                        0,
+                        dy,
+                        dy)
                 .addToSub(this);
-        ExecutableWidget.instance(dx - 2 * dy - 1, 1, dy - 2, dy - 2)
-                .setElementHandler(
-                        new ButtonElement(TextProvider.of(Component.literal("V")), ((element, widget, mouseButton) -> {
-                                    onSwitchAllowVanilla();
-                                    return false;
-                                }))
-                                .setActivePredicate((v) -> multiKeyBind.get().isAllowVanilla())
-                                .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                        "widget.gui.key-bind-configurate-widget.keycode-v.tooltips", ""))))
-                .addToSub(this);
-        deleteKeyInputWidget = ExecutableWidget.instance(dx - dy - 1, 1, dy - 2, dy - 2)
-                .setElementHandler(
-                        new ButtonElement(TextProvider.of(Component.literal("D")), ((element, widget, mouseButton) -> {
-                                    clear();
-                                    // make it return false, do not unselect current
-                                    return false;
-                                }))
-                                .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                        "widget.gui.key-bind-configurate-widget.keycode-d.tooltips", ""))))
-                .addToSub(this);
+    }
+
+    private void openEditor() {
+        List<Pair<String, ValueAccessor<?>>> accessors = List.of(
+                Pair.of(
+                        "widget.gui.key-bind-configurate-widget.keycode-t",
+                        ValueAccessor.of(
+                                () -> multiKeyBind.get().isToggleOnRelease(), value -> onSwitchToggleOnRelease())),
+                Pair.of(
+                        "widget.gui.key-bind-configurate-widget.keycode-v",
+                        ValueAccessor.of(() -> multiKeyBind.get().isAllowVanilla(), value -> onSwitchAllowVanilla())));
+        DrawableWidget editor = WidgetUtils.createValueAccessorsEditScreen(
+                Component.translatable("widget.gui.key-bind-configurate-widget.editor"),
+                List::of,
+                accessors,
+                WidgetUtils.DEFAULT_CONFIG_SCREEN_LAYOUT,
+                factory);
+        new CenterScreen(editor).access().openFromCurrent();
     }
 
     @Override

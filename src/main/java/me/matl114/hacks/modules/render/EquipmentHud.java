@@ -83,7 +83,7 @@ public class EquipmentHud extends IRender2DModule {
                 int startY = pp.getWindowY(mc.getWindow());
                 if (!stack.isEmpty()) {
                     vdraw.drawItem(stack, startX, startY, 999, 0);
-                    vdraw.drawItemInSlot(mc.font, stack, startX, startY, null);
+                    vdraw.drawItemInSlot(vdraw.getTextDrawer(), stack, startX, startY, null);
                     drawDamageIfAbsent(vdraw, stack, startX, startY);
                 } else {
                     vdraw.drawGuiTexture(Constants.EMPTY_SLOT_TO_SPRITE.get(re.getKey()), startX, startY, 16, 16);
@@ -99,7 +99,7 @@ public class EquipmentHud extends IRender2DModule {
         if (damage > 0) {
             Component text = ItemStackDisplayUtils.getDamageShowText(stack, display);
             if (text != null) {
-                float len = mc.font.getSplitter().stringWidth(text);
+                float len = vdraw.getTextDrawer().getWidth(text);
                 int startXX, startYY;
                 switch (displayDirection.get()) {
                     case UP -> {
@@ -122,10 +122,10 @@ public class EquipmentHud extends IRender2DModule {
                 }
 
                 vdraw.drawText(
-                        mc.font,
+                        vdraw.getTextDrawer(),
                         text.getVisualOrderText(),
                         startXX,
-                        startYY,
+                        (int) (startYY + (9 - vdraw.getTextDrawer().getTextHeight()) / 2.0F),
                         ItemStackDisplayUtils.getDamageDisplayColor(stack),
                         true);
             }

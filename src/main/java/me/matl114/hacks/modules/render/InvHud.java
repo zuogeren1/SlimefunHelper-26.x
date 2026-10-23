@@ -48,8 +48,10 @@ public class InvHud extends BaseModule {
             .defaultValue(new RegistryRegex<>(new Regex("^(.*)$"), BuiltInRegistries.ITEM))
             .build();
 
-    public IntRef line =
-            intBuilder(invHud.add("count-per-line")).defaultValue(9).build();
+    public IntRef line = intBuilder(invHud.add("count-per-line"))
+            .defaultValue(9)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public FlagRef showShulkerItems = builder(invHud.add("show-shulker-items"), Boolean.class)
             .defaultValue(true)
@@ -64,7 +66,7 @@ public class InvHud extends BaseModule {
 
     List<ItemStack> toShow;
 
-    public void onPostTick(Event<LocalPlayer> event) {
+    public void onPostTick() {
         if (enable.get()) {
             toShow = new ArrayList<>();
             Map<ItemStackSample, Integer> map;
@@ -104,7 +106,7 @@ public class InvHud extends BaseModule {
         int startX = right.get() ? (-18 * x - 18) : (18 * x);
         int startY = down.get() ? (-18 * totalLine + 18 * y) : (18 * y);
         vdraw.drawItem(stack, startX + 1, startY + 1, 999, 0);
-        vdraw.drawItemInSlot(mc.font, stack, startX + 1, startY + 1, null);
+        vdraw.drawItemInSlot(vdraw.getTextDrawer(), stack, startX + 1, startY + 1, null);
     }
 
     public void onRender2D(Event<Render2D> event) {

@@ -58,14 +58,17 @@ public class NameTag extends INameTag {
         if (checkNull()) {
             return;
         }
-        if (enable.get() && !event.context.hudHidden() && nameTagInfos != null) {
+        if (enable.get() && nameTagInfos != null) {
             var stack = event.context.drawContext();
             Matrix4f cam = RenderListener.getWorldModelViewMatrix();
             Matrix4f proj = RenderListener.getWorldBasicProjectionMatrix();
             Function<Vec3, Vector2d> projector = RenderUtils.createProjector(cam, proj);
             for (var entity : nameTagInfos) {
-                if (entity.player != mc.getCameraEntity()) {
-                    onRenderPlayer(entity, stack, projector, event.context.partialTicks());
+                if (entity.player == mc.getCameraEntity()) {
+                    continue;
+                }
+                if (!hideSelf.get() || entity.player != mc.player) {
+                    onRenderPlayer(entity, stack, projector, (event.context.partialTicks()));
                 }
             }
         }
@@ -76,7 +79,7 @@ public class NameTag extends INameTag {
         Vec3 pos = player.player.getPosition(tick).add(0, player.player.getBbHeight() + 0.5, 0);
         Vector2d screenPos = projector.apply(pos);
         if (screenPos != null) {
-            vdraw.pushMatrix();
+            vdraw.getMatrices().pushMatrix();
             try {
                 vdraw.getMatrices().translate((float) screenPos.x, (float) screenPos.y);
                 handleSize(vdraw);
@@ -92,7 +95,7 @@ public class NameTag extends INameTag {
                 //               }
                 // vdraw.drawText(mc.textRenderer, player.getNameForScoreboard(), 0,0, -1, true);
             } finally {
-                vdraw.popMatrix();
+                vdraw.getMatrices().popMatrix();
             }
         }
     }
@@ -104,15 +107,17 @@ public class NameTag extends INameTag {
 
     public void handleNameLinePlayer(VDrawContext vdraw, PlayerNameTagInfo player) {
         if (player.nameDisplay != null) {
+            float textHeight = vdraw.getTextDrawer().getTextHeight() + 1;
             float length = player.nameLength;
             float lengthHalf = length / 2.0F;
-            vdraw.getMatrices().translate(0, -HEIGHT);
-            vdraw.drawText(mc.font, player.nameDisplay.getVisualOrderText(), (int) -lengthHalf, 0, -1, true);
+            vdraw.getMatrices().translate(0, -textHeight);
+            vdraw.drawText(vdraw.getTextDrawer(), player.nameDisplay.getVisualOrderText(), (int) -lengthHalf, 0, -1, false);
         }
     }
 
     public void handleEquipmentPlayer(VDrawContext vdraw, PlayerNameTagInfo player) {
         if (player.equipments != null) {
+            float textHeight = vdraw.getTextDrawer().getTextHeight() + 1;
             ItemStack[] stacks = player.equipments;
             int startX = -stacks.length * 9;
             boolean hasDurability = false;
@@ -125,7 +130,7 @@ public class NameTag extends INameTag {
                 } else {
                     vdraw.drawItem(stacks[i], startX + i * 18, -17, 999, 0);
                     ItemStack stackOverride = stacks[i];
-                    vdraw.drawItemInSlot(mc.font, stackOverride, startX + i * 18, -17, null);
+                    vdraw.drawItemInSlot(vdraw.getTextDrawer(), stackOverride, startX + i * 18, -17, null);
                     if (equipmentPercentage.get().isNotIn(ItemStackDisplayUtils.DamageDisplay.NONE)
                             && stackOverride.getCount() == 1
                             && stackOverride.isDamageableItem()) {
@@ -133,32 +138,33 @@ public class NameTag extends INameTag {
                         FormattedCharSequence dur = ItemStackDisplayUtils.getDamageShowText(
                                         stackOverride, equipmentPercentage.get())
                                 .getVisualOrderText();
-                        float width = mc.font.getSplitter().stringWidth(dur);
+                        float width = vdraw.getTextDrawer().getWidth(dur);
                         int color = ItemStackDisplayUtils.getDamageDisplayColor(stackOverride);
                         vdraw.drawText(
-                                mc.font,
+                                vdraw.getTextDrawer(),
                                 dur,
                                 startX + i * 18 + 9 + (int) ((-width - 1) / 2),
-                                -16 - (int) HEIGHT,
+                                -16 - (int) textHeight,
                                 color,
                                 true);
                     }
                 }
             }
             vdraw.getMatrices().popMatrix();
-            vdraw.getMatrices().translate(0, hasDurability ? -HEIGHT * 2.0F : -HEIGHT * 1.5F);
+            vdraw.getMatrices().translate(0, hasDurability ? -textHeight * 2.0F : -textHeight * 1.5F);
         }
     }
 
     public void handleOtherInfoLine(VDrawContext vdraw, PlayerNameTagInfo player) {
         if (player.otherInfoDisplay != null) {
+            float textHeight = vdraw.getTextDrawer().getTextHeight() + 1;
             float length = player.otherInfoLength;
             float lengthHalf = length / 2.0F;
-            vdraw.getMatrices().translate(0, -HEIGHT * 0.75F);
+            vdraw.getMatrices().translate(0, -textHeight);
             vdraw.getMatrices().pushMatrix();
-            vdraw.getMatrices().scale(0.75F, 0.75F);
-            vdraw.drawText(mc.font, player.otherInfoDisplay.getVisualOrderText(), (int) -lengthHalf, 0, -1, true);
-            vdraw.popMatrix();
+            vdraw.drawText(
+                    vdraw.getTextDrawer(), player.otherInfoDisplay.getVisualOrderText(), (int) -lengthHalf, 0, -1, false);
+            vdraw.getMatrices().popMatrix();
         }
     }
 
@@ -173,9 +179,9 @@ public class NameTag extends INameTag {
                 float width = (endI - i - 1);
                 for (var j = i; j < endI; j++) {
                     width += 9;
-                    width += mc.font.getSplitter().stringWidth(line.get(j).getValue());
+                    width += vdraw.getTextDrawer().getWidth(line.get(j).getValue());
                 }
-                vdraw.getMatrices().translate(0, -HEIGHT);
+                vdraw.getMatrices().translate(0, -9);
                 vdraw.getMatrices().pushMatrix();
                 {
                     vdraw.getMatrices().translate(-width / 2, 0);
@@ -190,17 +196,16 @@ public class NameTag extends INameTag {
                         vdraw.getMatrices().popMatrix();
                         vdraw.getMatrices().translate(9, 0);
                         vdraw.drawText(
-                                mc.font,
+                                vdraw.getTextDrawer(),
                                 entry.getValue().getVisualOrderText(),
                                 0,
-                                0,
+                                (int) ((9 - vdraw.getTextDrawer().getTextHeight()) / 2.0F),
                                 potionColor.get().withAlpha(255),
                                 true);
                         vdraw.getMatrices()
                                 .translate(
-                                        mc.font
-                                                        .getSplitter()
-                                                        .stringWidth(line.get(j).getValue())
+                                        vdraw.getTextDrawer()
+                                                        .getWidth(line.get(j).getValue())
                                                 + 1,
                                         0);
                     }

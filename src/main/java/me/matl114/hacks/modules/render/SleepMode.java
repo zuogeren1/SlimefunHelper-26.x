@@ -1,5 +1,6 @@
 package me.matl114.hacks.modules.render;
 
+import me.matl114.gui.interfaces.ElementFactory;
 import net.minecraft.client.renderer.fog.FogRenderer;
 
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -86,9 +87,14 @@ public class SleepMode extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle("widget.sleep-mode.command", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle("widget.sleep-mode.command", 0, dblank, dx, dy));
     }
 
     boolean runnerOptimizeStart = false;

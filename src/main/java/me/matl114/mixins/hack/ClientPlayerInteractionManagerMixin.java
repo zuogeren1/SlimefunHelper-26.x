@@ -10,7 +10,7 @@ import javax.annotation.Nullable;
 import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.hacks.CombatTasks;
-import me.matl114.hacks.modules.ac.DisablerManager;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
@@ -204,7 +204,6 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
             currentFailBreakPos = pos;
             destroyBlockPos = pos;
             failBreakStartTick = MineExtra.INSTANCE.lastStartMineBreakingProgressResetTick;
-            MineExtra.INSTANCE.lastStartDoubleMineTick = Tasks.getTick();
             return true;
         }
         return false;

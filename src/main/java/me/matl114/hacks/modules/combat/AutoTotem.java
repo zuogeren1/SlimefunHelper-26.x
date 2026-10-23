@@ -3,14 +3,15 @@ package me.matl114.hacks.modules.combat;
 import java.util.List;
 import java.util.Random;
 import me.matl114.accessors.access.ClientPlayerAccess;
+import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
+import me.matl114.hacks.modules.task.PostManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.tasks.StateExecutor;
@@ -53,6 +54,15 @@ public class AutoTotem extends BaseModule {
 
     public final IntRef cooldown = builder(totem.add("totem-swap-cooldown"), IntRef.TYPE)
             .defaultValue(1)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
+
+    public final IntRef forcedHotbarSlot = intBuilder(totem.add("auto-totem-hotbar-slot"))
+            .defaultValue(-1)
+            .validator(Configs.intRange(-1, 8))
+            .build();
+
+    public final FlagRef mainHandTotem = flagBuilder(totem.add("main-hand-totem"), true)
             .build();
 
     public final NBTRef<EntrySet<Item>> enableHandItems = builder(
@@ -69,6 +79,7 @@ public class AutoTotem extends BaseModule {
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
         registerListener(Listener.getPacketPoint().getChannel(ClientboundEntityEventPacket.class), this::onTotem);
         registerListener(Listener.getPlayerInitConfiguration(), this::onPlayerInit);
+        registerListener(Listener.getPlayerScrollHotBar(), this::onTotemMainHand);
     }
 
     private boolean canBeAccepted(ItemStack ex) {
@@ -77,7 +88,7 @@ public class AutoTotem extends BaseModule {
 
     StateExecutor noTotem = new StateExecutor();
     // todo: add legal mode (swap hand)
-    public void onTick(Event<LocalPlayer> ev) {
+    public void onTick() {
         if (enable.get()) {
             onTotemLazy();
         }
@@ -95,6 +106,8 @@ public class AutoTotem extends BaseModule {
     //    int swapCnt1919810 = 0;
     TimerExecutor swapFrequency = new TimerExecutor();
     int swapCntCounter = 0;
+    int reswapCounter = 0;
+    private int forcedHotbarPreviousSlot = -1;
 
     private void handleTotemSwapSuccess() {
         noTotem.state(false);
@@ -109,20 +122,102 @@ public class AutoTotem extends BaseModule {
     }
 
     public void onTotemLazy() {
+        int forcedSlot = getForcedHotbarSlot();
+
         // stop from duplicate swap
-        if (!swap.canRun(cooldown.get())) {
+        if (mc.player.getOffhandItem().getItem() == Items.TOTEM_OF_UNDYING) {
+            restoreHotBar(forcedSlot, false);
+            restoreForcedHotbar();
             return;
         }
         if (!canBeAccepted(mc.player.getOffhandItem())) {
             // well looks
             int toSlot = 40;
-            swapTo(toSlot);
-        } else {
-            if (mc.player.getMainHandItem().getItem() != Items.TOTEM_OF_UNDYING
-                    && mc.player.getOffhandItem().getItem() != Items.TOTEM_OF_UNDYING) {
-                int toSlot = InventoryUtils.getSelectedSlot();
-                swapTo(toSlot);
+            if (!swap.canRun(cooldown.get())) {
+                return;
             }
+            swapTo(toSlot);
+            if (!swap.canRun(cooldown.get())) {
+                return;
+            }
+            if (forcedSlot >= 0) {
+                restoreHotBar(forcedSlot, false);
+            }
+        } else {
+            // not totem
+            if (forcedSlot >= 0) {
+                restoreHotBar(forcedSlot, true);
+                if (mainHandTotem.get()
+                        && mc.player.getInventory().getItem(forcedSlot).getItem() == Items.TOTEM_OF_UNDYING
+                        && InventoryUtils.getSelectedSlot() != forcedSlot) {
+                    if (++reswapCounter > 1) {
+                        forcedHotbarPreviousSlot = InventoryUtils.getSelectedSlot();
+                        PlayerInteractionAccess.of(mc.gameMode).syncSelectedHotbar(forcedSlot);
+                        reswapCounter = 0;
+                    }
+                } else {
+                    reswapCounter = 0;
+                }
+            } else if (mc.player.getMainHandItem().getItem() != Items.TOTEM_OF_UNDYING) {
+                if (mainHandTotem.get()) {
+                    int toSlot = InventoryUtils.getSelectedSlot();
+                    if (!swap.canRun(cooldown.get())) {
+                        return;
+                    }
+                    swapTo(toSlot);
+                }
+            }
+        }
+    }
+
+    public void onTotemMainHand(Event<Integer> event) {
+        if (event.isCancelled()) return;
+        int forcedSlot;
+        if (enable.get() && mainHandTotem.get() && (forcedSlot = getForcedHotbarSlot()) >= 0) {
+            if (mc.player.getOffhandItem().getItem() == Items.TOTEM_OF_UNDYING) {
+                return;
+            }
+            if (canBeAccepted(mc.player.getOffhandItem())
+                    && mc.player.getInventory().getItem(forcedSlot).getItem() == Items.TOTEM_OF_UNDYING
+                    && event.context != forcedSlot) {
+                if (InventoryUtils.getSelectedSlot() != forcedSlot) {
+                    event.context(forcedSlot);
+                } else {
+                    event.cancel();
+                }
+            }
+        }
+    }
+
+    private int getForcedHotbarSlot() {
+        int forcedSlot = forcedHotbarSlot.get();
+        return forcedSlot >= 0 && forcedSlot < 9 ? forcedSlot : -1;
+    }
+
+    private void restoreHotBar(int forcedSlot, boolean forceTotem) {
+        if (forcedSlot < 0 || forcedSlot >= 9) {
+            return;
+        }
+        ItemStack item = mc.player.getInventory().getItem(forcedSlot);
+        boolean hasTotem = forceTotem ? item.getItem() == Items.TOTEM_OF_UNDYING : canBeAccepted(item);
+        if (!hasTotem) {
+            if (swap.canRun(cooldown.get())) {
+                swapTo(forcedSlot);
+            }
+            return;
+        }
+    }
+
+    private void restoreForcedHotbar() {
+        if (forcedHotbarPreviousSlot < 0) {
+            return;
+        }
+        int previousSlot = forcedHotbarPreviousSlot;
+        forcedHotbarPreviousSlot = -1;
+        if (!checkNull()) {
+            // 与 InvExtra 的 hotBarCallbacks 同队列，避免同一 tick 重复同步选中槽
+            PostManager.INSTANCE.addNextTransactionAction(
+                    ch2 -> PlayerInteractionAccess.of(mc.gameMode).syncSelectedHotbar(previousSlot));
         }
     }
 
@@ -174,9 +269,9 @@ public class AutoTotem extends BaseModule {
         }
     }
 
-    public void onPlayerInit(Event<LocalPlayer> eventPlayer) {
+    public void onPlayerInit() {
         noTotem.state(false);
     }
 
-    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {}
+    public void onModulePreset() {}
 }

@@ -1,13 +1,13 @@
 package me.matl114.hacks.modules.chat;
 
-import me.matl114.utils.ClientUtils;
-
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.ListIterator;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Set;
+import java.util.UUID;
 import me.matl114.accessors.events.ChatHudAccess;
+import me.matl114.accessors.events.ChatHudLineAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
@@ -15,6 +15,7 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.ChatUtils;
+import me.matl114.utils.ClientUtils;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.multiplayer.chat.GuiMessage;
 import net.minecraft.network.chat.Component;
@@ -24,7 +25,9 @@ import net.minecraft.util.FormattedCharSequence;
 public class ChatCombine extends BaseModule {
     public final ModulePath chatCombine = makePath(Configs.CHAT_CONFIG, "chat-combine");
     private static final String formatCombinedMessage = " &r&7&l[x&a%d&7&l]";
-    private static final Pattern matcherCombinedMessageSuffix = Pattern.compile("^\\s*?\\[x(\\d*?)\\]$");
+    private static final String RAW_ID_PREFIX = "slimefunhelper:chatcombine/";
+    private static final String STACK_ID_PREFIX = "slimefunhelper:chatcombine_stack/";
+    private static final String LINE_ID_PREFIX = "slimefunhelper:chatcombine_line/";
 
     public ChatCombine() {
         super("ChatCombine");
@@ -32,85 +35,79 @@ public class ChatCombine extends BaseModule {
     }
 
     public final FlagRef enable = flagBuilder(chatCombine.add("enable")).build();
+    public final FlagRef removeAll =
+            flagBuilder(chatCombine.add("remove-all")).defaultValue(true).build();
 
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getMessageAddToVisible(), this::onAddVisibleMessage);
+        registerListener(Listener.getMessageAddToHud(), this::onMessageAdd);
     }
 
-    public void onAddVisibleMessage(Event<GuiMessage> textEvent) {
-        if (!enable.get()) {
-            return;
-        }
-        GuiMessage line = textEvent.context();
-        Component text = line.content();
-        // use translated
+    public void onMessageAdd(Event<Component> textEvent) {
+        if (!enable.get() || textEvent.isCancelled()) return;
+
+        Component text = textEvent.context();
         String rawString = ChatUtils.getOrderedTextString(text.getVisualOrderText());
-        //       rawString = rawString.replaceAll("§.", "");
+        String rawId = RAW_ID_PREFIX + rawString;
+
         ChatComponent hud = ClientUtils.getChat(mc);
-        int amount = 0;
+        ChatHudAccess hudAccess = hud == null ? null : ChatHudAccess.of(hud);
+        int maxStack = 1;
+        boolean matched = false;
         if (hud != null) {
-            var visibleHistory = ChatHudAccess.of(hud).getVisibleLines();
+            var visibleHistory = hudAccess.getVisibleLines();
+            boolean removeEverywhere = removeAll.get();
+            ListIterator<GuiMessage.Line> lineIterator = visibleHistory.listIterator();
             try {
-                ListIterator<GuiMessage.Line> lineIterator = visibleHistory.listIterator();
-                List<FormattedCharSequence> textList = new ArrayList<>();
+                Set<String> visitedLineIds = new HashSet<>();
                 while (lineIterator.hasNext()) {
-                    var visible = lineIterator.next();
-                    textList.add(0, visible.content());
-                    String rawLine1 = ChatUtils.getOrderedTextString(textList.toArray(FormattedCharSequence[]::new));
-                    // remove all fucking shits
-                    if (rawLine1.length() > rawString.length() + 10 + formatCombinedMessage.length()) {
-                        break;
-                    }
-                    if (rawLine1.startsWith(rawString)) {
-                        String suffix = rawLine1.substring(rawString.length());
-                        if (suffix.isEmpty()) {
-                            // absolutely equals
-                            amount += 1;
-                            lineIterator.remove();
-                            while (lineIterator.hasPrevious()) {
-                                lineIterator.previous();
-                                lineIterator.remove();
-                            }
-                            //                       do {
-                            //                           lineIterator.remove();
-                            //                       }while (lineIterator.hasPrevious());
-                            textList.clear();
-                        } else {
-                            // check if with suffix
-                            Matcher matcher = matcherCombinedMessageSuffix.matcher(suffix);
-                            if (matcher.find()) {
-                                try {
-                                    // combine amount and remove line
-                                    amount += Integer.parseInt(matcher.group(1));
-                                    lineIterator.remove();
-                                    while (lineIterator.hasPrevious()) {
-                                        lineIterator.previous();
-                                        lineIterator.remove();
-                                    }
-                                    textList.clear();
-                                } catch (Throwable e) {
-                                    // break combine
-                                    continue;
-                                }
-                            }
-                        }
-                    } else {
-                        // break combine
+                    GuiMessage.Line visible = lineIterator.next();
+                    Set<String> messageIds = ChatHudLineAccess.of(visible).getUniqueMessageIds();
+                    if (!messageIds.contains(rawId)) {
+                        if (!removeEverywhere) break;
                         continue;
                     }
+
+                    String lineId = messageIds.stream()
+                            .filter(id -> id.startsWith(LINE_ID_PREFIX))
+                            .findFirst()
+                            .orElse("legacy:" + System.identityHashCode(visible));
+                    if (visitedLineIds.add(lineId)) {
+                        maxStack = Math.max(maxStack, getStackSize(messageIds));
+                        matched = true;
+                    }
+
+                    lineIterator.remove();
                 }
             } catch (UnsupportedOperationException e) {
                 // 该列表不支持迭代器删除（第三方模组可能替换了 trimmedMessages），放弃本次合并，原样放行
             }
         }
-        if (amount > 0) {
-
-            String newLineLegacy = formatCombinedMessage.formatted(amount + 1);
+        int stack = matched ? maxStack + 1 : 1;
+        if (hudAccess != null) {
+            hudAccess.addPendingUniqueMessageId(rawId);
+            hudAccess.addPendingUniqueMessageId(STACK_ID_PREFIX + stack);
+            hudAccess.addPendingUniqueMessageId(LINE_ID_PREFIX + UUID.randomUUID());
+        }
+        if (matched) {
+            String newLineLegacy = formatCombinedMessage.formatted(stack);
             MutableComponent newLine = ChatUtils.copyText(text);
             newLine.append(ChatUtils.stringToText(newLineLegacy));
-            textEvent.context(new GuiMessage(line.addedTime(), newLine, line.signature(), line.source(), line.tag()));
+            textEvent.context(newLine);
         }
+    }
+
+    private int getStackSize(Set<String> messageIds) {
+        int stack = 1;
+        for (String id : messageIds) {
+            if (!id.startsWith(STACK_ID_PREFIX)) continue;
+            try {
+                stack = Math.max(stack, Integer.parseInt(id.substring(STACK_ID_PREFIX.length())));
+            } catch (NumberFormatException ignored) {
+                // Ignore malformed stack metadata.
+            }
+        }
+        return stack;
     }
 }

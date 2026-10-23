@@ -20,10 +20,7 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 
 public class InGuiChatBox extends BaseModule {
     public final ModulePath chat = makePath(Configs.CHAT_CONFIG, "chat-helper");
@@ -39,6 +36,7 @@ public class InGuiChatBox extends BaseModule {
 
     public final DoubleRef otherScreenInputLength = doubleBuilder(chat.add("chat-box-other-length"))
             .defaultValue(100.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
             .build();
     public static InGuiChatBox INSTANCE;
 

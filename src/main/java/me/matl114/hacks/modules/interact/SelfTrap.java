@@ -11,10 +11,10 @@ import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
-import me.matl114.hacks.modules.ac.DisablerManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.PacketMine;
 import me.matl114.hacks.modules.move.PlayerInputManager;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
@@ -72,7 +72,7 @@ public class SelfTrap extends BaseModule {
 
     public final FlagRef airplace = flagBuilder(selfTrap.add("air-place")).build();
 
-    public final FlagRef placeLower = flagBuilder(selfTrap.add("lower")).build();
+    public final FlagRef scaffold = flagBuilder(selfTrap.add("lower")).build();
 
     public final FlagRef onlyGround = flagBuilder(selfTrap.add("only-ground")).build();
 
@@ -125,7 +125,7 @@ public class SelfTrap extends BaseModule {
         }
     }
 
-    public void onInput(Event<Void> inputEvent) {
+    public void onInput() {
         if (checkNull() || !enable.get()) {
             return;
         }
@@ -177,29 +177,34 @@ public class SelfTrap extends BaseModule {
         }
 
         Set<BlockPos> result = new LinkedHashSet<>();
-        if (placeLower.get()) {
-            if (!onlyGround.get()
-                    || !CollisionUtil.isBoxCollided(
-                            mc.level,
-                            mc.player,
-                            playerBox.setMinY(playerBox.minY - 1.5).setMaxY(playerBox.minY))) {
-                for (BlockPos occupied : occupiedFeet) {
-                    result.add(occupied.below());
-                }
+        if (!onlyGround.get()
+                || !CollisionUtil.isBoxCollided(
+                        mc.level,
+                        mc.player,
+                        playerBox.setMinY(playerBox.minY - 1.5).setMaxY(playerBox.minY))) {
+            for (BlockPos occupied : occupiedFeet) {
+                result.add(occupied.below());
             }
         }
-        for (Direction direction : Direction.Plane.HORIZONTAL) {
+        Set<BlockPos> scaffoldPoses = new LinkedHashSet<>();
+        for (Direction direction : MathUtils.HORIZONTALS) {
             for (BlockPos occupied : occupiedFeet) {
                 BlockPos candidate = occupied.relative(direction);
                 if (!occupiedFeet.contains(candidate)) {
                     result.add(candidate);
-                }
-                BlockPos candidateDown = candidate.below();
-                if (!occupiedFeet.contains(candidateDown)) {
-                    result.add(candidateDown);
+                    if (scaffold.get()) {
+                        BlockState state = mc.level.getBlockState(candidate);
+                        if (state.isAir() || state.liquid()) {
+                            BlockPos candidateDown = candidate.below();
+                            if (!occupiedFeet.contains(candidateDown)) {
+                                scaffoldPoses.add(candidateDown);
+                            }
+                        }
+                    }
                 }
             }
         }
+        result.addAll(scaffoldPoses);
         return result;
     }
 
@@ -250,6 +255,9 @@ public class SelfTrap extends BaseModule {
                 if (supply == null) {
                     break;
                 }
+                if (!InteractionTasks.canHandleInteract(mode.get(), hitResult.val())) {
+                    break;
+                }
                 maxPlace = Math.min(maxPlace, supply.val().getCount());
                 offhandOk |= supply.index() == 40;
                 inventoryCallback = InvExtra.INSTANCE.swapItemToHand(supply.index(), offhandOk, ghostHand.get());
@@ -257,17 +265,16 @@ public class SelfTrap extends BaseModule {
                     break;
                 }
             }
-
-            InteractionTasks.handlePlaceMode(
+            boolean completed = InteractionTasks.handlePlaceMode(
                     mode.get(), hitResult.val(), offhandOk ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, swingHand.get());
             placeCount++;
-            if (placeCount >= maxPlace) {
+            if (!completed || placeCount >= maxPlace) {
                 break;
             }
         }
 
         if (inventoryCallback != null) {
-            inventoryCallback.run();
+            InteractionTasks.finishInteractGhostHand(mode.get(), inventoryCallback);
         }
         return placeCount > 0;
     }
@@ -294,7 +301,13 @@ public class SelfTrap extends BaseModule {
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
-        mode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
-        airplace.set(!event.context.getValue().hasAC());
+        ModulePreset preset = event.context.getValue();
+        if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
+        if (!preset.isOptionPreset()) {
+            mode.set(LegalInteractMode.getFromPreset(preset));
+            airplace.set(!preset.hasAC());
+        }
     }
 }

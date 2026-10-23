@@ -7,6 +7,8 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.DefaultElementFactory;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.utils.config.BaseAttrKeyValue;
 import me.matl114.utils.config.WrapperFactory;
@@ -17,29 +19,29 @@ import net.minecraft.nbt.Tag;
 @Getter
 @Accessors(fluent = true)
 public class NBTType<T> implements WrapperFactory<Tag, T> {
-    public NBTType(String typeName, Codec<T> codec, AttrKeyValue.CustomWidgetGenerator<T> customWidgetGenerator, T empty) {
-        this(typeName, codec, null, customWidgetGenerator, empty);
+    public NBTType(String typeName, Codec<T> codec, AttrKeyValue.CustomWidgetGenerator<T> customWidgetFactory, T empty) {
+        this(typeName, codec, null, customWidgetFactory, empty);
         this.stringifyFactory = createDefaultFactory(this);
     }
 
     public NBTType(
             String typeName,
             Codec<T> codec,
-            AttrKeyValue.CustomWidgetGenerator<T> customWidgetGenerator,
+            AttrKeyValue.CustomWidgetGenerator<T> customWidgetFactory,
             WrapperFactory<String, T> stringifyFactory,
             T empty) {
-        this(typeName, codec, Objects.requireNonNull(stringifyFactory), customWidgetGenerator, empty);
+        this(typeName, codec, Objects.requireNonNull(stringifyFactory), customWidgetFactory, empty);
     }
 
     public NBTType(
             String typeName,
             Codec<T> codec,
             WrapperFactory<String, T> stringifyFactory,
-            AttrKeyValue.CustomWidgetGenerator<T> customWidgetGenerator,
+            AttrKeyValue.CustomWidgetGenerator<T> customWidgetFactory,
             T empty) {
         this.typeName = typeName.toLowerCase(Locale.ROOT);
         this.typeCodec = codec;
-        this.customWidgetGenerator = customWidgetGenerator;
+        this.customWidgetFactory = customWidgetFactory;
         this.stringifyFactory = stringifyFactory;
         this.empty = empty;
     }
@@ -48,7 +50,7 @@ public class NBTType<T> implements WrapperFactory<Tag, T> {
     final Codec<T> typeCodec;
 
     @Setter
-    AttrKeyValue.CustomWidgetGenerator<T> customWidgetGenerator;
+    AttrKeyValue.CustomWidgetGenerator<T> customWidgetFactory;
 
     @Setter
     WrapperFactory<String, T> stringifyFactory;
@@ -77,13 +79,18 @@ public class NBTType<T> implements WrapperFactory<Tag, T> {
         return new BaseAttrKeyValue<T>(
                 key,
                 value,
-                customWidgetGenerator,
+                customWidgetFactory,
                 AttrKeyValues.NBT_FACTORY.concat(WrapperFactory.of(this::parse, this::toNbt)));
     }
 
     public DrawableWidget generateValueWidget(AttrKeyValue<T> value, int x, int y, int inputDx, int dy) {
-        if (customWidgetGenerator != null) {
-            return customWidgetGenerator.generateWidget(value, x, y, inputDx, dy);
+        return generateValueWidget(DefaultElementFactory.INSTANCE, value, x, y, inputDx, dy);
+    }
+
+    public DrawableWidget generateValueWidget(
+            ElementFactory factory, AttrKeyValue<T> value, int x, int y, int inputDx, int dy) {
+        if (customWidgetFactory != null) {
+            return customWidgetFactory.generateWidget(factory, value, x, y, inputDx, dy);
         } else {
             throw new IllegalStateException("Can not find factory");
         }

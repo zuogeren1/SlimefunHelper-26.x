@@ -4,6 +4,9 @@ import java.awt.*;
 import java.util.List;
 import java.util.Optional;
 import javax.annotation.Nonnull;
+import me.matl114.renderer.TextRenderers;
+import me.matl114.renderer.text.TextDrawer;
+import me.matl114.renderer.text.VanillaTextDrawer;
 import me.matl114.versioned.impl.DrawContext_v1_21_11;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -181,18 +184,45 @@ public interface VDrawContext {
 
     public TextureAtlasSprite getGuiSprite(Identifier i);
 
+    /** 当前生效的文字绘制器；自定义字体（资源字体/本地字体）都由它承载。 */
+    default TextDrawer getTextDrawer() {
+        return TextRenderers.get();
+    }
+
+    default void drawCenteredTextWithShadow(
+            TextDrawer textDrawer, FormattedCharSequence text, int centerX, int y, int color) {
+        this.drawText(textDrawer, text, centerX - textDrawer.getWidth(text) / 2, y, color, true);
+    }
+
+    default void drawTextWithShadow(TextDrawer textDrawer, @Nullable String text, int x, int y, int color) {
+        this.drawText(textDrawer, text, x, y, color, true);
+    }
+
+    /**
+     * 兼容旧调用点的字体重载：把原版 {@link Font} 包成一个只做度量的 {@link TextDrawer}。
+     * 真正的字形由当前生效的文字绘制器决定（见 {@link #getTextDrawer()}）。
+     */
     default void drawCenteredTextWithShadow(
             Font textRenderer, FormattedCharSequence text, int centerX, int y, int color) {
-        this.drawText(textRenderer, text, centerX - textRenderer.width(text) / 2, y, color, true);
+        this.drawCenteredTextWithShadow(new VanillaTextDrawer(textRenderer), text, centerX, y, color);
     }
 
     default void drawTextWithShadow(Font textRenderer, @Nullable String text, int x, int y, int color) {
-        this.drawText(textRenderer, text, x, y, color, true);
+        this.drawTextWithShadow(new VanillaTextDrawer(textRenderer), text, x, y, color);
     }
 
-    public void drawText(Font textRenderer, FormattedCharSequence text, int x, int y, int color, boolean shadow);
+    default void drawText(
+            Font textRenderer, FormattedCharSequence text, int x, int y, int color, boolean shadow) {
+        this.drawText(new VanillaTextDrawer(textRenderer), text, x, y, color, shadow);
+    }
 
-    public void drawText(Font textRenderer, @Nullable String text, int x, int y, int color, boolean shadow);
+    default void drawText(Font textRenderer, @Nullable String text, int x, int y, int color, boolean shadow) {
+        this.drawText(new VanillaTextDrawer(textRenderer), text, x, y, color, shadow);
+    }
+
+    public void drawText(TextDrawer textDrawer, FormattedCharSequence text, int x, int y, int color, boolean shadow);
+
+    public void drawText(TextDrawer textDrawer, @Nullable String text, int x, int y, int color, boolean shadow);
     // just pass the relative coord
     public void enableScissor(int x, int y, int width, int height);
 
@@ -220,9 +250,21 @@ public interface VDrawContext {
 
     public void lineGuiGradient(int x1, int y1, int x2, int y2, int color1, int color2, int depth);
 
-    public void drawTooltip(Font textRenderer, List<Component> text, Optional<TooltipComponent> data, int x, int y);
+    public void drawTooltip(List<Component> text, Optional<TooltipComponent> data, int x, int y);
+
+    /** 兼容旧调用点；字体参数已不再参与 tooltip 布局。 */
+    default void drawTooltip(
+            Font textRenderer, List<Component> text, Optional<TooltipComponent> data, int x, int y) {
+        this.drawTooltip(text, data, x, y);
+    }
 
     public void drawItem(ItemStack stack, int x, int y, int seed, int z);
 
-    public void drawItemInSlot(Font textRenderer, ItemStack stack, int x, int y, @Nullable String countOverride);
+    public void drawItemInSlot(
+            TextDrawer textDrawer, ItemStack stack, int x, int y, @Nullable String countOverride);
+
+    default void drawItemInSlot(
+            Font textRenderer, ItemStack stack, int x, int y, @Nullable String countOverride) {
+        this.drawItemInSlot(new VanillaTextDrawer(textRenderer), stack, x, y, countOverride);
+    }
 }

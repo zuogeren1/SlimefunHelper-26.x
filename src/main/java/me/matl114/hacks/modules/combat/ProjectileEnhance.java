@@ -71,6 +71,7 @@ public class ProjectileEnhance extends BaseModule {
 
     public DoubleRef tpDistance = builder(projectile.add("tp-accelerate"), DoubleRef.TYPE)
             .defaultValue(150.0D)
+            .validator(Configs.doubleRange(-200.0D, 200.0D))
             .show(enableTp::get)
             .build();
 
@@ -96,6 +97,7 @@ public class ProjectileEnhance extends BaseModule {
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        if (event.context().getValue().isOptionPreset()) return;
         mode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
     }
 

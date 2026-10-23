@@ -8,6 +8,7 @@ import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.gui.basic.ButtonAction;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.IntPrimitiveList;
@@ -46,8 +47,10 @@ public class EventNotify extends BaseModule {
 
     public final FlagRef onlyMin = flagBuilder(path.add("min-only")).build();
 
-    public final DoubleRef minScreenWidth =
-            doubleBuilder(path.add("min-width")).defaultValue(0.0D).build();
+    public final DoubleRef minScreenWidth = doubleBuilder(path.add("min-width"))
+            .defaultValue(0.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
+            .build();
 
     public final FlagRef enableQueue = flagBuilder(path.add("enable-queue")).build();
 
@@ -169,9 +172,14 @@ public class EventNotify extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createExecuteButton(
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createExecuteButton(
                 "widget.event-notify.test-usage",
                 ButtonAction.run(() -> {
                     notify("[SlimefunHelper]测试", "HelloWorld");

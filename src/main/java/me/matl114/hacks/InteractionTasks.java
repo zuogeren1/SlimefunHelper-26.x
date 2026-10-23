@@ -1,36 +1,32 @@
 package me.matl114.hacks;
 
-import com.google.common.util.concurrent.Runnables;
-import com.mojang.datafixers.util.Pair;
 import java.util.*;
 import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import lombok.Getter;
-import me.matl114.accessors.access.ClientPlayerAccess;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.events.catchers.PacketCatcherImpl;
 import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.hacks.api.ModuleGroup;
 import me.matl114.hacks.api.ModuleManager;
 import me.matl114.hacks.modules.HackModules;
 import me.matl114.hacks.modules.interact.*;
+import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
-import me.matl114.hacks.utils.entity.LegalMovementManager;
+import me.matl114.hacks.modules.move.RotationManager;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Tasks;
 import me.matl114.utils.*;
 import me.matl114.utils.collections.FlagEntry;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
-import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.*;
 import net.minecraft.world.InteractionHand;
@@ -64,12 +60,12 @@ import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
-import org.apache.commons.lang3.mutable.MutableObject;
 import me.matl114.utils.RaycastUtils;
 import me.matl114.hacks.utils.EntityUtils;
 
@@ -77,17 +73,29 @@ public class InteractionTasks {
     public static void init() {}
 
     private static Minecraft mc = Minecraft.getInstance();
+    private static final Set<Block> weirdBoxes = Set.of(Blocks.LECTERN);
+    private static final Set<Block> buggyBoxes = Set.of(
+            Blocks.CHEST,
+            Blocks.TRAPPED_CHEST,
+            Blocks.CHORUS_PLANT,
+            Blocks.KELP,
+            Blocks.KELP_PLANT,
+            Blocks.TWISTING_VINES,
+            Blocks.TWISTING_VINES_PLANT,
+            Blocks.WEEPING_VINES,
+            Blocks.WEEPING_VINES_PLANT,
+            Blocks.REDSTONE_WIRE);
     //
     //    public static void placeBlock(int idx, BlockHitResult result){
     //
     //    }
 
-    public static void interactItem(InteractionHand hand, Vec3 rot, boolean realInteract, boolean swingHand) {
-        interactItem(hand, EntityUtils.rotationToPitch(rot), EntityUtils.rotationToYaw(rot), realInteract, swingHand);
+    public static boolean interactItem(InteractionHand hand, Vec3 rot, boolean realInteract, boolean swingHand) {
+        return interactItem(
+                hand, EntityUtils.rotationToPitch(rot), EntityUtils.rotationToYaw(rot), realInteract, swingHand);
     }
 
-    public static void interactItem(
-            InteractionHand hand, float pitch, float yaw, boolean realInteract, boolean swingHand) {
+    public static boolean interactItem(InteractionHand hand, float pitch, float yaw, boolean realInteract, boolean swingHand) {
         if (realInteract || !ViaFabricPlusHooks.isSupportDupRot()) {
             Vec2 storePY = new Vec2(mc.player.getXRot(), mc.player.getYRot());
             EntityUtils.setEntityPitchSafe(mc.player, pitch);
@@ -98,8 +106,10 @@ public class InteractionTasks {
             }
             mc.player.setXRot(storePY.x);
             mc.player.setYRot(storePY.y);
+            return actionResult.consumesAction();
         } else {
             LegacySnapRotManager.INSTANCE.snapAt(pitch, yaw, false);
+            return false;
         }
     }
 
@@ -127,125 +137,96 @@ public class InteractionTasks {
         }
     }
 
-    public static void addPostRotationCorrectTask(Vec3 look3d, Vec3 eyePos, Runnable callback) {
-        addPostRotationCorrectTask(look3d.subtract(eyePos), callback);
-    }
-
-    public static void addPostRotationCorrectTask(Vec3 rotationVec, Runnable callback) {
-        //        RenderTasks.registerVirtualRenderTask(new RenderTasks.RenderTask(
-        //            RenderTasks.DEBUG_TICK, new RenderTasks.BoxObject(look3d.add(-0.1, -0.1, -0.1), look3d.add(0.1,
-        // 0.1, 0.1), Color.MAGENTA)));
-        ClientPlayerAccess.of(mc.player)
-                .getLegalMovementManager()
-                .addMovementModifier(new LegalMovementManager.MovementModifier() {
-                    @Override
-                    public int priority() {
-                        return PRIORITY_LOW;
-                    }
-
-                    @Override
-                    public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {
-                        LocalPlayer player = movementManagerEvent.context.playerStatus.entity;
-
-                        Vec2 rotation =
-                                EntityUtils.rotationToPitchYaw(rotationVec.normalize());
-                        movementManagerEvent.context.pushImportantRotation(true, true);
-                        PlayerStateManager.setPlayerYawSafe(player, rotation.y);
-                        EntityUtils.setEntityPitchSafe(player, rotation.x);
-                        //                        py = rotation;
-                        movementManagerEvent.context.tryMarkForMoveFix();
-                        movementManagerEvent.context.markForResetRot();
-                        // RenderTasks.drawBox(MathUtils.createBox(look3d, 0.2D), 300, Color.MAGENTA);
-                    }
-
-                    @Override
-                    public boolean postModify(
-                            Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
-                        callback.run();
-                        return false;
-                    }
-                });
+    public static void addPostRotationCorrectTask(BlockPos pos, Runnable callback) {
+        RotationManager.INSTANCE.request(RotationManager.ofBlock(() -> pos).postTick(callback));
     }
 
     public static Vec3 createBlockRayCastDirection(BlockPos pos) {
-        Vec3 bestEyePos = InteractExtra.INSTANCE.getBestInteractEyePos(mc.player.position(), new BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false));
-        return createBlockRayCastDirection(pos, bestEyePos);
+        return createBlockRayCastDirection(pos, mc.player.position());
     }
 
-    public static Vec3 createBlockRayCastDirection(BlockPos pos, Vec3 bestEyePos) {
-        Vec3 center = Vec3.atCenterOf(pos);
-        AABB box = new AABB(pos);
-        var raycastDirection1 =
-                center.subtract(bestEyePos).normalize().scale(interactExtra.getBlockReachDistance() - 0.09178);
-        if (box.clip(bestEyePos, bestEyePos.add(raycastDirection1)).isPresent()) {
-            return raycastDirection1.normalize();
-        } else {
-            AABB shrinkedBox = box.inflate(-1E-7, -1E-7, -1E-7);
-            Vec3 targetingPos = MathUtils.magnitudePoint(shrinkedBox, bestEyePos);
-            return targetingPos.subtract(bestEyePos).normalize();
+    public static Vec3 createBlockRayCastDirection(BlockPos pos, Vec3 playerPos) {
+        return InteractExtra.INSTANCE.getRaycast(playerPos, pos);
+    }
+
+    public static boolean handlePlaceMode(LegalInteractMode mode, BlockHitResult result, InteractionHand hand) {
+        return handlePlaceMode(mode, result, hand, true);
+    }
+
+    public static boolean canHandleInteract(LegalInteractMode mode, BlockHitResult result) {
+        if (canDirectHit(result)) {
+            return true;
         }
+        return switch (mode) {
+            case USEITEM_PACKET, LEGACY_SLIENT_ROT, NONE -> true;
+            case DELAY_MOVEMENT -> !RotationManager.INSTANCE.isOccupied();
+            case MOVEMENT_POST -> false;
+        };
     }
 
-    public static void handlePlaceMode(LegalInteractMode mode, BlockHitResult result, InteractionHand hand) {
-        handlePlaceMode(mode, result, hand, true);
-    }
-
-    public static void handlePlaceMode(
-            LegalInteractMode mode, BlockHitResult result, InteractionHand hand, boolean swingHand) {
-        Vec3 bestEyePos = InteractExtra.INSTANCE.getBestInteractEyePos(mc.player.position(), result);
-        boolean directlyHit = RaycastUtils.canRaycastHit(
+    private static boolean canDirectHit(BlockHitResult result) {
+        return RaycastUtils.canRaycastHit(
                 mc.player,
                 PlayerStateManager.INSTANCE.lastPitch,
                 PlayerStateManager.INSTANCE.lastYaw,
                 result.getBlockPos(),
                 InteractExtra.INSTANCE.getBlockReachDistance());
+    }
+
+    public static boolean handlePlaceMode(LegalInteractMode mode, BlockHitResult result, InteractionHand hand, boolean swingHand) {
+        boolean directlyHit = canDirectHit(result);
         switch (mode) {
             case USEITEM_PACKET -> {
-                Vec2 rotation =
-                        EntityUtils.rotationToPitchYaw(createBlockRayCastDirection(result.getBlockPos(), bestEyePos)
-                                .normalize());
+                Vec2 rotation = EntityUtils.rotationToPitchYaw(
+                        createBlockRayCastDirection(result.getBlockPos()).normalize());
                 mc.gameMode.startPrediction(
                         mc.level, (i) -> new ServerboundUseItemPacket(hand, i, rotation.y, rotation.x));
                 InteractionTasks.interactBlock(hand, result, swingHand);
+                return true;
             }
             case DELAY_MOVEMENT -> {
-                InteractionTasks.interactBlock(hand, result, swingHand);
                 if (!directlyHit) {
-                    InteractionTasks.addPostRotationCorrectTask(
-                            Vec3.atCenterOf(result.getBlockPos()), bestEyePos, Runnables.doNothing());
+                    if (!RotationManager.INSTANCE.request(RotationManager.ofBlock(result::getBlockPos))) {
+                        return false;
+                    }
+                    RotationManager.INSTANCE.startQueuePacket();
                 }
+                InteractionTasks.interactBlock(hand, result, swingHand);
+                return true;
             }
             case MOVEMENT_POST -> {
                 if (!directlyHit) {
-                    MutableObject<ServerboundUseItemOnPacket> catcher = new MutableObject<>();
-                    Listener.addPrePacketCatcher(new PacketCatcherImpl<>(ServerboundUseItemOnPacket.class, (eve) -> {
-                        if (eve.isCancelled()) return true;
-                        catcher.setValue(eve.context);
-                        eve.cancel();
-                        return true;
-                    }));
-                    InteractionTasks.interactBlock(hand, result, swingHand);
-                    if (catcher.getValue() != null) {
-                        var pkt = catcher.getValue();
-                        InteractionTasks.addPostRotationCorrectTask(
-                                Vec3.atCenterOf(result.getBlockPos()), bestEyePos, () -> mc.getConnection()
-                                        .send(pkt));
-                    }
+                    InteractionTasks.addPostRotationCorrectTask(result.getBlockPos(), () -> {
+                        InteractionTasks.interactBlock(hand, result, swingHand);
+                    });
+                    return false;
                 } else {
                     InteractionTasks.interactBlock(hand, result, swingHand);
+                    return true;
                 }
             }
             case LEGACY_SLIENT_ROT -> {
                 if (!directlyHit) {
-                    Vec2 rotation = EntityUtils.rotationToPitchYaw(
-                            createBlockRayCastDirection(result.getBlockPos(), bestEyePos));
+                    Vec2 rotation = EntityUtils.rotationToPitchYaw(createBlockRayCastDirection(result.getBlockPos()));
                     LegacySnapRotManager.INSTANCE.snapAt(rotation.x, rotation.y, false);
                 }
                 InteractionTasks.interactBlock(hand, result, swingHand);
+                return true;
             }
             case NONE -> {
                 InteractionTasks.interactBlock(hand, result, swingHand);
+                return true;
             }
+        }
+        throw new IllegalStateException("Unhandled interaction mode: " + mode);
+    }
+
+    public static void finishInteractGhostHand(LegalInteractMode mode, Runnable callback) {
+        if (callback == null) return;
+        if (!mode.canMultiRotPlace()) {
+            InvExtra.INSTANCE.pushPostTickGhostHandCallback(callback);
+        } else {
+            callback.run();
         }
     }
 
@@ -254,12 +235,57 @@ public class InteractionTasks {
         return interactExtra.getPotentialEyeHeights(playerPos).anyMatch(box::contains);
     }
 
+    public static boolean isSpecialPositionPlaceState(BlockState state) {
+        return state.is(BlockTags.FENCES)
+                || state.is(BlockTags.WALLS)
+                || state.is(BlockTags.DOORS)
+                || state.is(BlockTags.STAIRS)
+                || weirdBoxes.contains(state.getBlock())
+                || buggyBoxes.contains(state.getBlock());
+    }
+
+    public static AABB getPositionPlaceBoundary(BlockPos pos, BlockState state) {
+        var shape = state.getShape(mc.level, pos, CollisionContext.of(mc.player));
+        if (shape.isEmpty()) {
+            shape = state.getCollisionShape(mc.level, pos);
+        }
+        if (shape.isEmpty()) {
+            return new AABB(pos);
+        }
+
+        List<AABB> shapeBoxes = shape.toAabbs();
+        AABB boundary = new AABB(pos);
+        for (AABB localBox : shapeBoxes) {
+            AABB box = localBox.move(pos);
+            boundary = new AABB(
+                    Math.max(boundary.minX, box.minX),
+                    Math.max(boundary.minY, box.minY),
+                    Math.max(boundary.minZ, box.minZ),
+                    Math.min(boundary.maxX, box.maxX),
+                    Math.min(boundary.maxY, box.maxY),
+                    Math.min(boundary.maxZ, box.maxZ));
+        }
+        return boundary;
+    }
+
     public static boolean checkPositionPlace(BlockPos pos, Direction face, Vec3 playerPos) {
         Vec3 plateCenter = Vec3.atCenterOf(pos).relative(face, 0.5d);
+        BlockState state = mc.level.getBlockState(pos);
+        if (!state.isCollisionShapeFullBlock(mc.level, pos) || isSpecialPositionPlaceState(state)) {
+            AABB boundary = getPositionPlaceBoundary(pos, state);
+            plateCenter = switch (face) {
+                case DOWN -> new Vec3(pos.getX() + 0.5, boundary.minY, pos.getZ() + 0.5);
+                case UP -> new Vec3(pos.getX() + 0.5, boundary.maxY, pos.getZ() + 0.5);
+                case NORTH -> new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, boundary.minZ);
+                case SOUTH -> new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, boundary.maxZ);
+                case WEST -> new Vec3(boundary.minX, pos.getY() + 0.5, pos.getZ() + 0.5);
+                case EAST -> new Vec3(boundary.maxX, pos.getY() + 0.5, pos.getZ() + 0.5);};
+        }
         Vec3 directionVec = Vec3.atLowerCornerOf(face.getUnitVec3i());
+        Vec3 finalPlaceCenter = plateCenter;
         return interactExtra
                 .getPotentialEyeHeights(playerPos)
-                .anyMatch(eye -> eye.subtract(plateCenter).dot(directionVec) > 0);
+                .anyMatch(eye -> eye.subtract(finalPlaceCenter).dot(directionVec) > 0);
     }
 
     public static boolean checkPositionPlace(BlockHitResult hitResult) {

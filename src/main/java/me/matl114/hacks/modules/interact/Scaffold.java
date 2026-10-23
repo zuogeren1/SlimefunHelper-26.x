@@ -10,8 +10,8 @@ import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
-import me.matl114.hacks.modules.ac.DisablerManager;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
 import me.matl114.managers.Configs;
@@ -111,17 +111,19 @@ public class Scaffold extends BaseModule {
 
     private boolean placeBlock(int hand, BlockHitResult result) {
         boolean offhandOk = offhand.get() || hand == 40;
+        if (!InteractionTasks.canHandleInteract(legalMode.get(), result)) {
+            return false;
+        }
         Runnable callback = InvExtra.INSTANCE.swapItemToHand(hand, offhandOk, ghostHand.get());
         if (callback == null) {
             return false;
         }
         try {
-            InteractionTasks.handlePlaceMode(
+            return InteractionTasks.handlePlaceMode(
                     legalMode.get(), result, offhandOk ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, swingHand.get());
         } finally {
-            callback.run();
+            InteractionTasks.finishInteractGhostHand(legalMode.get(), callback);
         }
-        return true;
     }
 
     private Set<Item> availableItemBlocks;
@@ -150,7 +152,7 @@ public class Scaffold extends BaseModule {
         return stackEntry == null ? -1 : stackEntry.index();
     }
 
-    public void onPreInput(Event<Void> event) {
+    public void onPreInput() {
         if (checkNull()) {
             return;
         }
@@ -218,8 +220,9 @@ public class Scaffold extends BaseModule {
             }
             BlockHitResult hit = hitResult.val();
             if (hit != null) {
-                placeBlock(hand, hit);
+                boolean completed = placeBlock(hand, hit);
                 ccc++;
+                if (!completed) break;
             }
         }
         return ccc > 0;
@@ -292,7 +295,12 @@ public class Scaffold extends BaseModule {
     }
 
     public void onPresetReload(Event<EventContainer<ModulePreset>> event) {
-        legalMode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
-        airplace.set(!event.context.getValue().hasAC());
+        ModulePreset preset = event.context.getValue();
+        if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (!preset.isOptionPreset()) {
+            legalMode.set(LegalInteractMode.getFromPreset(preset));
+            airplace.set(!preset.hasAC());
+        }
     }
 }

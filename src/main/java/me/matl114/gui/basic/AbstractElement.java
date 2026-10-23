@@ -25,8 +25,8 @@ public class AbstractElement implements ElementHandler {
         return this;
     }
 
-    public AbstractElement withElement(ElementHandler handler) {
-        return withInputHandler(handler).combineRender(handler);
+    public AbstractElement withRenderer(RenderHandler handler) {
+        return combineRender(handler);
     }
 
     @Override
@@ -57,6 +57,10 @@ public class AbstractElement implements ElementHandler {
         }
         mouseHandlers.add(handler);
         return this;
+    }
+
+    public AbstractElement withElement(ElementHandler handler) {
+        return withInputHandler(handler).combineRender(handler);
     }
 
     public final void renderAtCentered(

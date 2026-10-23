@@ -3,11 +3,15 @@ package me.matl114.hacks.modules.survival;
 import com.google.common.collect.ImmutableMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
+import java.lang.ref.WeakReference;
 import java.util.*;
 import java.util.function.Consumer;
+import lombok.Getter;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.annotations.Broadcast;
+import me.matl114.events.channels.EventChannel;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -31,7 +35,6 @@ import me.matl114.utils.MathUtils;
 import me.matl114.utils.ScreenUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -41,6 +44,14 @@ import net.minecraft.world.phys.Vec3;
 
 public class XaeroHelper extends BaseModule {
     public static XaeroHelper INSTANCE;
+
+    @Getter
+    @Broadcast
+    private static final EventChannel<Level> worldSwitchPoint = new EventChannel<>();
+
+    public static EventChannel<Level> getWorldSwitchPoint() {
+        return worldSwitchPoint;
+    }
 
     public XaeroHelper() {
         super("XaeroHelper");
@@ -91,6 +102,7 @@ public class XaeroHelper extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
+        registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch, Integer.MIN_VALUE);
         registerListener(Listener.getPostGameTick(), this::onTickMapRender);
         registerListener(XaeroHooks.getWorldMapRightClickOption(), this::onXaeroWorldMapClick);
         registerListener(Listener.getPostGameTick(), this::onXaeroTempWaypointSync);
@@ -101,7 +113,7 @@ public class XaeroHelper extends BaseModule {
     public <W> void unregisterAll() {
         super.unregisterAll();
         toggleLoadedChunk(false);
-        destroyTempWaypoints();
+        clearWaypoints();
     }
 
     public static final String LOADED_CHUNK_RENDER_ID = "slimefun_xaerohelper_loaded_chunk_render";
@@ -185,7 +197,7 @@ public class XaeroHelper extends BaseModule {
         }
     }
 
-    public void onTickMapRender(Event<LocalPlayer> event) {
+    public void onTickMapRender() {
         if (loadedChunkRender.get() && loadedChunkFeature != null) {
             Set<ChunkPos> chunkPoses = new HashSet<>(100);
             for (var chunk : CommonUtils.chunks(false)) {
@@ -234,50 +246,192 @@ public class XaeroHelper extends BaseModule {
         }
     }
 
-    IXWaypointAccess access;
+    public record WaypointBinding(WeakReference<Object> owner, IXWaypoint waypoint) {}
+
+    private IXWaypointAccess access;
+    private final List<WaypointBinding> submittedWaypoints = new ArrayList<>();
     IXWaypoint travelPoint;
 
-    private void destroyTempWaypoints() {
-        if (access != null) {
-            if (travelPoint != null) {
-                access.remove(travelPoint);
-                travelPoint = null;
-            }
+    private void clearWaypoints() {
+        detachWaypoints();
+        submittedWaypoints.clear();
+        travelPoint = null;
+    }
+
+    private void detachWaypoints() {
+        if (access != null && !submittedWaypoints.isEmpty()) {
+            access.removeAll(
+                    submittedWaypoints.stream().map(WaypointBinding::waypoint).toList());
+            access.requestRefresh();
         }
         access = null;
     }
 
-    private void destroyTravelPoint() {
-        if (travelPoint != null) {
-            access.remove(travelPoint);
-            travelPoint = null;
+    private void onWorldSwitch(Event<Level> event) {
+        clearWaypoints();
+        worldSwitchPoint.broadcast(event.context);
+    }
+
+    private void attachWaypoints() {
+        if (access != null && !submittedWaypoints.isEmpty()) {
+            access.addAll(
+                    submittedWaypoints.stream().map(WaypointBinding::waypoint).toList());
             access.requestRefresh();
         }
     }
 
-    public void onXaeroTempWaypointSync(Event<LocalPlayer> eventVoid) {
+    private void cleanupCollectedWaypoints() {
+        if (submittedWaypoints.isEmpty()) {
+            return;
+        }
+        List<IXWaypoint> removed = new ArrayList<>();
+        submittedWaypoints.removeIf(binding -> {
+            if (binding.owner().get() == null) {
+                removed.add(binding.waypoint());
+                return true;
+            }
+            return false;
+        });
+        if (access != null && !removed.isEmpty()) {
+            access.removeAll(removed);
+            access.requestRefresh();
+        }
+    }
+
+    private void syncWaypointAccess() {
+        IXWaypointFactory factory = XaeroHooks.getInstance().getWaypointFactory();
+        ResourceKey<Level> currentWorld = factory == null ? null : factory.getCurrentWorld();
+        IXWaypointAccess currentAccess = factory == null || !Objects.equals(currentWorld, mc.level.dimension())
+                ? null
+                : factory.getCurrentWaypointSet();
+        if (!Objects.equals(currentAccess, access)) {
+            detachWaypoints();
+            access = currentAccess;
+            attachWaypoints();
+        }
+    }
+
+    public IXWaypoint createWaypoint(
+            int x, int y, int z, String name, String initials, int color, int type, boolean temp, boolean yIncluded) {
+        IXWaypointFactory factory = XaeroHooks.getInstance().getWaypointFactory();
+        if (factory == null) {
+            return null;
+        }
+        return factory.createWaypoint(x, y, z, name, initials, color, type, temp, yIncluded);
+    }
+
+    public IXWaypoint submitWaypoint(
+            Object owner,
+            int x,
+            int y,
+            int z,
+            String name,
+            String initials,
+            int color,
+            int type,
+            boolean temp,
+            boolean yIncluded) {
+        IXWaypoint waypoint = createWaypoint(x, y, z, name, initials, color, type, temp, yIncluded);
+        return waypoint == null ? null : submitWaypoint(owner, waypoint);
+    }
+
+    public IXWaypoint submitWaypoint(Object owner, IXWaypoint waypoint) {
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(waypoint, "waypoint");
+        cleanupCollectedWaypoints();
+        if (submittedWaypoints.stream().anyMatch(binding -> Objects.equals(binding.waypoint(), waypoint))) {
+            return waypoint;
+        }
+        submittedWaypoints.add(new WaypointBinding(new WeakReference<>(owner), waypoint));
+        if (access != null) {
+            access.add(waypoint);
+            access.requestRefresh();
+        }
+        return waypoint;
+    }
+
+    public void updateWaypoint(IXWaypoint waypoint, Consumer<IXWaypoint> updater) {
+        cleanupCollectedWaypoints();
+        if (submittedWaypoints.stream().noneMatch(binding -> Objects.equals(binding.waypoint(), waypoint))) {
+            return;
+        }
+        if (access == null) {
+            updater.accept(waypoint);
+        } else {
+            access.update(waypoint, updater);
+            access.requestRefresh();
+        }
+    }
+
+    public void removeWaypoint(IXWaypoint waypoint) {
+        if (waypoint == null) {
+            return;
+        }
+        cleanupCollectedWaypoints();
+        boolean removed = submittedWaypoints.removeIf(binding -> Objects.equals(binding.waypoint(), waypoint));
+        if (access != null && removed) {
+            access.remove(waypoint);
+            access.requestRefresh();
+        }
+    }
+
+    public void removeWaypoint(Object owner, BlockPos pos) {
+        cleanupCollectedWaypoints();
+        double scale = mc.level == null ? 1 : mc.level.dimensionType().coordinateScale();
+        int x = (int) (pos.getX() * scale);
+        int y = pos.getY();
+        int z = (int) (pos.getZ() * scale);
+        List<IXWaypoint> removed = new ArrayList<>();
+        submittedWaypoints.removeIf(binding -> {
+            IXWaypoint waypoint = binding.waypoint();
+            if (binding.owner().get() == owner
+                    && waypoint.getX() == x
+                    && waypoint.getY() == y
+                    && waypoint.getZ() == z) {
+                removed.add(waypoint);
+                return true;
+            }
+            return false;
+        });
+        if (access != null && !removed.isEmpty()) {
+            access.removeAll(removed);
+            access.requestRefresh();
+        }
+    }
+
+    public void removeSub(Object owner) {
+        Objects.requireNonNull(owner, "owner");
+        List<IXWaypoint> removed = new ArrayList<>();
+        submittedWaypoints.removeIf(binding -> {
+            if (binding.owner().get() == owner) {
+                removed.add(binding.waypoint());
+                return true;
+            }
+            return false;
+        });
+        if (access != null && !removed.isEmpty()) {
+            access.removeAll(removed);
+            access.requestRefresh();
+        }
+    }
+
+    public void onXaeroTempWaypointSync() {
         if (checkNull()) return;
+        cleanupCollectedWaypoints();
         if (!XaeroHooks.getInstance().isXaeroMiniMapEnable()) {
             return;
         }
-        IXWaypointFactory factory = XaeroHooks.getInstance().getWaypointFactory();
-        if (!Objects.equals(factory.getCurrentWorld(), mc.level.dimension())) {
-            destroyTempWaypoints();
-            return;
-        }
-        IXWaypointAccess currentSetAccess = factory.getCurrentWaypointSet();
-        if (!Objects.equals(currentSetAccess, access)) {
-            destroyTempWaypoints();
-        }
-        access = currentSetAccess;
+        syncWaypointAccess();
         if (travelGoalSync.get()) {
             if (TravellingControl.travelTask == null) {
-                destroyTravelPoint();
+                removeWaypoint(travelPoint);
+                travelPoint = null;
             } else {
                 Vec3 target = TravellingControl.travelTask.getCurrentFlyingTarget();
                 BlockPos pos = new BlockPos((int) target.x, (int) Math.clamp(target.y, -512, 512), (int) target.z);
                 if (travelPoint == null) {
-                    travelPoint = factory.createWaypoint(
+                    travelPoint = submitWaypoint(
+                            this,
                             pos.getX(),
                             pos.getY(),
                             pos.getZ(),
@@ -287,18 +441,21 @@ public class XaeroHelper extends BaseModule {
                             0,
                             true,
                             true);
-                    access.add(travelPoint);
-                    access.requestRefresh();
                 }
-                access.update(travelPoint, (acc) -> {
-                    if (acc.getX() != pos.getX() || acc.getY() != pos.getY() || acc.getZ() != pos.getZ()) {
+                if (travelPoint != null
+                        && (travelPoint.getX() != pos.getX()
+                                || travelPoint.getY() != pos.getY()
+                                || travelPoint.getZ() != pos.getZ())) {
+                    updateWaypoint(travelPoint, acc -> {
                         acc.setX(pos.getX());
                         acc.setY(pos.getY());
                         acc.setZ(pos.getZ());
-                        access.requestRefresh();
-                    }
-                });
+                    });
+                }
             }
+        } else {
+            removeWaypoint(travelPoint);
+            travelPoint = null;
         }
     }
 
@@ -311,9 +468,14 @@ public class XaeroHelper extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle(
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle(
                 XaeroHooks.getInstance().isXaeroWorldMapEnable()
                         ? "widget.xaero-helper.xaero-worldmap-enable"
                         : "widget.xaero-helper.xaero-worldmap-not-support",
@@ -321,7 +483,7 @@ public class XaeroHelper extends BaseModule {
                 dblank,
                 dx,
                 dy));
-        acceptor.accept(createTitle(
+        acceptor.accept(factory.createTitle(
                 XaeroHooks.getInstance().isXaeroMiniMapEnable()
                         ? "widget.xaero-helper.xaero-minimap-enable"
                         : "widget.xaero-helper.xaero-minimap-not-support",
@@ -329,7 +491,7 @@ public class XaeroHelper extends BaseModule {
                 dblank,
                 dx,
                 dy));
-        acceptor.accept(createTitle(
+        acceptor.accept(factory.createTitle(
                 XaeroHooks.getInstance().isXaeroPlusEnable()
                         ? "widget.xaero-helper.xaero-plus-enable"
                         : "widget.xaero-helper.xaero-plus-not-support",

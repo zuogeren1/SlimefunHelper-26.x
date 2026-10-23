@@ -1,5 +1,10 @@
 package me.matl114.hacks;
 
+import me.matl114.hacks.modules.task.ConnectionProxy;
+import me.matl114.hacks.modules.task.DisablerManager;
+import me.matl114.hacks.modules.task.PacketOrderManager;
+import me.matl114.hacks.modules.task.PostManager;
+import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.utils.ClientUtils;
 
 import java.util.ArrayList;
@@ -159,7 +164,7 @@ public class MainTasks {
             }
         }
 
-        for (Config config : Config.getConfigs()) {
+        for (Config config : Config.REGISTRY) {
             Set<String> indexes = new LinkedHashSet<>();
             for (String path : config.getVisiblePaths()) {
                 String[] cut = Config.cutToPath(path);
@@ -230,15 +235,14 @@ public class MainTasks {
 
     @ApiMethod
     public static void openConfigNewStyleScreen() {
-        ScreenAccess.of(new ConfigurateNewStyleScreen(
-                        Config.getConfigs().stream().toList()))
+        ScreenAccess.of(new ConfigurateNewStyleScreen(Config.REGISTRY.stream().toList()))
                 .openFromCurrent();
     }
 
     @ApiMethod
     public static void openConfigScreen(Config config) {
         ConfigurateNewStyleScreen newStyleScreen =
-                new ConfigurateNewStyleScreen(Config.getConfigs().stream().toList());
+                new ConfigurateNewStyleScreen(Config.REGISTRY.stream().toList());
         newStyleScreen.setGlobal(config);
         ScreenAccess.of(newStyleScreen).openFromCurrent();
     }
@@ -285,6 +289,9 @@ public class MainTasks {
     private static ClickGui clickGui;
 
     @Getter
+    private static TextFont textFont;
+
+    @Getter
     private static ConfigManager configManager;
 
     @Getter
@@ -297,6 +304,21 @@ public class MainTasks {
     private static ServerStorage serverStorage;
 
     @Getter
+    private static ServerFeature serverFeature;
+
+    @Getter
+    private static MovementManager movementManager;
+
+    @Getter
+    private static PostManager postManager;
+
+    @Getter
+    private static DisablerManager disablerManager;
+
+    @Getter
+    private static PacketOrderManager packetOrderManager;
+
+    @Getter
     private static ConnectionProxy connectionProxy;
 
     @Getter
@@ -305,10 +327,16 @@ public class MainTasks {
     private static void initModule(ModuleManager m) {
         moduleSettings = new ModuleSettings().register(m);
         clickGui = new ClickGui().register(m);
+        textFont = new TextFont().register(m);
         configManager = new ConfigManager().register(m);
         bindCommand = new BindCommand().register(m);
         eventCommand = new EventCommand().register(m);
         serverStorage = new ServerStorage().register(m);
+        serverFeature = new ServerFeature().register(m);
+        movementManager = new MovementManager().register(m);
+        postManager = new PostManager().register(m);
+        disablerManager = new DisablerManager().register(m);
+        packetOrderManager = new PacketOrderManager().register(m);
         connectionProxy = new ConnectionProxy().register(m);
         iqBoost = new IQBoost().register(m);
     }
@@ -316,6 +344,8 @@ public class MainTasks {
     // TODO: add entity inspect in info command
     //
     static {
+        // initialize config
+        NBTTypes.init();
         moduleManager.registerFactories(MainTasks::initModule);
         HackModules.registerModuleGroup(moduleManager);
         MineTasks.init();
@@ -329,7 +359,6 @@ public class MainTasks {
         SurvivalTasks.init();
         SlimefunTasks.init();
         ModelTasks.init();
-        ACTasks.init();
         ExtraTasks.init();
     }
 }

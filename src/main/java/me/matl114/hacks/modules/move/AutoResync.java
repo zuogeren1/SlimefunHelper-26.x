@@ -58,6 +58,7 @@ public class AutoResync extends BaseModule {
 
     public final DoubleRef autoResyncPosDistance = builder(moveSafety.add("auto-resync-distance"), DoubleRef.TYPE)
             .defaultValue(10.0D)
+            .validator(Configs.doubleRange(-200.0D, 200.0D))
             .build();
 
     public final FlagRef logAutoResync =
@@ -97,14 +98,10 @@ public class AutoResync extends BaseModule {
                 Listener.getPacketPostHandlePoint().getChannel(ClientboundPlayerRotationPacket.class),
                 this::onPostRotate);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
-        registerListener(Listener.getPlayerRespawnPoint(), this::onWorldSwitch);
+        registerListener(Listener.getPlayerRespawnPoint(), () -> worldSwitchTick = Tasks.getTick());
     }
 
     int worldSwitchTick = 0;
-
-    public void onWorldSwitch(Event<LocalPlayer> event) {
-        worldSwitchTick = Tasks.getTick();
-    }
 
     public Vec2 restoreRot = null;
 
@@ -192,7 +189,7 @@ public class AutoResync extends BaseModule {
         }
     }
 
-    public void onPreSetBack(Event<ClientboundPlayerPositionPacket> event) {
+    public void onPreSetBack() {
         if (checkNull()) return;
         if (autoResyncRot.get() && !modifyPacketRot.get()) {
             restoreRot = new Vec2(mc.player.getXRot(), mc.player.getYRot());
@@ -214,7 +211,7 @@ public class AutoResync extends BaseModule {
         }
     }
 
-    public void onPostSetBack(Event<ClientboundPlayerPositionPacket> event) {
+    public void onPostSetBack() {
         if (checkNull()) return;
         if (checkNull()) return;
         if (restoreRot != null) {
@@ -226,7 +223,7 @@ public class AutoResync extends BaseModule {
         }
     }
 
-    public void onPostRotate(Event<ClientboundPlayerRotationPacket> eventRotate) {
+    public void onPostRotate() {
         if (checkNull()) return;
         if (restoreRot != null) {
             EntityUtils.setEntityPitchSafe(mc.player, restoreRot.x);
@@ -257,6 +254,7 @@ public class AutoResync extends BaseModule {
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        if (event.context().getValue().isOptionPreset()) return;
         switch (event.context.getValue()) {
             case HACKING, VANILLA, AC_VULCAN -> {
                 if (autoResyncPosDistance.get() < 0) {

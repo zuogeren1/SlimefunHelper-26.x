@@ -12,7 +12,19 @@ public interface PacketStorage {
 
     PacketFlow side();
 
-    void send();
+    public interface Recv extends PacketStorage {
+        default PacketFlow side() {
+            return PacketFlow.CLIENTBOUND;
+        }
 
-    void handle();
+        void handle();
+    }
+
+    public interface Send extends PacketStorage {
+        default PacketFlow side() {
+            return PacketFlow.SERVERBOUND;
+        }
+
+        void send(boolean forceFlush);
+    }
 }

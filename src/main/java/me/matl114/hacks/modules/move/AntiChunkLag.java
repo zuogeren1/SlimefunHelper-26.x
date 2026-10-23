@@ -1,9 +1,9 @@
 package me.matl114.hacks.modules.move;
 
 import me.matl114.events.Event;
-import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
@@ -22,16 +22,11 @@ import net.minecraft.world.phys.Vec3;
 
 public class AntiChunkLag extends BaseModule implements LegalMovementManager.MovementModifier {
     public static AntiChunkLag INSTANCE;
-    public static LegalMovementManager.DelegateMovementModifier instance;
 
     public AntiChunkLag() {
         super("AntiChunkLag");
         INSTANCE = this;
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         bindFlag(enable);
     }
 
@@ -130,7 +125,7 @@ public class AntiChunkLag extends BaseModule implements LegalMovementManager.Mov
                         // fix armorGlide
                         if (mc.player.isFallFlying()) {
                             if (ElytraExtra.INSTANCE.isCurrentArmorGliding()) {
-                                if (ElytraExtra.INSTANCE.isThisTickArmoGlideMovementServerSideGlide()) {
+                                if (ElytraExtra.INSTANCE.isThisTickGlideMovementServerSideGlide()) {
                                     FloatingUtils.INSTANCE.setForceSilent(false);
                                 } else {
                                     FloatingUtils.INSTANCE.setForceSilent(true);

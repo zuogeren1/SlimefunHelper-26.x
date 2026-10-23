@@ -10,6 +10,7 @@ import me.matl114.events.Listener;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
+import me.matl114.hacks.modules.survival.XaeroHelper;
 import me.matl114.managers.FileManager;
 import me.matl114.managers.file.FileStorage;
 import me.matl114.utils.ChatUtils;
@@ -29,6 +30,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.mutable.MutableObject;
 import org.joml.Vector3d;
@@ -38,6 +41,7 @@ public class Warps extends BaseModule {
     private static final String SPLITTER_REGEX = "\\|";
     private static final String SAVE_KEY = "warp-entries";
     private final FileStorage saveMap = FileManager.getInstance().getInternalStorage("warp-saves.nbt");
+    private ResourceKey<Level> loadedWaypointWorld;
 
     // todo: add render settings, add auto create settings
     public final List<String> cachedString = new ArrayList<>();
@@ -130,8 +134,20 @@ public class Warps extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
+        registerListener(XaeroHelper.getWorldSwitchPoint(), this::onGameJoin);
+        registerListener(Listener.getGameJoinPoint(), this::onGameJoin);
+        registerListener(Listener.getPostGameTick(), this::onPostGameTick);
         registerListener(Listener.getCustomListener().getChannel(MovTasks.TpaCommandEvent.class), this::onTpaToWarp);
         registerCommandBootstrap(this::warpCommandBootStrap);
+        if (!checkNull()) {
+            loadCurrentWaypoints();
+        }
+    }
+
+    @Override
+    public <W> void unregisterAll() {
+        unloadCurrentWaypoints();
+        super.unregisterAll();
     }
 
     public boolean isValidWarpName(String name) {
@@ -148,14 +164,23 @@ public class Warps extends BaseModule {
     public boolean registerWarp(String world, String name, Vec3 pos) {
         if (isValidWarpName(name)) {
             String serverName = CommonUtils.getServerName();
-            return putInternal(serverName, world, name, pos);
+            Vec3 oldPos = getWorldWarps(world).get(name);
+            if (putInternal(serverName, world, name, pos)) {
+                updateCurrentWaypoint(serverName, world, name, oldPos, pos);
+                return true;
+            }
         }
         return false;
     }
 
     public boolean unregisterWarp(String world, String name) {
         String serverName = CommonUtils.getServerName();
-        return removeInternal(serverName, world, name);
+        Vec3 oldPos = getWorldWarps(world).get(name);
+        if (removeInternal(serverName, world, name)) {
+            removeCurrentWaypoint(serverName, world, oldPos);
+            return true;
+        }
+        return false;
     }
 
     @Nonnull
@@ -188,6 +213,91 @@ public class Warps extends BaseModule {
         BlockPos pos = BlockPos.containing(vec3d);
         return BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ());
     }
+
+    private void loadCurrentWaypoints() {
+        unloadCurrentWaypoints();
+        if (checkNull() || XaeroHelper.INSTANCE == null) {
+            loadedWaypointWorld = null;
+            return;
+        }
+        var warps = getCurrentWorldWarps().orElse(Map.of());
+        boolean loaded = true;
+        for (var entry : warps.entrySet()) {
+            loaded &= addCurrentWaypoint(entry.getKey(), entry.getValue());
+        }
+        loadedWaypointWorld = loaded ? mc.level.dimension() : null;
+    }
+
+    private void unloadCurrentWaypoints() {
+        if (XaeroHelper.INSTANCE != null) {
+            XaeroHelper.INSTANCE.removeSub(this);
+        }
+    }
+
+    private boolean addCurrentWaypoint(String name, Vec3 pos) {
+        if (XaeroHelper.INSTANCE == null || mc.level == null) {
+            return false;
+        }
+        BlockPos blockPos = BlockPos.containing(pos);
+        double scale = mc.level.dimensionType().coordinateScale();
+        return XaeroHelper.INSTANCE.submitWaypoint(
+                        this,
+                        (int) (blockPos.getX() * scale),
+                        blockPos.getY(),
+                        (int) (blockPos.getZ() * scale),
+                        PREFIX_WARP + name,
+                        "W",
+                        ChatFormatting.YELLOW.ordinal(),
+                        0,
+                        true,
+                        true)
+                != null;
+    }
+
+    private void removeCurrentWaypoint(String serverName, String worldName, Vec3 pos) {
+        if (!isCurrentWorld(serverName, worldName)) {
+            return;
+        }
+        if (pos != null && XaeroHelper.INSTANCE != null) {
+            XaeroHelper.INSTANCE.removeWaypoint(this, BlockPos.containing(pos));
+        }
+        loadedWaypointWorld = null;
+    }
+
+    private void updateCurrentWaypoint(String serverName, String worldName, String name, Vec3 oldPos, Vec3 pos) {
+        if (!isCurrentWorld(serverName, worldName)) {
+            return;
+        }
+        if (oldPos != null && XaeroHelper.INSTANCE != null) {
+            XaeroHelper.INSTANCE.removeWaypoint(this, BlockPos.containing(oldPos));
+        }
+        if (addCurrentWaypoint(name, pos)) {
+            loadedWaypointWorld = mc.level.dimension();
+        } else {
+            loadedWaypointWorld = null;
+        }
+    }
+
+    private boolean isCurrentWorld(String serverName, String worldName) {
+        return !checkNull()
+                && Objects.equals(serverName, CommonUtils.getServerName())
+                && Objects.equals(
+                        worldName, mc.level.dimension().identifier().toString());
+    }
+
+    private void onGameJoin() {
+        loadedWaypointWorld = null;
+        loadCurrentWaypoints();
+    }
+
+    private void onPostGameTick() {
+        if (!checkNull()) {
+            if (!Objects.equals(loadedWaypointWorld, mc.level.dimension())) {
+                loadCurrentWaypoints();
+            }
+        }
+    }
+
     // all display and used name should be append a $
     public static final String PREFIX_WARP = "$";
 

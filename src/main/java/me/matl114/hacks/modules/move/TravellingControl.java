@@ -3,7 +3,11 @@ package me.matl114.hacks.modules.move;
 import java.util.Optional;
 import java.util.function.Consumer;
 import me.matl114.accessors.access.ClientPlayerAccess;
+import me.matl114.gui.interfaces.ElementFactory;
+import me.matl114.hacks.modules.task.MovementManager;
+import me.matl114.hacks.utils.move.ElytraMotion;
 import me.matl114.hacks.utils.move.ElytraOptimizeUtils;
+import me.matl114.hacks.utils.move.FlightVelocity;
 import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -17,7 +21,6 @@ import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
-import me.matl114.hacks.utils.move.FlightVelocity;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
@@ -39,6 +42,7 @@ import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundStartConfigurationPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 
@@ -48,11 +52,7 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
 
     public TravellingControl() {
         super("Travel");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
     }
 
     //    public FlagRef enable = flagBuilder(travellingControl.add("enable")).build();
@@ -227,7 +227,7 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
     public void registerAll() {
         super.registerAll();
         registerCommandBootstrap(this::bootStrapTravelCommand);
-        registerListener(Listener.getCustomListener().getChannel(FlightVelocity.class), this::onElytraVelocity);
+        registerListener(Listener.getCustomListener().getChannel(ElytraMotion.class), this::onElytraVelocity);
         registerListener(
                 Listener.getPacketPreHandlePoint().getChannel(ClientboundStartConfigurationPacket.class),
                 this::onReconfiguration);
@@ -261,7 +261,7 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
 
     boolean currentReconfiguration = false;
 
-    private void onReconfiguration(Event<ClientboundStartConfigurationPacket> eventKick) {
+    private void onReconfiguration() {
         currentReconfiguration = true;
     }
 
@@ -660,20 +660,21 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
             return false;
         }
 
-        public void onElytra(Event<EventContainer<FlightVelocity>> event) {
+        public void onElytra(Event<EventContainer<ElytraMotion>> event) {
             if (elytraRotation == null) {
                 return;
             }
-            EventContainer<FlightVelocity> eventContainer = event.context();
-            if (eventContainer.getValue().mode() != FlightVelocity.Mode.ELYTRA_FLIGHT) return;
-            FlightVelocity velocity = eventContainer.getValue();
-            Vec3 rotation = elytraRotation;
+            EventContainer<ElytraMotion> eventContainer = event.context();
+            ElytraMotion motion = eventContainer.getValue();
+            if (motion.algorithm() == null) return;
+            Vec2 rotation = EntityUtils.rotationToPitchYaw(elytraRotation);
             if (MovTasks.getElytraFlight().useAutoRescale.get() && ElytraExtra.INSTANCE.autoRescale.get()) {
                 rotation = pullingUp
-                        ? ElytraOptimizeUtils.calculateBestPullupSpeed(rotation)
-                        : ElytraOptimizeUtils.calculateBestDownForwardSpeed(rotation, false);
+                        ? ElytraOptimizeUtils.calculateBestPullupSpeed(rotation.x, rotation.y, motion.algorithm())
+                        : ElytraOptimizeUtils.calculateBestDownForwardSpeed(
+                                rotation.x, rotation.y, motion.algorithm(), false, true);
             }
-            velocity.velocity(rotation.normalize().scale(velocity.maxVelocity()));
+            motion.rotation(rotation);
         }
     }
 
@@ -1309,7 +1310,10 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
             }
             double diagonalYaw = Math.floor((mc.player.getYRot() + 45.0) / 90.0) * 90.0 + 45.0;
             PlayerStateManager.setPlayerYawSafe(mc.player, (float) diagonalYaw);
-            float pitch = ElytraOptimizeUtils.calculateBestPullUpAngle((float) diagonalYaw);
+            Vec2 boostRotation = ElytraOptimizeUtils.calculateBestPullUpRotation(
+                    (float) diagonalYaw, ElytraExtra.INSTANCE.autoRescaleAl.get());
+            PlayerStateManager.setPlayerYawSafe(mc.player, boostRotation.y);
+            float pitch = boostRotation.x;
             EntityUtils.setEntityPitchSafe(mc.player, pitch);
             return pitch;
         }
@@ -1520,7 +1524,7 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
         }
     }
 
-    private void onElytraVelocity(Event<EventContainer<FlightVelocity>> event) {
+    private void onElytraVelocity(Event<EventContainer<ElytraMotion>> event) {
         if (travelDelegate instanceof TravelMoveVelocity velocity) {
             velocity.onElytra(event);
         }
@@ -1538,8 +1542,13 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        acceptor.accept(createTitle("widget.travelling-control.command", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        acceptor.accept(factory.createTitle("widget.travelling-control.command", 0, dblank, dx, dy));
     }
 
     public static TravelInfo travelTask;

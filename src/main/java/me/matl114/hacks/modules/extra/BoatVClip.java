@@ -3,11 +3,11 @@ package me.matl114.hacks.modules.extra;
 import java.util.*;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.combat.CombatExtra;
 import me.matl114.hacks.modules.mine.FakeBlockManager;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
@@ -31,11 +31,7 @@ public class BoatVClip extends BaseModule implements LegalMovementManager.Moveme
 
     public BoatVClip() {
         super("BoatVClip");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         bindFlag(enable);
     }
 
@@ -52,35 +48,8 @@ public class BoatVClip extends BaseModule implements LegalMovementManager.Moveme
         blockStateMap.clear();
     }
 
-    @Override
-    public void registerAll() {
-        super.registerAll();
-        registerListener(Listener.getPacketPoint().getChannel(ClientboundBlockUpdatePacket.class), this::onBlockUpdate);
-    }
-
     Map<BlockPos, BlockState> blockStateMap = new HashMap<>();
     Set<BlockPos> minedBlockPos = new HashSet<>();
-
-    public void onBlockUpdate(Event<ClientboundBlockUpdatePacket> update) {
-        if (enable.get()) {
-            // minedBlockPos.remove(update.drawContext.position());
-            BlockPos pos = update.context.getPos();
-
-            if (blockStateMap.containsKey(pos)) {
-                //                if(mc.player.hasVehicle()){
-                //                    Tasks.scheduleDelayedPre(()->{
-                //                        Listener.sendPacketNoEvents(new
-                // PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, Direction.UP,
-                // NetworkUtils.generateNextSequence()));
-                //                        Listener.sendPacketNoEvents(new PlayerActionC2SPacket(
-                //                            PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.UP,
-                // NetworkUtils.generateNextSequence()));
-                //                    }, 0);
-                //                }
-                //                update.cancel();
-            }
-        }
-    }
 
     Entity lastVehicle;
     int cd = 0;

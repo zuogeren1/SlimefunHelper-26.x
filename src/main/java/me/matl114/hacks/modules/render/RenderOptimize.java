@@ -1,6 +1,5 @@
 package me.matl114.hacks.modules.render;
 
-import java.util.Iterator;
 import java.util.concurrent.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -36,6 +35,7 @@ import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -44,6 +44,7 @@ import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.function.BooleanConsumer;
 
@@ -59,6 +60,7 @@ public class RenderOptimize extends BaseModule {
 
     public final DoubleRef cullingDistanceItem = builder(renderOptimize.add("item-culling-distance"), DoubleRef.TYPE)
             .defaultValue(40.0D)
+            .validator(Configs.doubleRange(0.0D, 360.0D))
             .build();
 
     public final FlagRef enableParticleTickOpt =
@@ -73,6 +75,7 @@ public class RenderOptimize extends BaseModule {
     public final DoubleRef cullingDistanceEntityLabel = builder(
                     renderOptimize.add("entity-label-render-culling-distance"), DoubleRef.TYPE)
             .defaultValue(64.0D)
+            .validator(Configs.doubleRange(0.0D, 360.0D))
             .build();
 
     public final FlagRef enableBlockLabelRenderOpt =
@@ -81,6 +84,7 @@ public class RenderOptimize extends BaseModule {
     public final DoubleRef cullingDistanceBlockLabel = builder(
                     renderOptimize.add("block-label-render-culling-distance"), DoubleRef.TYPE)
             .defaultValue(20.0D)
+            .validator(Configs.doubleRange(0.0D, 360.0D))
             .build();
 
     public final FlagRef cullingEnable =
@@ -111,6 +115,7 @@ public class RenderOptimize extends BaseModule {
 
     public final DoubleRef cullingRadius = builder(renderOptimize.add("optimize-culling-radius"), DoubleRef.TYPE)
             .defaultValue(64.0D)
+            .validator(Configs.doubleRange(0.0D, 360.0D))
             .build();
 
     public final FlagRef cullingUseRaycast =
@@ -153,12 +158,14 @@ public class RenderOptimize extends BaseModule {
             boolean itemFalling = !item.onGround() && item.getGravity() > 0;
             if (!itemInFluid && !itemFalling) {
                 event.cancel();
+                item.setOldPosAndRot();
                 return;
             }
             LocalPlayer player = Minecraft.getInstance().player;
             if (player != null
                     && player.position().distanceToSqr(item.position()) > MathUtils.s2(cullingDistanceItem.get())) {
                 event.cancel();
+                item.setOldPosAndRot();
                 return;
             }
         } else if (entity instanceof ArmorStand armorStand && enableArmorStandTickOpt.get()) {
@@ -326,7 +333,7 @@ public class RenderOptimize extends BaseModule {
 
     public void canChunkBeSeen(int chunkX, int chunkZ, Vec3 cameraPos, Vec3 cameraLook) {}
 
-    public void onBlockEntityCullingTick(Event<LocalPlayer> event) {
+    public void onBlockEntityCullingTick() {
 
         if (mc.level != null && cullingEnable.get()) {
             double maxDistance = cullingRadius.get();
@@ -447,7 +454,7 @@ public class RenderOptimize extends BaseModule {
     public volatile ConcurrentHashMap<Long, Boolean> cache = new ConcurrentHashMap<>();
     private int tickCounter = 0;
 
-    public void onCacheClean(Event<LocalPlayer> event) {
+    public void onCacheClean() {
         if (cullingUseRaycast.get()) {
             tickCounter += 1;
             if (tickCounter > 1) {
@@ -458,51 +465,51 @@ public class RenderOptimize extends BaseModule {
     }
 
     public boolean raycastFullBlockAsync(AABB box, Vec3 cameraPos, RenderController controller) {
-        boolean smallBox = box.getMaxPosition().subtract(box.getMinPosition()).lengthSqr() < 1e-2;
-        Vec3[] corners = smallBox
-                ? new Vec3[] {box.getCenter()}
-                : new Vec3[] {
-                    new Vec3(box.minX, box.minY, box.minZ), // 000
-                    new Vec3(box.maxX, box.minY, box.minZ), // 100
-                    new Vec3(box.minX, box.maxY, box.minZ), // 010
-                    new Vec3(box.maxX, box.maxY, box.minZ), // 110
-                    new Vec3(box.minX, box.minY, box.maxZ), // 001
-                    new Vec3(box.maxX, box.minY, box.maxZ), // 101
-                    new Vec3(box.minX, box.maxY, box.maxZ), // 011
-                    new Vec3(box.maxX, box.maxY, box.maxZ) // 111
-                };
+        ClientLevel world = mc.level;
+        if (world == null) return false;
 
-        ConcurrentHashMap<Long, Boolean> cacheResults = cache;
+        Vec3 center = box.getCenter();
+        double xSize = box.maxX - box.minX;
+        double ySize = box.maxY - box.minY;
+        double zSize = box.maxZ - box.minZ;
+        Vec3[] samples;
+        if (xSize <= ySize && xSize <= zSize) {
+            double x = center.x;
+            samples = new Vec3[] {
+                new Vec3(x, box.minY, box.minZ),
+                new Vec3(x, box.minY, box.maxZ),
+                new Vec3(x, box.maxY, box.minZ),
+                new Vec3(x, box.maxY, box.maxZ),
+                center
+            };
+        } else if (ySize <= zSize) {
+            double y = center.y;
+            samples = new Vec3[] {
+                new Vec3(box.minX, y, box.minZ),
+                new Vec3(box.minX, y, box.maxZ),
+                new Vec3(box.maxX, y, box.minZ),
+                new Vec3(box.maxX, y, box.maxZ),
+                center
+            };
+        } else {
+            double z = center.z;
+            samples = new Vec3[] {
+                new Vec3(box.minX, box.minY, z),
+                new Vec3(box.minX, box.maxY, z),
+                new Vec3(box.maxX, box.minY, z),
+                new Vec3(box.maxX, box.maxY, z),
+                center
+            };
+        }
 
-        ClientLevel mcwolrd = mc.level;
-        if (mcwolrd == null) return false;
-        for (var start : corners) {
-            Iterator<BlockPos> blockPosIterator = RaycastUtils.createRaycastBlockPosIterator(start, cameraPos);
-            int blockCount = 0;
-            long startPos = BlockPos.containing(start).asLong();
-            while (blockPosIterator.hasNext()) {
-                BlockPos blockPos = blockPosIterator.next();
-                long posId = blockPos.asLong();
-                if (startPos == posId) continue;
-                boolean checkIsBlock;
-                Boolean cacheR = cacheResults.get(posId);
-                if (cacheR == null) {
-                    BlockState state = mcwolrd.getBlockState(blockPos);
-                    checkIsBlock =
-                            !state.isAir() && state.canOcclude() && state.isCollisionShapeFullBlock(mcwolrd, blockPos);
-                    cacheResults.put(posId, checkIsBlock ? Boolean.TRUE : Boolean.FALSE);
-                } else {
-                    checkIsBlock = cacheR;
-                }
-                if (checkIsBlock) {
-                    blockCount += 1;
-                    if (blockCount >= 1) {
-                        break;
-                    }
-                }
-            }
-            // can be seen
-            if (blockCount < 1) {
+        for (Vec3 sample : samples) {
+            var hit = world.clip(new ClipContext(
+                    cameraPos,
+                    sample,
+                    ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE,
+                    mc.player));
+            if (hit.getType() == HitResult.Type.MISS) {
                 return false;
             }
         }

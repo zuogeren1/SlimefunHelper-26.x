@@ -3,7 +3,6 @@ package me.matl114.mixins.gui;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
-import java.util.function.Consumer;
 import me.matl114.accessors.gui.TextFieldAccess;
 import me.matl114.gui.McWidgetHelpers;
 import me.matl114.gui.basic.ColorProvider;
@@ -56,9 +55,6 @@ public abstract class TextFieldWidgetMixin extends AbstractWidget implements Tex
     public void setBorderColorProvider(ColorProvider provider) {
         this.boxColorProvider = provider;
     }
-
-    @Shadow
-    public abstract void setResponder(Consumer<String> changedListener);
 
     @Shadow
     private int cursorPos;

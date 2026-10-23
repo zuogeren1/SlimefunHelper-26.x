@@ -4,12 +4,14 @@ import java.util.function.Consumer;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.move.ElytraExtra;
 import me.matl114.hacks.modules.move.FloatingUtils;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.tasks.TimerExecutor;
 import me.matl114.hooks.BaritoneHooks;
@@ -26,7 +28,6 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec2;
 
 public class BaritoneFix extends BaseModule implements LegalMovementManager.MovementModifier {
     public static BaritoneFix INSTANCE;
@@ -36,11 +37,7 @@ public class BaritoneFix extends BaseModule implements LegalMovementManager.Move
     public BaritoneFix() {
         super("BaritoneFix");
         INSTANCE = this;
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
     }
 
     public final ModulePath fix = makePath(Configs.SURVIVAL_CONFIG, "baritone.fix");
@@ -260,7 +257,7 @@ public class BaritoneFix extends BaseModule implements LegalMovementManager.Move
         }
     }
 
-    public void onBaritoneMoveRot(Event<Vec2> vec2fEvent) {}
+    public void onBaritoneMoveRot() {}
 
     @Override
     public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
@@ -307,8 +304,13 @@ public class BaritoneFix extends BaseModule implements LegalMovementManager.Move
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        acceptor.accept(createTitle(
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        acceptor.accept(factory.createTitle(
                 BaritoneHooks.getInstance().isBaritoneAPISupported()
                         ? "widget.baritone-fix.baritone-api-support"
                         : "widget.baritone-fix.baritone-api-not-support",
@@ -316,7 +318,7 @@ public class BaritoneFix extends BaseModule implements LegalMovementManager.Move
                 dblank,
                 dx,
                 dy));
-        acceptor.accept(createTitle(
+        acceptor.accept(factory.createTitle(
                 BaritoneHooks.getInstance().isBaritoneVersionSupported()
                         ? "widget.baritone-fix.baritone-support"
                         : "widget.baritone-fix.baritone-not-support",

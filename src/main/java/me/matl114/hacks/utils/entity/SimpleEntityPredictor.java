@@ -10,6 +10,11 @@ public record SimpleEntityPredictor(Entity entity) implements Predictor {
     }
 
     @Override
+    public Vec3 getCurrentSyncedPos() {
+        return entity.getPositionCodec().getBase();
+    }
+
+    @Override
     public Vec3 getCurrentPos() {
         return entity.position();
     }

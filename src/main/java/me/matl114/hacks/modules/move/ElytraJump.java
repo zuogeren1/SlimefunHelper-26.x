@@ -9,6 +9,7 @@ import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.mine.QueueMine;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.move.goal.GoalNearBlockPos;
@@ -34,11 +35,7 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
 
     public ElytraJump() {
         super("ElytraJump");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         bindFlag(enable);
     }
 
@@ -48,13 +45,17 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
             moduleEntry(root.addHotkey(), new MultiKeyBind(), root.addEnable()).build();
     //
 
-    public final DoubleRef pitch =
-            doubleBuilder(root.add("pitch")).defaultValue(80.0D).build();
+    public final DoubleRef pitch = doubleBuilder(root.add("pitch"))
+            .defaultValue(80.0D)
+            .validator(Configs.doubleRange(-90.0D, 90.0D))
+            .build();
 
     public final FlagRef sneak = flagBuilder(root.add("sneak")).build();
 
-    public final DoubleRef groundHeight =
-            doubleBuilder(root.add("ground-height")).defaultValue(3.0D).build();
+    public final DoubleRef groundHeight = doubleBuilder(root.add("ground-height"))
+            .defaultValue(3.0D)
+            .validator(Configs.doubleRange(0.0D, 10.0D))
+            .build();
 
     public final FlagRef axisStrict = flagBuilder(root.add("axis-strict")).build();
     public final FlagRef autoMineStoneAndNetherrackObstacles =
@@ -65,11 +66,13 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
 
     public final IntRef avoidObstacleYawRange = intBuilder(root.add("avoid-obstacles-yaw-range"))
             .defaultValue(50)
+            .validator(Configs.intRange(0, 180))
             .show(this.autoAvoidObstacle::get)
             .build();
 
     public final IntRef predictTicks = intBuilder(root.add("avoid-obstacles-predict-ticks"))
             .defaultValue(80)
+            .validator(Configs.intRange(0, 400))
             .build();
 
     public final FlagRef avoidHoles = flagBuilder(root.add("avoid-holes")).build();
@@ -94,12 +97,22 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
     private boolean ownsRoadPath;
 
     private void flushImmediately() {
-        if (queueing) {
-            queueing = false;
-            if (checkNull()) return;
-            // check for fallflying
-            PacketManager.flushOutBound();
-        }
+        if (checkNull()) return;
+        PacketManager.schedule(() -> {
+            if (queueing) {
+                // check for fallflying
+                PacketManager.flushOutBound(() -> {
+                    queueing = false;
+                });
+            }
+        });
+    }
+
+    private void startQueue() {
+        if (checkNull()) return;
+        PacketManager.schedule(() -> {
+            queueing = true;
+        });
     }
 
     @Override
@@ -120,7 +133,7 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
         }
     }
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (workThisTick
                 && currentLandingBlock != null
                 && autoMineStoneAndNetherrackObstacles.get()
@@ -132,13 +145,13 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
         }
     }
 
-    public void onPacketFlush(Event<Void> event) {
+    public void onPacketFlush() {
         queueing = false;
     }
 
     boolean queueing = false;
 
-    public void onPacketQueue(Event<PacketStorage> eventIn) {
+    public void onPacketQueue(Event<PacketStorage.Send> eventIn) {
         if (queueing && usePacketQueue.get()) {
             PacketType<?> packetType = eventIn.context.packetType();
             if (PacketManager.isAsyncOrNotTransactionC2SPacket(packetType)) {
@@ -407,9 +420,7 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
         if (workThisTick) {
             if (mc.player.onGround()) {
                 re.jump(true).sprint(true).forward(true).sneak(sneak.get()).applyInput(mc.player);
-
                 mc.player.setSprinting(true);
-
             } else {
                 if (!mc.player.isFallFlying()) {
                     if (mc.player.tryToStartFallFlying()) {
@@ -428,7 +439,7 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
                 flushImmediately();
             }
             if (re.jump()) {
-                queueing = true;
+                startQueue();
             }
         } else {
             flushImmediately();

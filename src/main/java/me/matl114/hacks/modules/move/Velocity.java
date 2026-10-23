@@ -1,9 +1,8 @@
 package me.matl114.hacks.modules.move;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.Objects;
 import me.matl114.accessors.access.ClientPlayerAccess;
+import me.matl114.accessors.events.ClientPlayerEntityAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.EventContainer;
@@ -12,6 +11,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.mine.FakeBlockManager;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
@@ -66,6 +66,7 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
 
     public final IntRef maxResetKBTick = intBuilder(antiKb.add("grim-reset-kb-tick"))
             .defaultValue(3)
+            .validator(Configs.intRange(0, 10))
             .show(() -> mode.get().isIn(Mode.GRIM_LEGACY_GROUND))
             .build();
 
@@ -112,17 +113,11 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
     public final FlagRef noClimbing =
             flagBuilder(velocityControl.add("no-climbing")).build();
 
-    public static LegalMovementManager.DelegateMovementModifier instance;
-
     public Velocity() {
         super("Velocity");
         INSTANCE = this;
         bindFlag(enable);
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
     }
 
     @Override
@@ -155,7 +150,6 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
 
     public int lastHurtTick = 0;
     public int canCancel = 0;
-    int lastGroundTick = 0;
 
     public void onEntityDamage(Event<ClientboundDamageEventPacket> damage) {
         if (enable.get() && mc.player != null && damage.context.entityId() == mc.player.getId()) {
@@ -168,7 +162,6 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
         }
     }
 
-    boolean shouldDelay = false;
     long lastSetBackNS = 0;
     long lastVelocityNS = 0;
     long lastCancelVelocityNS = 0;
@@ -305,7 +298,7 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
 
     private BlockPos lastBlockPos;
 
-    public void onPreTick(Event<LocalPlayer> eventPreTick) {
+    public void onPreTick() {
         if (!enable.get()) {
             return;
         }
@@ -316,6 +309,7 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
             if (Objects.equals(lastBlockPos, pos)) {
                 if (!FakeBlockManager.INSTANCE.isCurrentlyFakeState(pos)) {
                     flagLegacy = false;
+                    ClientPlayerEntityAccess.of(mc.player).resyncPos();
                     return;
                 }
             } else {
@@ -324,7 +318,8 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
             }
             if (lastCancelVelocityTick + maxResetKBTick.get() <= Tasks.getTick()) {
                 flagLegacy = false;
-                // mc.player.setVelocity(Vec3d.ZERO);
+                ClientPlayerEntityAccess.of(mc.player).resyncPos();
+                // mc.player.setDeltaMovement(Vec3.ZERO);
             } else {
                 if (freezeIfWalk.get() || !PlayerInputUtils.of(mc.options).hasMovementControl()) {
                     FloatingUtils.INSTANCE.setGrimFloatingTick(true);
@@ -349,7 +344,7 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
         }
     }
 
-    public void onBlockUpdate(Event<ClientboundBlockUpdatePacket> eventBlockUpdate) {
+    public void onBlockUpdate() {
         //        if(enable.get()){
         //            BlockPos pos = eventBlockUpdate.context.getPos();
         //            if(pos.getSquaredDistance(mc.player.getPos()) < 10){
@@ -359,27 +354,10 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
         //        }
     }
 
-    Deque<Packet> packets = new ArrayDeque<>();
+    public void onPing() {}
 
-    public void onPing(Event<ClientboundPingPacket> pingEvent) {
-        if (shouldDelay) {
-            packets.add(pingEvent.context);
-            pingEvent.cancel();
-        }
-    }
-
-    public void onSetPosition(Event<ClientboundPlayerPositionPacket> event) {
+    public void onSetPosition() {
         lastSetBackNS = System.nanoTime();
-        if (shouldDelay) {
-            for (Packet packet : packets) {
-                try {
-                    packet.handle(mc.getConnection());
-                } catch (RunningOnDifferentThreadException ex) {
-                    // ignore
-                }
-            }
-            packets.clear();
-        }
     }
     //    public void onPlayerSetBackPacket(Event<PlayerPositionLookS2CPacket> event){
     //        if(mode.get() == BypassMode.BYPASS_GRIM){
@@ -387,7 +365,7 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
     //        }
     //    }
 
-    public void onSendMove(Event<ServerboundMovePlayerPacket> event) {}
+    public void onSendMove() {}
 
     @Override
     public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {}
@@ -403,10 +381,6 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
     @Override
     public void applyAfterTravelTick(Event<LegalMovementManager> movementManagerEvent, Event<Vec3> moveEvent) {
         if (skipTick) {
-            sendFallFlying();
-        }
-        if (shouldDelay) {
-            skipTick = true;
             sendFallFlying();
         }
     }
@@ -430,14 +404,11 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
 
     @Override
     public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
-        if (lastGroundTick + 5 < Tasks.getTick()) {
-            shouldDelay = false;
-            skipTick = false;
-        }
         return true;
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        if (event.context().getValue().isOptionPreset()) return;
         switch (event.context.getValue()) {
             case AC_GRIM_LEGACY, AC_GRIM -> mode.set(Mode.GRIM_LEGACY_GROUND);
             case AC_MATRIX -> mode.set(Mode.GRIM_NEW_GROUND);

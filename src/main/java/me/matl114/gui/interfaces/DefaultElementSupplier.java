@@ -9,13 +9,13 @@ import me.matl114.gui.basic.ColorSampler;
 import me.matl114.gui.basic.ElementHandler;
 import me.matl114.gui.basic.InputHandler;
 import me.matl114.gui.basic.RenderHandler;
+import me.matl114.gui.basic.TextAlign;
 import me.matl114.gui.basic.TextProvider;
 import me.matl114.gui.complex.RawTextElement;
 import me.matl114.gui.elements.ButtonElement;
 import me.matl114.gui.elements.IconElement;
 import me.matl114.gui.elements.TextFieldElement;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.EditBox;
+import me.matl114.utils.config.ValueAccessor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
@@ -55,66 +55,20 @@ public final class DefaultElementSupplier implements ElementSupplier {
     @Override
     public ElementHandler create(ElementSupplier.RawTextBuilder builder) {
         RawTextElement element = new RawTextElement(
-                safeTextProvider(builder.textProvider),
-                builder.color == null ? ColorSampler.WHITE : builder.color,
-                builder.alignment);
+                TextProvider.withAlign(safeTextProvider(builder.textProvider), TextAlign.fromLegacy(builder.alignment)),
+                builder.color == null ? ColorSampler.WHITE : builder.color);
         return applyCommon(element, builder);
     }
 
     @Override
     public ElementHandler create(ElementSupplier.TextFieldBuilder builder) {
-        EditBox textFieldWidget = builder.textFieldWidget != null
-                ? builder.textFieldWidget
-                : new EditBox(
-                        Minecraft.getInstance().font,
-                        0,
-                        0,
-                        0,
-                        0,
-                        builder.message == null ? Component.empty() : builder.message);
-        if (builder.textPredicate != null) {
-            // 26.2 移除了 EditBox.setFilter(Predicate)。旧版谓词作用于「整串」、
-            // 整串不通过即整体拒绝；逐字符过滤会让 s -> s.length() <= 8 这类谓词恒真而失效。
-            // 这里改为整串校验，不通过时回退到上一个合法值。
-            // applying 标志用于防止 setValue 再次触发 responder 造成递归。
-            AtomicReference<String> lastValid = new AtomicReference<>("");
-            AtomicBoolean applying = new AtomicBoolean(false);
-            textFieldWidget.setResponder(value -> {
-                if (applying.get()) {
-                    return;
-                }
-                if (builder.textPredicate.test(value)) {
-                    lastValid.set(value);
-                } else {
-                    applying.set(true);
-                    try {
-                        textFieldWidget.setValue(lastValid.get());
-                    } finally {
-                        applying.set(false);
-                    }
-                }
-            });
-        }
-        textFieldWidget.setMaxLength(builder.maxLength);
-        if (builder.editable != null) {
-            textFieldWidget.setEditable(builder.editable);
-        }
-        if (builder.placeholder != null) {
-            textFieldWidget.setHint(builder.placeholder);
-        }
-        if (builder.suggestion != null) {
-            textFieldWidget.setSuggestion(builder.suggestion);
-        }
-        if (builder.editableColor != null) {
-            textFieldWidget.setTextColor(builder.editableColor);
-        }
-        if (builder.uneditableColor != null) {
-            textFieldWidget.setTextColorUneditable(builder.uneditableColor);
-        }
-        TextFieldElement element = new TextFieldElement(textFieldWidget);
-        element.setText(builder.text == null ? "" : builder.text);
+        String initialText = builder.textFieldWidget == null ? builder.text : builder.textFieldWidget.getValue();
+        TextFieldElement element = new TextFieldElement(ValueAccessor.holder(initialText == null ? "" : initialText));
+        element.setMessage(builder.message);
+        element.setMaxLength(builder.maxLength);
+        element.setTextValue(builder.text == null ? "" : builder.text, false);
         if (builder.cursorToEnd != null) {
-            textFieldWidget.moveCursorToEnd(builder.cursorToEnd);
+            element.setCursorToEnd(builder.cursorToEnd);
         }
         if (builder.borderColorProvider != null) {
             element.setBorderColorProvider(builder.borderColorProvider);
@@ -124,16 +78,6 @@ public final class DefaultElementSupplier implements ElementSupplier {
         }
         if (builder.focusUnlocked != null) {
             element.setFocusUnlocked(builder.focusUnlocked);
-        }
-        if (builder.changedListener != null || builder.listener != null) {
-            element.setChangedListener(str -> {
-                if (builder.changedListener != null) {
-                    builder.changedListener.accept(str);
-                }
-                if (builder.listener != null) {
-                    builder.listener.accept(str);
-                }
-            });
         }
         return applyCommon(element, builder);
     }

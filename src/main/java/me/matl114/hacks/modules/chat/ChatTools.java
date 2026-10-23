@@ -1,5 +1,6 @@
 package me.matl114.hacks.modules.chat;
 
+import me.matl114.gui.Constants;
 import me.matl114.utils.ClientUtils;
 
 import io.github.reserveword.imblocker.common.gui.FocusableObject;
@@ -25,6 +26,7 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.ScreenUtils;
+import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.utils.config.ValueAccessor;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.EditBox;
@@ -56,18 +58,19 @@ public class ChatTools extends BaseModule {
             .updateListener(this::refreshSpecialChars)
             .build();
 
-    public final StringRef chatCache =
-            builder(chatTools.add("cached"), String.class).defaultValue("").build();
-
     public final FlagRef autoSend = flagBuilder(
                     Configs.CHAT_CONFIG, chatTools.add("auto-chat").toPath())
             .build();
 
-    public final IntRef period =
-            intBuilder(chatTools.add("auto-chat-period")).defaultValue(21).build();
+    public final IntRef period = intBuilder(chatTools.add("auto-chat-period"))
+            .defaultValue(21)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
-    public final IntRef multiple =
-            intBuilder(chatTools.add("auto-chat-multiple")).defaultValue(1).build();
+    public final IntRef multiple = intBuilder(chatTools.add("auto-chat-multiple"))
+            .defaultValue(1)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public final FlagRef keepChatInv = flagBuilder(
                     Configs.CHAT_CONFIG, chatTools.add("keep-chat-inv").toPath())
@@ -112,7 +115,7 @@ public class ChatTools extends BaseModule {
 
     public int counter = 0;
 
-    public void onTick(Event<LocalPlayer> gt) {
+    public void onTick() {
         if (mc.getConnection() != null && autoSend.get()) {
             counter += 1;
             if (counter >= period.getValue()) {
@@ -124,15 +127,8 @@ public class ChatTools extends BaseModule {
         }
     }
 
-    private static final Identifier LOCK_ENABLE_SPRITE = Identifier.tryParse("slimefunhelper:gui/lock_enable");
-    private static final Identifier LOCK_DISABLE_SPRITE = Identifier.tryParse("slimefunhelper:gui/lock_disable");
-    private static final List<Component> TOOLTIPS_CHAT_TOOLS = List.of(Component.literal("点击展开/关闭聊天框小工具栏"));
-
-    private static final List<Component> TOOLTIPS_SPECIAL_CHARS =
-            List.of(Component.literal("点击展开/关闭特殊字符快捷键"), Component.literal("可以在配置界面中配置特殊字符列表"));
-
     public void sendCachedMessage() {
-        String val = chatCache.get();
+        String val = ChatLocalSettings.getChatCache();
         if (val != null) {
             ChatTasks.sayMessage(val, false);
         }
@@ -183,14 +179,14 @@ public class ChatTools extends BaseModule {
         int totalHeight = 68; //  -104 ~ -36
         SubScreenWidget basicSubScreenWidget = new SubScreenWidget(0, 0, 250, 68);
         // -56 -> -56 - (-104)
-        ContentDelegateWidget<EditBox> helperWidgetWrapper =
-                McWidgetHelpers.createTextFieldEditBox(0 + 2, 48 + 2, 120 - 2, 20 - 2, chatCache::set, chatCache.get());
+        ContentDelegateWidget<EditBox> helperWidgetWrapper = McWidgetHelpers.createTextFieldEditBox(
+                0 + 2, 48 + 2, 120 - 2, 20 - 2, ChatLocalSettings::setChatCache, ChatLocalSettings.getChatCache());
         cacheWidget = helperWidgetWrapper.getDelegate();
 
         // todo： add translatable to buttons and everything
         createExecuteButton(
                         "widget.chat-tools.send-cache",
-                        ButtonAction.run(() -> ChatTasks.sayMessage(chatCache.get(), true)),
+                        ButtonAction.run(() -> ChatTasks.sayMessage(ChatLocalSettings.getChatCache(), true)),
                         120 + 1,
                         48 + 1,
                         60 - 2,
@@ -199,13 +195,15 @@ public class ChatTools extends BaseModule {
 
         Runnable toggle = HotKeyUtils.getToggleTask(
                 Configs.CHAT_CONFIG, chatTools.add("auto-chat").toPath());
+        AttrKeyValue<Boolean> autoSendToggle = AttrKeyValue.bool("chat-screen-tools.auto-chat", autoSend.get());
+        autoSendToggle.addListener(bl -> {
+            if (bl != autoSend.get()) {
+                toggle.run();
+            }
+        });
         createToggleButton(
                         "widget.chat-tools.auto-send",
-                        ValueAccessor.of(autoSend::get, (bl) -> {
-                            if (bl != autoSend.get()) {
-                                toggle.run();
-                            }
-                        }),
+                        ValueAccessor.of(autoSendToggle),
                         180 + 1,
                         48 + 1,
                         50 - 2,
@@ -213,13 +211,16 @@ public class ChatTools extends BaseModule {
                 .addToSub(basicSubScreenWidget);
         Runnable toggle2 = HotKeyUtils.getToggleTask(
                 Configs.CHAT_CONFIG, chatTools.add("keep-chat-inv").toPath());
+        AttrKeyValue<Boolean> keepChatInvToggle =
+                AttrKeyValue.bool("chat-screen-tools.keep-chat-inv", keepChatInv.get());
+        keepChatInvToggle.addListener(bl -> {
+            if (bl != keepChatInv.get()) {
+                toggle2.run();
+            }
+        });
         createToggleButton(
                         "widget.chat-tools.keep-chat-inv",
-                        ValueAccessor.of(keepChatInv::get, (bl) -> {
-                            if (bl != autoSend.get()) {
-                                toggle2.run();
-                            }
-                        }),
+                        ValueAccessor.of(keepChatInvToggle),
                         180 + 1,
                         24 + 1,
                         70 - 2,
@@ -240,8 +241,8 @@ public class ChatTools extends BaseModule {
                 .addToSub(basicSubScreenWidget);
         createElement(
                         IconElement.statedGuiPredicate(
-                                LOCK_ENABLE_SPRITE,
-                                LOCK_DISABLE_SPRITE,
+                                Constants.LOCK_ENABLE_SPRITE,
+                                Constants.LOCK_DISABLE_SPRITE,
                                 ButtonAction.empty(),
                                 (el) -> ChatTasks.getEncryptChat().shouldEncryptSendMessage()),
                         () -> ChatUtils.parseTooltipsTranslation("widget.chat-tools.toggle-encrypt.tooltips", ""),
@@ -303,7 +304,7 @@ public class ChatTools extends BaseModule {
         this.basicSubScreenWidget = basicSubScreenWidget;
         toggleSpecialCharWidget(this.enableSpecialChars.get());
         this.delegateToolScreen = new ContentDelegateWidget<>(-250, -68, 0, 0);
-        toggleBasicToolScreen(this.enableChatScreenTools.get());
+        this.delegateToolScreen.setContentDelegate(this.enableChatScreenTools.get() ? this.basicSubScreenWidget : null);
     }
 
     private void toggleSpecialCharWidget(boolean bl) {
@@ -387,9 +388,7 @@ public class ChatTools extends BaseModule {
 
     public void onChatScreenInitialize(Event<ChatScreen> event) {
         var chat0 = event.context;
-        if (basicSubScreenWidget == null) {
-            initToolWidget();
-        }
+        initToolWidget();
         createExecuteButton(
                         () -> enableChatScreenTools.get() ? ENABLE_STATE : DISABLE_STATE,
                         () -> ChatUtils.parseTooltipsTranslation("widget.chat-tools.toggle-hud.tooltips", ""),

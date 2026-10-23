@@ -89,25 +89,33 @@ public class BadPacketsFix extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getPlayerInitConfiguration(), this::onPlayerInitialize);
+        registerListener(Listener.getPlayerRespawnPoint(), this::onPlayerInitialize);
         registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundPlayerCommandPacket.class), this::onSendSprint);
-        registerListener(Listener.getPacketPoint().getChannel(ServerboundPlayerInputPacket.class), this::onSendInput);
+                Listener.getPacketPoint().getChannel(ServerboundPlayerCommandPacket.class),
+                this::onSendSprint,
+                Integer.MIN_VALUE);
         registerListener(
-                Listener.getPacketPoint().getChannel(ClientboundPlayerAbilitiesPacket.class), this::onServerAbility);
+                Listener.getPacketPoint().getChannel(ServerboundPlayerInputPacket.class), this::onSendInput, Integer.MIN_VALUE);
         registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundPlayerAbilitiesPacket.class), this::onAbilityUpdate);
+                Listener.getPacketPoint().getChannel(ClientboundPlayerAbilitiesPacket.class),
+                this::onServerAbility,
+                Integer.MIN_VALUE);
         registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundAcceptTeleportationPacket.class),
-                this::onTeleportConfirm);
+                Listener.getPacketPoint().getChannel(ServerboundPlayerAbilitiesPacket.class),
+                this::onAbilityUpdate,
+                Integer.MIN_VALUE);
+        registerListener(Listener.getPacketPoint().getChannel(ServerboundAcceptTeleportationPacket.class), this::onTeleportConfirm);
         registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class), this::onPlayerRotation);
+                Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class),
+                this::onPlayerRotation,
+                Integer.MIN_VALUE);
         //        registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
         //        registerListener(Listener.getPostHandleInputEvents(), this::onPostInputEvent);
         registerListener(Listener.getWorldSwitchPoint(), this::onWorldChange);
         registerListener(
                 Listener.getPacketPoint().getChannel(ClientboundSetChunkCacheRadiusPacket.class),
-                this::onRepackViewDistance);
+                this::onRepackViewDistance,
+                Integer.MIN_VALUE);
         registerListener(
                 Listener.getRegistryTagKeyReload().getChannel(BuiltInRegistries.BLOCK.key()), this::fixTagsBadPackets);
     }

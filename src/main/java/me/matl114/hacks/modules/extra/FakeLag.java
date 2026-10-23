@@ -30,8 +30,10 @@ public class FakeLag extends BaseModule {
                     () -> Component.literal("%dMS".formatted(this.delayMs.get())))
             .build();
 
-    public final IntRef delayMs =
-            intBuilder(root.add("delay-ms")).defaultValue(25).build();
+    public final IntRef delayMs = intBuilder(root.add("delay-ms"))
+            .defaultValue(25)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     @Override
     public void registerAll() {
@@ -46,7 +48,7 @@ public class FakeLag extends BaseModule {
 
     int joinServerTick;
 
-    public void onPacketInBound(Event<PacketStorage> event) {
+    public void onPacketInBound(Event<PacketStorage.Recv> event) {
         if (checkNull()) {
             joinServerTick = Tasks.getTick();
             return;

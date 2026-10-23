@@ -2,6 +2,7 @@ package me.matl114.hacks.modules.survival;
 
 import java.util.function.Consumer;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.Vec3;
@@ -34,11 +35,15 @@ public class SchedularSettings extends BaseModule {
     public final FlagRef enableAutoDischarge =
             builder(root.add("discharge"), Boolean.class).defaultValue(true).build();
 
-    public final IntRef defaultInventoryActionPerTick =
-            intBuilder(root.add("inv-speed-limit")).defaultValue(27).build();
+    public final IntRef defaultInventoryActionPerTick = intBuilder(root.add("inv-speed-limit"))
+            .defaultValue(27)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
-    public final IntRef hotbarProtectRange =
-            intBuilder(root.add("hotbar-protect")).defaultValue(0).build();
+    public final IntRef hotbarProtectRange = intBuilder(root.add("hotbar-protect"))
+            .defaultValue(0)
+            .validator(Configs.intRange(0, 10))
+            .build();
 
     public final NBTRef<Vec3> scannChestRange = builder(root.add("scann-chest-range"), Vec3.class)
             .defaultValue(new Vec3(20, 5, 20))
@@ -96,9 +101,14 @@ public class SchedularSettings extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
     }
 
     public PathingSchedular.PathingEngine createEngine() {

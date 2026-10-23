@@ -300,7 +300,7 @@ public class Listener {
         }
     }
 
-    private static final Function<Class<? extends Screen>, Class<? extends Screen>> screenClassIdentifierMapper =
+    static final Function<Class<? extends Screen>, Class<? extends Screen>> screenClassIdentifierMapper =
             Util.memoize((clz -> {
                 Class<?> clzz = clz;
                 while (clzz != Screen.class && clzz.getSuperclass() != Screen.class) {
@@ -479,10 +479,6 @@ public class Listener {
     @ExtraArgs({Connection.class})
     public static final PacketEventChannel packetPostScheduleSendPoint = new PacketEventChannel();
 
-    @Getter
-    @ExtraArgs({Connection.class})
-    private static final PacketEventChannel packetPostSendPoint = new PacketEventChannel();
-
     @Getter // packet accept or send
     @Cancelable
     @Modifiable
@@ -540,8 +536,7 @@ public class Listener {
 
     @Getter
     @Broadcast
-    @ExtraArgs({BlockPos.class})
-    private static final EventChannel<Vec3> playerWebSlowPoint = new EventChannel<>();
+    private static final EventChannel<SlowMovement> playerSlowedByBlockPoint = new EventChannel<>();
 
     @Getter
     @Cancelable
@@ -639,6 +634,11 @@ public class Listener {
     private static final EventChannelDispatcher<Entity> entityPostTickListener =
             new EventChannelDispatcher<>(Entity::getType);
 
+
+    @Getter
+    @Broadcast
+    private static final EventChannelDispatcher<PosUpdate> entityTrackedPositionUpdate =
+            new EventChannelDispatcher<>(s -> s.entity().getType());
 
     @Getter
     @Cancelable
@@ -994,7 +994,7 @@ public class Listener {
         Listener.getPacketPostHandlePoint()
                 .registerHandler(
                         (Consumer<Event<Packet<?>>>) ev -> onPacketEventCatch(postCatchers, ev), Integer.MIN_VALUE);
-        Listener.getPacketPostSendPoint()
+        Listener.getPacketPostScheduleSendPoint()
                 .registerHandler(
                         (Consumer<Event<Packet<?>>>) ev -> onPacketEventCatch(postCatchers, ev), Integer.MIN_VALUE);
         Listener.getConnectionEstablish()

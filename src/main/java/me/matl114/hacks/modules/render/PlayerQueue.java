@@ -9,6 +9,7 @@ import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.IntPrimitiveList;
@@ -69,8 +70,9 @@ public class PlayerQueue extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank, ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
         acceptor.accept(createTitle("widget.player-queue.command", 0, dblank, dx, dy));
     }
 

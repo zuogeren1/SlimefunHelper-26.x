@@ -8,6 +8,7 @@ import me.matl114.events.impl.Render2D;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.interact.Interact;
@@ -53,9 +54,15 @@ public class BlockFarm extends BaseModule {
     public final KeyBindRef hotkey =
             moduleEntry(root.addHotkey(), new MultiKeyBind(), root.addEnable()).build();
 
-    public final IntRef delay = intBuilder(root.add("delay")).defaultValue(6).build();
+    public final IntRef delay = intBuilder(root.add("delay"))
+            .defaultValue(6)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
-    public final IntRef mul = intBuilder(root.add("multiply")).defaultValue(9).build();
+    public final IntRef mul = intBuilder(root.add("multiply"))
+            .defaultValue(9)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public final FlagRef enableWhiteList =
             flagBuilder(root.add("white-list-enable")).build();
@@ -78,9 +85,14 @@ public class BlockFarm extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
     }
 
     BlockItem currentPlacingItem;
@@ -110,7 +122,7 @@ public class BlockFarm extends BaseModule {
 
     int timer;
 
-    public void onPreInput(Event<Void> event) {
+    public void onPreInput() {
         if (checkNull()) return;
         textRenderer.clear();
         if (enable.get() && currentPlacingItem != null) {
@@ -188,7 +200,7 @@ public class BlockFarm extends BaseModule {
         if (enable.get() && render.get()) {
             vdraw.context.drawContext().pushMatrix();
             try {
-                textRenderer.render2D(vdraw.context.drawContext());
+                textRenderer.render2D(vdraw.context.drawContext(), vdraw.context.partialTicks());
             } finally {
                 vdraw.context.drawContext().popMatrix();
             }

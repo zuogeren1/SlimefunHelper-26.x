@@ -10,12 +10,12 @@ import me.matl114.hacks.utils.config.BoundedPrimitiveFlagMap;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
+import me.matl114.plugins.MainPlugin;
 import me.matl114.utils.*;
 import me.matl114.versioned.SupportVersion;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import me.matl114.hacks.utils.EntityUtils;
 
@@ -87,7 +87,7 @@ public class Hud extends IRender2DColoredModule {
     public void handleIcon(VDrawContext vdraw) {
         if (right.get()) {
             vdraw.drawTexturedQuad(
-                    Identifier.tryParse("slimefunhelper:textures/custom/genshin_impact.png"),
+                    MainPlugin.identifier("textures/custom/genshin_impact.png"),
                     -80,
                     0,
                     0,
@@ -100,7 +100,7 @@ public class Hud extends IRender2DColoredModule {
         } else {
 
             vdraw.drawTexturedQuad(
-                    Identifier.tryParse("slimefunhelper:textures/custom/genshin_impact.png"),
+                    MainPlugin.identifier("textures/custom/genshin_impact.png"),
                     0,
                     80,
                     0,

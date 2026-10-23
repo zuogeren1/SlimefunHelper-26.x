@@ -63,8 +63,12 @@ public class ContentDelegateWidget<W extends GuiEventListener & Renderable & Nar
 
                 draw.render0(context, translatedMouseX, translatedMouseY, delta, disableSelect);
             } else {
-                this.getDelegate().extractRenderState(context.pushMatrix(), translatedMouseX, translatedMouseY, delta);
-                context.popMatrix();
+                var drawContext = context.pushMatrix();
+                try {
+                    this.getDelegate().extractRenderState(drawContext, translatedMouseX, translatedMouseY, delta);
+                } finally {
+                    context.popMatrix();
+                }
             }
         }
     }

@@ -36,11 +36,15 @@ public class InvHelper extends BaseModule {
     }
 
     public final ModulePath root = makePath(Configs.INV_CONFIG, "inv-helper");
-    public final IntRef checkDelay =
-            intBuilder(root.add("check-delay")).defaultValue(2).build();
+    public final IntRef checkDelay = intBuilder(root.add("check-delay"))
+            .defaultValue(2)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
-    public final IntRef totalOp =
-            intBuilder(root.add("total-operation")).defaultValue(2).build();
+    public final IntRef totalOp = intBuilder(root.add("total-operation"))
+            .defaultValue(2)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public final ModulePath hotBar = root.add("hot-bar");
 
@@ -51,8 +55,10 @@ public class InvHelper extends BaseModule {
                     hotBar.add("auto-stack-hot-bar-hotkey"), new MultiKeyBind(), hotBar.add("auto-stack-hot-bar"))
             .build();
 
-    public final DoubleRef stackPercentage =
-            doubleBuilder(hotBar.add("stack-percentage")).defaultValue(0.25D).build();
+    public final DoubleRef stackPercentage = doubleBuilder(hotBar.add("stack-percentage"))
+            .defaultValue(0.25D)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
+            .build();
 
     public final FlagRef offHandStack =
             flagBuilder(hotBar.add("off-hand-stack")).build();
@@ -77,6 +83,7 @@ public class InvHelper extends BaseModule {
 
     public final DoubleRef resupplyPercentage = doubleBuilder(resupply.add("resupply-percentage"))
             .defaultValue(0.125)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
             .build();
 
     public final ModulePath stacking = root.add("stacking");
@@ -89,6 +96,7 @@ public class InvHelper extends BaseModule {
 
     public final DoubleRef autoMergePercentage = doubleBuilder(stacking.add("auto-merge-percentage"))
             .defaultValue(0.125)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
             .build();
 
     public final KeyBindRef mergeKey = hotkey(stacking.add("stack-inventory-key"))

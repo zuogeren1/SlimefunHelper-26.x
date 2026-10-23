@@ -12,13 +12,12 @@ import me.matl114.hacks.WorldTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.extra.EventNotify;
+import me.matl114.hacks.modules.extra.SoundNotify;
 import me.matl114.hacks.modules.task.ServerStorage;
 import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.Holder;
 import me.matl114.hacks.utils.world.ChunkStorage;
-import me.matl114.hooks.XaeroHooks;
 import me.matl114.hooks.impl.xaerowaypoints.IXWaypoint;
-import me.matl114.hooks.impl.xaerowaypoints.IXWaypointAccess;
-import me.matl114.hooks.impl.xaerowaypoints.IXWaypointFactory;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
@@ -27,10 +26,10 @@ import me.matl114.utils.MathUtils;
 import me.matl114.utils.WorldUtils;
 import me.matl114.versioned.api.VDataFlag;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -42,6 +41,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -70,13 +70,15 @@ public class SearchLabel extends BaseModule {
             .defaultValue(new EntrySet<>(BuiltInRegistries.BLOCK, List.of(Blocks.CHEST, Blocks.SHULKER_BOX)))
             .build();
 
-    public final IntRef importantBlocksCount =
-            intBuilder(searchControl.add("block-counts")).defaultValue(8).build();
+    public final IntRef importantBlocksCount = intBuilder(searchControl.add("block-counts"))
+            .defaultValue(8)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final NBTRef<EntrySet<Block>> instantBlocks = builder(
                     searchControl.add("instant-blocks"), EntrySet.<Block>parameter())
-            .defaultValue(new EntrySet<>(
-                    BuiltInRegistries.BLOCK, List.of(Blocks.SHULKER_BOX, Blocks.CRAFTER, Blocks.ENDER_CHEST)))
+            .defaultValue(
+                    new EntrySet<>(BuiltInRegistries.BLOCK, List.of(Blocks.SHULKER_BOX, Blocks.CRAFTER, Blocks.ENDER_CHEST)))
             .build();
 
     public final FlagRef labelImportantItems =
@@ -84,12 +86,13 @@ public class SearchLabel extends BaseModule {
 
     public final NBTRef<EntrySet<Item>> importantItems = builder(
                     searchControl.add("important-items"), EntrySet.<Item>parameter())
-            .defaultValue(
-                    new EntrySet<>(BuiltInRegistries.ITEM, List.of(Items.ELYTRA, Items.FILLED_MAP, Items.SHULKER_BOX)))
+            .defaultValue(new EntrySet<>(BuiltInRegistries.ITEM, List.of(Items.ELYTRA, Items.FILLED_MAP, Items.SHULKER_BOX)))
             .build();
 
-    public final IntRef importantItemsCount =
-            intBuilder(searchControl.add("item-counts")).defaultValue(1).build();
+    public final IntRef importantItemsCount = intBuilder(searchControl.add("item-counts"))
+            .defaultValue(1)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final FlagRef labelImportantEntities =
             flagBuilder(searchControl.add("enable-important-entities")).build();
@@ -101,13 +104,15 @@ public class SearchLabel extends BaseModule {
                     List.of(EntityTypes.PLAYER, EntityTypes.CHEST_MINECART, EntityTypes.HOPPER_MINECART)))
             .build();
 
-    public final IntRef importantEntitiesCount =
-            intBuilder(searchControl.add("entity-counts")).defaultValue(4).build();
+    public final IntRef importantEntitiesCount = intBuilder(searchControl.add("entity-counts"))
+            .defaultValue(4)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final NBTRef<EntrySet<EntityType<?>>> instantEntities = builder(
                     searchControl.add("instant-entities"), EntrySet.<EntityType<?>>parameter())
-            .defaultValue(new EntrySet<>(
-                    BuiltInRegistries.ENTITY_TYPE, List.of(EntityTypes.MINECART, EntityTypes.HOPPER_MINECART)))
+            .defaultValue(
+                    new EntrySet<>(BuiltInRegistries.ENTITY_TYPE, List.of(EntityTypes.MINECART, EntityTypes.HOPPER_MINECART)))
             .build();
 
     public final FlagRef labelInWorldMap = builder(searchControl.add("label-in-world-map"), Boolean.class)
@@ -117,6 +122,16 @@ public class SearchLabel extends BaseModule {
 
     public final FlagRef notify =
             flagBuilder(searchControl.add("notify-when-update-label")).build();
+
+    public final FlagRef notifySound =
+            flagBuilder(searchControl.add("sound-when-update-label")).build();
+
+    public final NBTRef<Holder<SoundEvent>> searchLabelSound = builder(
+                    searchControl.add("sound"), Holder.<SoundEvent>parameter())
+            .defaultValue(Holder.of(
+                    BuiltInRegistries.SOUND_EVENT,
+                    SoundNotify.SEARCH_LABEL_SOUND.map(net.minecraft.core.Holder::value).orElse(null)))
+            .build();
 
     public final FlagRef log =
             flagBuilder(searchControl.add("log-when-update-label")).build();
@@ -130,53 +145,29 @@ public class SearchLabel extends BaseModule {
     private static final String KEY_CHUNK_LABEL_RECORD = "slimefunhelper:search_label_chunk_records";
 
     private void updateWorldMapSettings(boolean show) {
-        if (checkNull()) return;
-        if (currentAccess == null) return;
+        if (!enable.get()) {
+            return;
+        }
         if (show) {
-            loadCurrentData(currentAccess);
+            loadCurrentData();
         } else {
-            unloadCurrentData(currentAccess);
+            unloadCurrentData();
+            loadedWorld = null;
         }
     }
 
-    private void setupNewAccess(IXWaypointAccess access) {
-        destroyCurrentAccess();
-        currentWaypoints.clear();
-        currentAccess = access;
-        loadCurrentData(currentAccess);
-    }
-
-    private void destroyCurrentAccess() {
-        if (currentAccess != null) {
-            unloadCurrentData(currentAccess);
-        }
-        currentAccess = null;
-    }
-
-    private void updateCurrentAccess() {
-        var factory = XaeroHooks.getInstance().getWaypointFactory();
-        if (factory == null) {
-            destroyCurrentAccess();
+    private void loadCurrentData() {
+        unloadCurrentData();
+        if (checkNull()) {
             return;
         }
-        var access = factory.getCurrentWaypointSet();
-        if (!Objects.equals(access, currentAccess)) {
-            if (access != null) {
-                setupNewAccess(access);
-            } else {
-                destroyCurrentAccess();
-            }
+        var serverStorage = ServerStorage.getStorage();
+        if (serverStorage == null) {
+            return;
         }
-    }
-
-    private void loadCurrentData(IXWaypointAccess access) {
-        currentWaypoints.clear();
-        var currentWorldMap = ServerStorage.getStorage().chunkStorageMap.get(mc.level.dimension());
+        var currentWorldMap = serverStorage.chunkStorageMap.get(mc.level.dimension());
         if (currentWorldMap == null) {
-            return;
-        }
-        IXWaypointFactory factory = XaeroHooks.getInstance().getWaypointFactory();
-        if (factory == null) {
+            loadedWorld = mc.level.dimension();
             return;
         }
         for (var re : currentWorldMap.entrySet()) {
@@ -187,10 +178,10 @@ public class SearchLabel extends BaseModule {
                 if (removeIfClose.get() && record.reached()) {
                     continue;
                 }
-                IXWaypoint newWaypoint = createWaypoint(pos, record, factory);
-                addTo(newWaypoint, access);
+                addTo(pos, createWaypoint(pos, record));
             }
         }
+        loadedWorld = mc.level.dimension();
     }
 
     private String createLabel(ChunkRecord record) {
@@ -207,8 +198,7 @@ public class SearchLabel extends BaseModule {
         return name.toString();
     }
 
-    private IXWaypoint createWaypoint(ChunkPos pos, ChunkRecord record, IXWaypointFactory factory) {
-
+    private IXWaypoint createWaypoint(ChunkPos pos, ChunkRecord record) {
         int color;
         if (record.typeEntities.isPresent()) {
             color = ChatFormatting.RED.ordinal();
@@ -219,7 +209,7 @@ public class SearchLabel extends BaseModule {
         }
         double scale = mc.level.dimensionType().coordinateScale();
 
-        return factory.createWaypoint(
+        return XaeroHelper.INSTANCE.createWaypoint(
                 (int) (pos.getMiddleBlockX() * scale),
                 64,
                 (int) (pos.getMiddleBlockZ() * scale),
@@ -231,29 +221,15 @@ public class SearchLabel extends BaseModule {
                 true);
     }
 
-    private void addTo(IXWaypoint newWaypoint, IXWaypointAccess access) {
-        access.removeIf(s -> {
-            return s.getX() == newWaypoint.getX()
-                    && s.getY() == newWaypoint.getY()
-                    && s.getZ() == newWaypoint.getZ()
-                    && s.isTemp() == newWaypoint.isTemp()
-                    && Objects.equals(s.getInitials(), newWaypoint.getInitials());
-        });
-        access.add(newWaypoint);
-        access.requestRefresh();
-        currentWaypoints.add(newWaypoint);
+    private void addTo(ChunkPos pos, IXWaypoint newWaypoint) {
+        remove(pos);
+        if (newWaypoint != null) {
+            XaeroHelper.INSTANCE.submitWaypoint(this, newWaypoint);
+        }
     }
 
-    private void remove(IXWaypointAccess access, ChunkPos pos) {
-        double scale = mc.level.dimensionType().coordinateScale();
-        access.removeIf(s -> {
-            return s.getX() == (int) (pos.getMiddleBlockX() * scale)
-                    && s.getY() == 64
-                    && s.getZ() == (int) (pos.getMiddleBlockZ() * scale)
-                    && s.isTemp()
-                    && Objects.equals(s.getInitials(), "L");
-        });
-        access.requestRefresh();
+    private void remove(ChunkPos pos) {
+        XaeroHelper.INSTANCE.removeWaypoint(this, new BlockPos(pos.getMiddleBlockX(), 64, pos.getMiddleBlockZ()));
     }
 
     private void update(ChunkPos pos, ChunkRecord record) {
@@ -262,21 +238,20 @@ public class SearchLabel extends BaseModule {
             if (storage != null) {
                 storage.put(KEY_CHUNK_LABEL_RECORD, null);
             }
-            if (currentAccess != null) {
-                remove(currentAccess, pos);
-            }
+            remove(pos);
         } else {
             ChunkStorage storage = ServerStorage.getOrCreateChunkStorage(pos);
+            if (storage == null) return;
             storage.put(KEY_CHUNK_LABEL_RECORD, record, ChunkRecord.CODEC);
-            if (labelInWorldMap.get() && currentAccess != null) {
-                var factory = XaeroHooks.getInstance().getWaypointFactory();
-                if (factory == null) {
-                    return;
-                }
-                addTo(createWaypoint(pos, record, factory), currentAccess);
+            if (labelInWorldMap.get()) {
+                addTo(pos, createWaypoint(pos, record));
             }
             if (notify.get()) {
                 EventNotify.INSTANCE.notify("[SlimefunHelper]自动标点", createLabel(record));
+            }
+            if (notifySound.get()) {
+                SoundNotify.INSTANCE.playSound(
+                        Optional.ofNullable(this.searchLabelSound.get().entry()).map(BuiltInRegistries.SOUND_EVENT::wrapAsHolder));
             }
             if (log.get()) {
                 logI18N("message.module.search-label.label-update", createLabel(record));
@@ -293,30 +268,23 @@ public class SearchLabel extends BaseModule {
         if (record.reached()) return;
         if (record.isEmpty()) {
             storage.put(KEY_CHUNK_LABEL_RECORD, null);
-            if (currentAccess != null) {
-                remove(currentAccess, pos);
-            }
+            remove(pos);
         } else {
             storage.put(KEY_CHUNK_LABEL_RECORD, record.withReached(true), ChunkRecord.CODEC);
             if (removeIfClose.get()) {
-                remove(currentAccess, pos);
+                remove(pos);
             }
         }
     }
 
-    private void unloadCurrentData(IXWaypointAccess access) {
-        for (var re : currentWaypoints) {
-            access.remove(re);
-        }
-        currentWaypoints.clear();
+    private void unloadCurrentData() {
+        XaeroHelper.INSTANCE.removeSub(this);
     }
-
-    IXWaypointAccess currentAccess;
-    final Set<IXWaypoint> currentWaypoints = new HashSet<>();
 
     @Override
     public void registerAll() {
         super.registerAll();
+        registerListener(XaeroHelper.getWorldSwitchPoint(), this::onWorldSwitch);
         registerListener(Listener.getPostGameTick(), this::onPostTick);
         registerListener(Listener.getServerEntitySpawnListener(), this::onEntitySpawn);
         registerListener(Listener.getChunkUpdateListener(), this::onChunkPostLoad);
@@ -327,12 +295,34 @@ public class SearchLabel extends BaseModule {
     }
 
     ChunkPos lastChunkPos = null;
+    ResourceKey<Level> loadedWorld = null;
 
-    public void onPostTick(Event<LocalPlayer> eventUpdate) {
-        if (enable.get() && labelInWorldMap.get() && XaeroHooks.getInstance().getWaypointFactory() != null) {
-            updateCurrentAccess();
-        } else {
-            destroyCurrentAccess();
+    @Override
+    public void onEnableModule() {
+        super.onEnableModule();
+        loadedWorld = null;
+        loadCurrentData();
+    }
+
+    @Override
+    public void onDisableModule() {
+        super.onDisableModule();
+        unloadCurrentData();
+        lastChunkPos = null;
+        loadedWorld = null;
+    }
+
+    private void onWorldSwitch() {
+        lastChunkPos = null;
+        loadedWorld = null;
+        if (enable.get() && labelInWorldMap.get()) {
+            loadCurrentData();
+        }
+    }
+
+    public void onPostTick() {
+        if (enable.get() && labelInWorldMap.get() && !Objects.equals(loadedWorld, mc.level.dimension())) {
+            loadCurrentData();
         }
         if (enable.get()) {
             if (!Objects.equals(lastChunkPos, mc.player.chunkPosition())) {
@@ -420,7 +410,8 @@ public class SearchLabel extends BaseModule {
                                                                 .test(item.getItem()
                                                                         .getItem());
                                                     } else if (s instanceof ItemFrame frame
-                                                            && !frame.getItem().isEmpty()) {
+                                                            && !frame.getItem()
+                                                                    .isEmpty()) {
                                                         return importantItems
                                                                 .get()
                                                                 .test(frame.getItem()
@@ -705,7 +696,7 @@ public class SearchLabel extends BaseModule {
     }
 
     private boolean isOverworldStructureContainer(BlockPos pos, Block above, Block below) {
-        Holder<Biome> biome = mc.level.getBiome(pos);
+        net.minecraft.core.Holder<Biome> biome = mc.level.getBiome(pos);
 
         if (biome.is(BiomeTags.HAS_DESERT_PYRAMID) && contains(DESERT_PYRAMID_BLOCKS, above, below)) {
             return true;
@@ -793,7 +784,7 @@ public class SearchLabel extends BaseModule {
     }
 
     private boolean isNetherStructureContainer(BlockPos pos, Block above, Block below) {
-        Holder<Biome> biome = mc.level.getBiome(pos);
+        net.minecraft.core.Holder<Biome> biome = mc.level.getBiome(pos);
 
         if (biome.is(BiomeTags.HAS_NETHER_FORTRESS) && contains(NETHER_FORTRESS_BLOCKS, above, below)) {
             return true;
@@ -803,11 +794,12 @@ public class SearchLabel extends BaseModule {
             return true;
         }
 
-        return biome.is(BiomeTags.HAS_RUINED_PORTAL_NETHER) && contains(NETHER_RUINED_PORTAL_BLOCKS, above, below);
+        return biome.is(BiomeTags.HAS_RUINED_PORTAL_NETHER)
+                && contains(NETHER_RUINED_PORTAL_BLOCKS, above, below);
     }
 
     private boolean isEndStructureContainer(BlockPos pos, Block above, Block below) {
-        Holder<Biome> biome = mc.level.getBiome(pos);
+        net.minecraft.core.Holder<Biome> biome = mc.level.getBiome(pos);
 
         return biome.is(BiomeTags.HAS_END_CITY) && contains(END_CITY_BLOCKS, above, below);
     }
@@ -833,10 +825,7 @@ public class SearchLabel extends BaseModule {
                                 .byNameCodec()
                                 .optionalFieldOf("type-block")
                                 .forGetter(ChunkRecord::typeBlock),
-                        BuiltInRegistries.ITEM
-                                .byNameCodec()
-                                .optionalFieldOf("item-type")
-                                .forGetter(ChunkRecord::typeItem),
+                        BuiltInRegistries.ITEM.byNameCodec().optionalFieldOf("item-type").forGetter(ChunkRecord::typeItem),
                         BuiltInRegistries.ENTITY_TYPE
                                 .byNameCodec()
                                 .optionalFieldOf("entity-type")

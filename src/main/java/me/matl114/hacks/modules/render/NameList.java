@@ -101,16 +101,20 @@ public class NameList extends INameTag {
         }
         if (enable.get() && !event.context.hudHidden() && nameTagInfos != null) {
             var stack = event.context.drawContext();
+            float textHeight = stack.getTextDrawer().getTextHeight() + 1;
             stack.getMatrices().pushMatrix();
             handleRenderPosition(stack);
             int count = 0;
             for (var entry : nameTagInfos) {
+                if (hideSelf.get() && entry.player == mc.getCameraEntity()) {
+                    continue;
+                }
                 if (count >= playerListMaxLength.get()) {
                     handleTooManyPlayerList(stack);
                     break;
                 }
                 onRenderList(entry, stack, (event.context.partialTicks()));
-                stack.getMatrices().translate(0, HEIGHT);
+                stack.getMatrices().translate(0, textHeight);
                 count += 1;
             }
             stack.getMatrices().popMatrix();
@@ -141,8 +145,8 @@ public class NameList extends INameTag {
     }
 
     @Override
-    public void onUpdate(Event<Void> event) {
-        super.onUpdate(event);
+    public void onUpdate() {
+        super.onUpdate();
         if (checkNull() || !enable.get() || !locatorTrack.get()) {
             LocatorTracker.INSTANCE.clear();
             return;
@@ -300,7 +304,13 @@ public class NameList extends INameTag {
             if (right.get()) {
                 vdraw.getMatrices().translate(-length, 0);
             }
-            vdraw.drawText(mc.font, player.nameDisplay.getVisualOrderText(), (int) 0, 0, -1, true);
+            vdraw.drawText(
+                    vdraw.getTextDrawer(),
+                    player.nameDisplay.getVisualOrderText(),
+                    (int) 0,
+                    (int) ((9 - vdraw.getTextDrawer().getTextHeight()) / 2.0F),
+                    -1,
+                    false);
             if (!right.get()) {
                 vdraw.getMatrices().translate(length, 0);
             }
@@ -333,7 +343,7 @@ public class NameList extends INameTag {
                         stackOverride = stackOverride.copy();
                         stackOverride.setDamageValue(0);
                     }
-                    vdraw.drawItemInSlot(mc.font, stackOverride, i * 16, 0, countOverride);
+                    vdraw.drawItemInSlot(vdraw.getTextDrawer(), stackOverride, i * 16, 0, countOverride);
                 }
             }
             vdraw.getMatrices().popMatrix();
@@ -349,7 +359,13 @@ public class NameList extends INameTag {
             if (right.get()) {
                 vdraw.getMatrices().translate(-length, 0);
             }
-            vdraw.drawText(mc.font, player.otherInfoDisplay.getVisualOrderText(), (int) 0, 0, -1, true);
+            vdraw.drawText(
+                    vdraw.getTextDrawer(),
+                    player.otherInfoDisplay.getVisualOrderText(),
+                    (int) 0,
+                    (int) ((9 - vdraw.getTextDrawer().getTextHeight()) / 2.0F),
+                    -1,
+                    false);
             if (!right.get()) {
                 vdraw.getMatrices().translate(length, 0);
             }
@@ -363,7 +379,7 @@ public class NameList extends INameTag {
             int size = line.size();
             for (var i = 0; i < size; i++) {
                 var entry = line.get(i);
-                float len = mc.font.getSplitter().stringWidth(entry.getValue());
+                float len = vdraw.getTextDrawer().getWidth(entry.getValue());
                 if (right.get()) {
                     vdraw.getMatrices().translate(-9 - len, 0);
                 }
@@ -372,12 +388,12 @@ public class NameList extends INameTag {
                 statusEffectRenderer.render(0, 0, vdraw, entry.getKey().value());
                 vdraw.getMatrices().popMatrix();
                 vdraw.drawText(
-                        mc.font,
+                        vdraw.getTextDrawer(),
                         entry.getValue().getVisualOrderText(),
                         9,
-                        0,
+                        (int) ((9 - vdraw.getTextDrawer().getTextHeight()) / 2.0F),
                         potionColor.get().withAlpha(255),
-                        true);
+                        false);
 
                 if (!right.get()) {
                     vdraw.getMatrices().translate(9 + len, 0);
@@ -388,14 +404,19 @@ public class NameList extends INameTag {
 
     public void handleTooManyPlayerList(VDrawContext vdraw) {
         vdraw.pushMatrix();
-        FormattedCharSequence display = Component.literal(
-                        "......(" + (nameTagInfos.size() - playerListMaxLength.get()) + " more)")
+        FormattedCharSequence display = Component.literal("......(" + (nameTagInfos.size() - playerListMaxLength.get()) + " more)")
                 .getVisualOrderText();
-        float length = mc.font.getSplitter().stringWidth(display);
+        float length = vdraw.getTextDrawer().getWidth(display);
         if (right.get()) {
             vdraw.getMatrices().translate(-length, 0);
         }
-        vdraw.drawText(mc.font, display, (int) 0, 0, -1, true);
+        vdraw.drawText(
+                vdraw.getTextDrawer(),
+                display,
+                (int) 0,
+                (int) ((9 - vdraw.getTextDrawer().getTextHeight()) / 2.0F),
+                -1,
+                false);
         vdraw.popMatrix();
     }
 }

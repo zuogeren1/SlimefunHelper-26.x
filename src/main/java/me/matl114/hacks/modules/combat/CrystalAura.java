@@ -17,11 +17,12 @@ import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
-import me.matl114.hacks.modules.ac.DisablerManager;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.PacketMine;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
@@ -87,15 +88,24 @@ public class CrystalAura extends BaseModule {
             .defaultValue(LegalInteractMode.NONE)
             .build();
 
-    public final IntRef range = intBuilder(root.add("range")).defaultValue(10).build();
+    public final IntRef range = intBuilder(root.add("range"))
+            .defaultValue(10)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
     private List<Vec3i> interactRangeBlocks = new ArrayList<>();
     public final DoubleRef interactRange = doubleBuilder(root.add("interact-range"))
             .defaultValue(4.5)
+            .validator(Configs.doubleRange(0.0D, 100.0D))
             .updateListener(s -> interactRangeBlocks = MathUtils.create3DPointListAroundPlayer(s))
             .build();
 
     public final IntRef delay = intBuilder(root.add("delay"))
             .defaultValue(3)
+            .validator(Configs.INT_POSITIVE)
+            .build();
+
+    public final IntRef attackDelay = intBuilder(root.add("attack-delay"))
+            .defaultValue(2)
             .validator(Configs.INT_POSITIVE)
             .build();
 
@@ -123,7 +133,28 @@ public class CrystalAura extends BaseModule {
             .validator(Configs.doubleRange(0.0D, 1000.0D))
             .build();
 
+    public final ModulePath invulnerability = root.add("invulnerability-frame");
+
+    public final FlagRef considerInvulnerability = builder(invulnerability.add("consider"), Boolean.class)
+            .defaultValue(false)
+            .build();
+
+    public final DoubleRef invulnerabilityDamageMultiplier = doubleBuilder(invulnerability.add("damage-multiplier"))
+            .defaultValue(1.0D)
+            .validator(Configs.doubleRange(0.0D, 100.0D))
+            .build();
+
+    public final IntRef invulnerabilityConsiderTicks = intBuilder(invulnerability.add("consider-ticks"))
+            .defaultValue(7)
+            .validator(Configs.INT_POSITIVE)
+            .build();
+
     public final FlagRef usePredictor = builder(root.add("damage-use-predictor"), Boolean.class)
+            .defaultValue(true)
+            .build();
+
+    public final FlagRef considerExistingDamage = builder(
+                    invulnerability.add("consider-existing-damage"), Boolean.class)
             .defaultValue(true)
             .build();
 
@@ -166,11 +197,15 @@ public class CrystalAura extends BaseModule {
             .defaultValue(false)
             .build();
 
-    public final IntRef fillMinWaitTime =
-            intBuilder(fill.add("fill-min-wait-time")).defaultValue(2).build();
+    public final IntRef fillMinWaitTime = intBuilder(fill.add("fill-min-wait-time"))
+            .defaultValue(2)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
-    public final IntRef fillMaxWaitTime =
-            intBuilder(fill.add("fill-max-wait-time")).defaultValue(4).build();
+    public final IntRef fillMaxWaitTime = intBuilder(fill.add("fill-max-wait-time"))
+            .defaultValue(4)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final ModulePath damageBlock = root.add("auto-block");
 
@@ -209,6 +244,7 @@ public class CrystalAura extends BaseModule {
     TimerExecutor supplyEndCrystalExecutor = new TimerExecutor();
     TimerExecutor supplyBaseExecutor = new TimerExecutor();
     TimerExecutor supplyFillBlockExecutor = new TimerExecutor();
+    TimerExecutor tickAttackExecutor = new TimerExecutor();
     List<Player> currentTarget = List.of();
     List<CrystalPlan> pendingBases = new ArrayList<>();
     Queue<CrystalPlan> delayQueue = new ArrayDeque<>();
@@ -216,8 +252,9 @@ public class CrystalAura extends BaseModule {
     int timer = 0;
     RenderCollector<AABB> debugRender = RenderCollectors.createBoxCollector(true, false, false);
     boolean nextHitSkipDamageTest;
+    double maxExistingDamageValue = Double.NEGATIVE_INFINITY;
 
-    public void onWorldSwitch(Event<LocalPlayer> event) {
+    public void onWorldSwitch() {
         currentTarget = List.of();
         trackedGlasses.clear();
         timer = 0;
@@ -228,7 +265,7 @@ public class CrystalAura extends BaseModule {
     boolean fillWorkingTick = false;
     Pair<BlockPos, BlockState> lastMiningTarget = null;
 
-    public void onPostInputEvent(Event<Void> event) {
+    public void onPostInputEvent() {
         if (checkNull()) {
             return;
         }
@@ -244,7 +281,7 @@ public class CrystalAura extends BaseModule {
             Pair<BlockPos, BlockState> currentPair = Pair.of(pos, mc.level.getBlockState(pos));
             if (!Objects.equals(currentPair, lastMiningTarget)) {
                 lastMiningTarget = currentPair;
-                if (SequencedActionManager.INSTANCE.isWaitingBreakResponse(pos::equals)) {
+                if (SequencedActionManager.INSTANCE.isWaitingStopBreakResponse(pos)) {
                     shouldWorkFill = true;
                 }
             }
@@ -339,7 +376,7 @@ public class CrystalAura extends BaseModule {
         if (enable.get()) {
             RenderUtils.startDrawVirtual(event.context.stack());
             try {
-                debugRender.render3D(event.context.stack());
+                debugRender.render3D(event.context.stack(), event.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(event.context.stack());
             }
@@ -369,6 +406,7 @@ public class CrystalAura extends BaseModule {
     }
 
     public boolean tickAttack() {
+        maxExistingDamageValue = Double.NEGATIVE_INFINITY;
         boolean skipTick = nextHitSkipDamageTest;
         nextHitSkipDamageTest = false;
         if (currentTarget.isEmpty()) {
@@ -385,18 +423,26 @@ public class CrystalAura extends BaseModule {
                 continue;
             }
             Map<Player, Double> damageMap = calculateCrystalDamage(crystal.position());
-            if (isSuitableExplodePos(damageMap) && (skipTick || isSuitableAttackExplodePos(damageMap))) {
-                candidates.add(Map.entry(crystal, damageMap));
+            Map<Player, Double> attackDamageMap =
+                    considerInvulnerability.get() ? calculateInvulnerabilityDamageMap(damageMap) : damageMap;
+            if (isSuitableExplodePos(damageMap) && (skipTick || isSuitableAttackExplodePos(attackDamageMap))) {
+                candidates.add(Map.entry(crystal, attackDamageMap));
+            } else {
+                // use raw damage
+                maxExistingDamageValue = Math.max(maxExistingDamageValue, getBestEnemyDamage(damageMap));
             }
         }
-        candidates.sort(Map.Entry.comparingByValue(this::compareCrystalEntries));
-        for (var crystalEntry : candidates) {
-            EndCrystal crystal = crystalEntry.getKey();
-            debugRender.submit(crystal.getBoundingBox(), ColorUtils.withAlphaInt(Color.MAGENTA, 255));
-            if (!CombatManager.INSTANCE.attackCrystal(crystal)) {
-                break;
+        if (tickAttackExecutor.canRun(attackDelay.get())) {
+            candidates.sort(Map.Entry.comparingByValue(this::compareCrystalEntries));
+            for (var crystalEntry : candidates) {
+                EndCrystal crystal = crystalEntry.getKey();
+                debugRender.submit(crystal.getBoundingBox(), ColorUtils.withAlphaInt(Color.MAGENTA, 255));
+                tickAttackExecutor.mark();
+                if (!CombatManager.INSTANCE.attackCrystal(crystal)) {
+                    break;
+                }
+                attack = true;
             }
-            attack = true;
         }
         return attack;
     }
@@ -462,7 +508,9 @@ public class CrystalAura extends BaseModule {
         boolean legal = mode.get().isLegal();
 
         CrystalPlan bestPlan = null;
-        double bestEnemyDamage = Double.NEGATIVE_INFINITY;
+        double bestEnemyDamage = considerInvulnerability.get() && considerExistingDamage.get()
+                ? Math.max(maxExistingDamageValue, Double.NEGATIVE_INFINITY)
+                : Double.NEGATIVE_INFINITY;
         double bestSelfDamage = Double.POSITIVE_INFINITY;
         Map<Player, Double> bestDamageMap = Map.of();
         Set<EndCrystal> currentPreRemovals = Set.of();
@@ -490,6 +538,8 @@ public class CrystalAura extends BaseModule {
                         .min(Double::compare)
                         .orElse(Double.POSITIVE_INFINITY)))
                 .toList();
+        // already has a targeting, just consider about invulerability
+        boolean shouldConsiderExisting = bestEnemyDamage >= targetDamageThreshold.get();
         for (BlockPos pos : searchBlockPos) {
             BlockPos crystalPos = pos.above();
             boolean canPlaceCrystal = isCrystalHasBase(crystalPos);
@@ -516,6 +566,10 @@ public class CrystalAura extends BaseModule {
             var result = CombatManager.INSTANCE.isCrystalConditionedBlockedByEntity(pos.above(), (check) -> {
                 // let entity test pass explosion-removing entities
                 if (check instanceof CombatManager.EntityBlock entity) {
+                    if (entity.entity() instanceof EndCrystal end && new AABB(pos.above()).contains(end.position())) {
+                        // crystal at here
+                        return true;
+                    }
                     if (entity.entity() instanceof EndCrystal end
                             && TargetSelector.INSTANCE.isWithinAttackRange(mc.player.position(), end)
                             && isSuitableExplodePos(calculateCrystalDamage(end.position()))) {
@@ -525,6 +579,11 @@ public class CrystalAura extends BaseModule {
                         entitySet2.add(entity.entity());
                         return false;
                     }
+                }
+                // do not block
+                if (check instanceof CombatManager.PendingCrystal pendingCrystal
+                        && Objects.equals(pos, pendingCrystal.basePos())) {
+                    return true;
                 }
                 // let the dropping test pass glass
                 if (check instanceof CombatManager.PendingItemDrop drop && isTrackedGlassState(drop.dropState())) {
@@ -602,6 +661,12 @@ public class CrystalAura extends BaseModule {
                 }
                 nextHitSkipDamageTest = true;
             } else {
+                return false;
+            }
+        } else if (shouldConsiderExisting) {
+            // do not attack if player are during,
+            var invulnerable = calculateInvulnerabilityDamageMap(bestDamageMap);
+            if (!isSuitableAttackExplodePos(invulnerable)) {
                 return false;
             }
         }
@@ -768,21 +833,7 @@ public class CrystalAura extends BaseModule {
             if (!EntityUtils.isEntityValid(target) || target == mc.player) {
                 continue;
             }
-            Vec3 targetPos = target.position();
-            Vec3 realMovement;
-            if (usePredictor.get()) {
-                Vec3 predictionPos =
-                        PositionPredict.INSTANCE.attackPredictArgument.get().predict(target);
-
-                if (predictionPos.distanceToSqr(targetPos) > MathUtils.s2(0.5)) {
-                    Vec3 movement = predictionPos.subtract(targetPos);
-                    realMovement = MovTasks.simulateMovement(target, targetPos, movement, false);
-                } else {
-                    realMovement = Vec3.ZERO;
-                }
-            } else {
-                realMovement = Vec3.ZERO;
-            }
+            Vec3 realMovement = getTargetDamageMovement(target);
             damageMap.put(target, (double) ExplosionUtils.calculateExplosionMaxDamage(
                     ExplosionUtils.END_CRYSTAL_POWER, target.getBoundingBox().move(realMovement), explosionPos));
         }
@@ -814,21 +865,7 @@ public class CrystalAura extends BaseModule {
             if (!EntityUtils.isEntityValid(target) || target == mc.player) {
                 continue;
             }
-            Vec3 targetPos = target.position();
-            Vec3 realMovement;
-            if (usePredictor.get()) {
-                Vec3 predictionPos =
-                        PositionPredict.INSTANCE.attackPredictArgument.get().predict(target);
-
-                if (predictionPos.distanceToSqr(targetPos) > MathUtils.s2(0.5)) {
-                    Vec3 movement = predictionPos.subtract(targetPos);
-                    realMovement = MovTasks.simulateMovement(target, targetPos, movement, false);
-                } else {
-                    realMovement = Vec3.ZERO;
-                }
-            } else {
-                realMovement = Vec3.ZERO;
-            }
+            Vec3 realMovement = getTargetDamageMovement(target);
 
             damageMap.put(target, (double) ExplosionUtils.calculateExplosionRawDamage(
                     ExplosionUtils.END_CRYSTAL_POWER,
@@ -838,6 +875,29 @@ public class CrystalAura extends BaseModule {
                     ExplosionUtils.EXPLOSION_RESISTENCE));
         }
         return damageMap;
+    }
+
+    private Vec3 getTargetDamageMovement(Player target) {
+        Vec3 targetPos = target.position();
+        Vec3 syncedPos = PositionPredict.INSTANCE.getPredictor(target).getCurrentSyncedPos();
+        if (syncedPos == null) {
+            return Vec3.ZERO;
+        }
+
+        Vec3 syncMovement = syncedPos.subtract(targetPos);
+        if (!usePredictor.get()) {
+            return syncMovement;
+        }
+
+        Vec3 predictionPos =
+                PositionPredict.INSTANCE.attackPredictArgument.get().predict(target);
+        if (predictionPos == null || predictionPos.distanceToSqr(syncedPos) <= MathUtils.s2(0.5)) {
+            return syncMovement;
+        }
+
+        Vec3 predictedMovement =
+                MovTasks.simulateMovement(target, syncedPos, predictionPos.subtract(syncedPos), false);
+        return syncMovement.add(predictedMovement);
     }
 
     private Vec3 getCrystalExplosionPos(BlockPos basePos) {
@@ -878,6 +938,29 @@ public class CrystalAura extends BaseModule {
             }
         }
         return best;
+    }
+
+    private Map<Player, Double> calculateInvulnerabilityDamageMap(Map<Player, Double> damageMap) {
+        if (!considerInvulnerability.get()) return damageMap;
+        Map<Player, Double> adjustedDamageMap = new LinkedHashMap<>(damageMap);
+        for (var entry : adjustedDamageMap.entrySet()) {
+            CombatManager.DamageTracker tracker = CombatManager.INSTANCE.getDamageTracker(entry.getKey());
+            if (tracker == null
+                    || tracker.getInvulnerabilityTicks() <= 0
+                    || tracker.getInvulnerabilityTicks() <= 10 - invulnerabilityConsiderTicks.get()) {
+                continue;
+            }
+            Double damage = entry.getValue();
+            if (damage == null) continue;
+            double adjustedDamage = Math.min(
+                    Math.min(
+                            (damage.floatValue() - DamageUtils.getRawDamageByDifficulty(mc.level, tracker.lastDamage))
+                                    * invulnerabilityDamageMultiplier.get(),
+                            damage),
+                    0);
+            entry.setValue(adjustedDamage);
+        }
+        return adjustedDamageMap;
     }
 
     private boolean isBasePlacedCrystalInAttackRange(BlockPos basePos) {
@@ -1041,17 +1124,22 @@ public class CrystalAura extends BaseModule {
         if (entry == null) {
             return false;
         }
+        BlockHitResult hitResult = InteractionTasks.createHitResult(basePos, mc.player.position());
+        if (!InteractionTasks.canHandleInteract(mode.get(), hitResult)) {
+            return false;
+        }
         Runnable callback = InvExtra.INSTANCE.swapItemToHand(entry.index(), offhand.get(), ghostHand.get());
         if (callback == null) {
             return false;
         }
-        InteractionTasks.handlePlaceMode(
-                mode.get(),
-                InteractionTasks.createHitResult(basePos, mc.player.position()),
-                offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
-                swingHand.get());
+        boolean completed = InteractionTasks.handlePlaceMode(
+                mode.get(), hitResult, offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, swingHand.get());
+        if (!completed) {
+            InteractionTasks.finishInteractGhostHand(mode.get(), callback);
+            return false;
+        }
         CombatManager.INSTANCE.markCrystalPlace(basePos);
-        callback.run();
+        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
         return true;
     }
 
@@ -1063,17 +1151,21 @@ public class CrystalAura extends BaseModule {
         if (entry == null) {
             return false;
         }
+        if (!InteractionTasks.canHandleInteract(mode.get(), autoBase.basePlaceResult())) {
+            return false;
+        }
         Runnable callback = InvExtra.INSTANCE.swapItemToHand(entry.index(), offhand.get(), ghostHand.get());
         if (callback == null) {
             return false;
         }
-        InteractionTasks.handlePlaceMode(
+        boolean completed = InteractionTasks.handlePlaceMode(
                 mode.get(),
                 autoBase.basePlaceResult(),
                 offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
                 swingHand.get());
-        callback.run();
-        if (zeroTickBase.get()
+        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
+        if (completed
+                && zeroTickBase.get()
                 && DisablerManager.INSTANCE.isMultiRotPlaceCheckDisabled(
                         mode.get().canMultiRotPlace())) {
             placeBlockingAndCrystal(plan);
@@ -1104,13 +1196,16 @@ public class CrystalAura extends BaseModule {
         if (hitResult == null || !canPlaceBlockingBlockAtHit(plan, entry.val(), hitResult)) {
             return false;
         }
+        if (!InteractionTasks.canHandleInteract(mode.get(), hitResult)) {
+            return false;
+        }
         Runnable callback = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, ghostHand.get());
         if (callback == null) {
             return false;
         }
-        InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
-        callback.run();
-        return true;
+        boolean completed = InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
+        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
+        return completed;
     }
 
     private boolean canPlaceBlockingBlockAtHit(CrystalPlan plan, ItemStack stack, BlockHitResult hitResult) {
@@ -1268,13 +1363,16 @@ public class CrystalAura extends BaseModule {
 
     private boolean placeScaffoldBlock(CrystalPlan plan, IndexEntry<ItemStack> entry) {
         BlockHitResult hitResult = getScaffoldPlaceResult(plan);
+        if (!InteractionTasks.canHandleInteract(mode.get(), hitResult)) {
+            return false;
+        }
         Runnable callback = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, ghostHand.get());
         if (callback == null) {
             return false;
         }
-        InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
-        callback.run();
-        return true;
+        boolean completed = InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
+        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
+        return completed;
     }
 
     private boolean placeFill(BlockPos pos, BlockHitResult hitResult) {
@@ -1282,19 +1380,21 @@ public class CrystalAura extends BaseModule {
         if (entry == null) {
             return false;
         }
+        if (!InteractionTasks.canHandleInteract(mode.get(), hitResult)) {
+            return false;
+        }
         Runnable callback = InvExtra.INSTANCE.swapItemToHand(entry.index(), offhand.get(), ghostHand.get());
         if (callback == null) {
             return false;
         }
-        mc.level.setBlockAndUpdate(pos, Blocks.AIR.defaultBlockState());
-        InteractionTasks.handlePlaceMode(
-                mode.get(),
-                hitResult,
-                offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
-                swingHand.get());
-        callback.run();
-        trackedGlasses.put(pos, Tasks.getTick());
-        return true;
+        mc.level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+        boolean completed = InteractionTasks.handlePlaceMode(
+                mode.get(), hitResult, offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, swingHand.get());
+        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
+        if (completed) {
+            trackedGlasses.put(pos, Tasks.getTick());
+        }
+        return completed;
     }
 
     private boolean canFillPos(BlockPos crystalPos) {
@@ -1473,8 +1573,14 @@ public class CrystalAura extends BaseModule {
     }
 
     public void onPreset(Event<EventContainer<ModulePreset>> event) {
-        mode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
-        airplaceBase.set(!event.context.getValue().hasAC());
+        ModulePreset preset = event.context.getValue();
+        if (preset.isAirplacePreset()) airplaceBase.set(preset.getAirplace(airplaceBase.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
+        if (!preset.isOptionPreset()) {
+            mode.set(LegalInteractMode.getFromPreset(preset));
+            airplaceBase.set(!preset.hasAC());
+        }
     }
 
     public record CrystalPlan(EndCrystalOption option, Optional<BlockPos> blockingPos) {}

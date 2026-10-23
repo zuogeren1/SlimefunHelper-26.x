@@ -1,6 +1,5 @@
 package me.matl114.hacks.modules.survival;
 
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -10,7 +9,6 @@ import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
-import net.minecraft.client.player.LocalPlayer;
 
 public class WalkControl extends BaseModule {
     public static WalkControl INSTANCE;
@@ -59,7 +57,7 @@ public class WalkControl extends BaseModule {
 
     boolean currentSneak;
 
-    public void onPreGameTick(Event<LocalPlayer> event) {
+    public void onPreGameTick() {
         if (enable.get()) {
             if (enableForward.get()) {
                 switch (mode.get()) {
@@ -132,7 +130,7 @@ public class WalkControl extends BaseModule {
                 }
             }
             if (!modifier.isEmpty()) {
-                PlayerInputManager.INSTANCE.addInputModifier(modifier);
+                PlayerInputManager.INSTANCE.addInputModifier(modifier, 0);
             }
         }
         if (mc.options.keyUp.isDown()) {

@@ -14,16 +14,15 @@ import lombok.experimental.Accessors;
 import me.matl114.api.Displayable;
 import me.matl114.gui.Constants;
 import me.matl114.gui.basic.*;
-import me.matl114.gui.elements.ButtonElement;
-import me.matl114.gui.elements.ColorBoxElement;
 import me.matl114.gui.elements.IconElement;
+import me.matl114.gui.interfaces.DefaultElementFactory;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.managers.config.ConfigEnum;
 import me.matl114.utils.ReflectUtils;
 import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.utils.config.BaseAttrKeyValue;
 import me.matl114.utils.config.WrapperFactory;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.CommonColors;
 import org.apache.commons.lang3.function.Consumers;
 import org.apache.commons.lang3.mutable.MutableBoolean;
 
@@ -58,11 +57,11 @@ public class EnumAttrKeyValue<T> extends BaseAttrKeyValue<T> {
         this.identifier = clazz;
     }
 
-    public static final CustomWidgetGenerator<?> ENUM_WIDGET_FACTORY = (s, x, y, dx, dy) -> {
+    public static final CustomWidgetGenerator<?> ENUM_WIDGET_FACTORY = (factory, s, x, y, dx, dy) -> {
         if (s instanceof EnumAttrKeyValue attrKeyValue) {
-            return attrKeyValue.generateSwitchingButton(x, y, dx, dy, Consumers.nop());
+            return attrKeyValue.generateSwitchingButton(factory, x, y, dx, dy, Consumers.nop());
         } else {
-            return BaseAttrKeyValue.generateTextInputValueWidget(s, x, y, dx, dy);
+            return BaseAttrKeyValue.generateTextInputValueWidget(factory, s, x, y, dx, dy);
         }
     };
 
@@ -75,10 +74,10 @@ public class EnumAttrKeyValue<T> extends BaseAttrKeyValue<T> {
             map = ReflectUtils.getEnumMap(enumClass);
         }
 
-        return createFiniteLookupWidgetGenerator(map);
+        return createFiniteLookupWidgetFactory(map);
     }
 
-    public static <T> CustomWidgetGenerator<T> createFiniteLookupWidgetGenerator(Map<String, T> map) {
+    public static <T> CustomWidgetGenerator<T> createFiniteLookupWidgetFactory(Map<String, T> map) {
         Preconditions.checkArgument(!map.isEmpty());
         Class<?> enumClass = map.values().iterator().next().getClass();
         List<Pair<String, Supplier<Component>>> flattenMap;
@@ -92,13 +91,18 @@ public class EnumAttrKeyValue<T> extends BaseAttrKeyValue<T> {
                     .map(v -> new Pair<>(v, (Supplier<Component>) () -> Component.translatableWithFallback(v, v)))
                     .toList();
         }
-        return (s, x, y, dx, dy) -> {
-            return generateSwitchingButton(flattenMap, s, x, y, dx, dy, Runnables.doNothing());
+        return (factory, s, x, y, dx, dy) -> {
+            return generateSwitchingButton(factory, flattenMap, s, x, y, dx, dy, Runnables.doNothing());
         };
     }
 
     public DrawableWidget generateSwitchingButton(
             int x, int y, int dx, int dy, Consumer<EnumAttrKeyValue<T>> callback) {
+        return generateSwitchingButton(DefaultElementFactory.INSTANCE, x, y, dx, dy, callback);
+    }
+
+    public DrawableWidget generateSwitchingButton(
+            ElementFactory factory, int x, int y, int dx, int dy, Consumer<EnumAttrKeyValue<T>> callback) {
         List<Pair<String, Supplier<Component>>> flattenMap;
         if (Displayable.class.isAssignableFrom(identifier)) {
             Map<String, Displayable> valueMap = (Map<String, Displayable>) (this).getValueMap();
@@ -112,12 +116,24 @@ public class EnumAttrKeyValue<T> extends BaseAttrKeyValue<T> {
                                     new Pair<>(v, (Supplier<Component>) () -> Component.translatableWithFallback(v, v)))
                             .toList();
         }
-        return generateSwitchingButton(flattenMap, this, x, y, dx, dy, () -> {
+        return generateSwitchingButton(factory, flattenMap, this, x, y, dx, dy, () -> {
             callback.accept(this);
         });
     }
 
     public static DrawableWidget generateSwitchingButton(
+            List<Pair<String, Supplier<Component>>> flattenMap,
+            AttrKeyValue<?> ex,
+            int x,
+            int y,
+            int dx,
+            int dy,
+            Runnable runnable) {
+        return generateSwitchingButton(DefaultElementFactory.INSTANCE, flattenMap, ex, x, y, dx, dy, runnable);
+    }
+
+    public static DrawableWidget generateSwitchingButton(
+            ElementFactory factory,
             List<Pair<String, Supplier<Component>>> flattenMap,
             AttrKeyValue<?> ex,
             int x,
@@ -154,31 +170,37 @@ public class EnumAttrKeyValue<T> extends BaseAttrKeyValue<T> {
             };
             boolean needSwitch = dx > 2 * dy;
             int mainDx = needSwitch ? dx - dy : dx;
-            subScreen.addDrawableChild(ExecutableWidget.instance(1, 1, mainDx - 2, dy - 2)
-                    .setElementHandler(new ButtonElement(
-                                    (ign) -> {
-                                        kvUpdater.run();
-                                        return flattenMap
-                                                .get(integer.get())
-                                                .getSecond()
-                                                .get();
-                                    },
-                                    ButtonAction.run(() -> {
-                                        kvUpdater.run();
-                                        int index0 = integer.get();
-                                        index0 = (index0 + 1) % choices;
-                                        integer.set(index0);
-                                        indexUpdater.run();
-                                    }))
-                            .withTooltips(TooltipHandler.of(List.of(Component.translatable(ex.getKeyName()))))));
+            subScreen.addDrawableChild(factory.createExecuteButton(
+                    () -> {
+                        kvUpdater.run();
+                        return flattenMap.get(integer.get()).getSecond().get();
+                    },
+                    () -> List.of(Component.translatable(ex.getKeyName())),
+                    ButtonAction.run(() -> {
+                        kvUpdater.run();
+                        int index0 = integer.get();
+                        index0 = (index0 + 1) % choices;
+                        integer.set(index0);
+                        indexUpdater.run();
+                    }),
+                    0,
+                    0,
+                    mainDx,
+                    dy));
             if (needSwitch) {
                 MutableBoolean show = new MutableBoolean(false);
-                subScreen.addDrawableChild(ExecutableWidget.instance(dx - dy + 2, 2, dy - 4, dy - 4)
-                        .setElementHandler(IconElement.statedGuiPredicate(
+                subScreen.addDrawableChild(factory.createElement(
+                        IconElement.statedGuiPredicate(
                                 Constants.EXPAND_GUI_ON_SPRITE,
                                 Constants.EXPAND_GUI_OFF_SPRITE,
                                 ButtonAction.run(() -> show.setValue(!show.booleanValue())),
-                                (eee) -> show.booleanValue())));
+                                (eee) -> show.booleanValue()),
+                        null,
+                        null,
+                        dx - dy,
+                        0,
+                        dy,
+                        dy));
                 Supplier<SubScreenWidget> subScreenSupplier = Suppliers.memoize(() -> {
                     SubScreenWidget selectors = new SubScreenWidget(0, 0, 0, 0).setPriority(1);
                     int height = 0;
@@ -186,24 +208,22 @@ public class EnumAttrKeyValue<T> extends BaseAttrKeyValue<T> {
                         var section = flattenMap.get(i);
                         var supplier = section.getSecond();
                         final int finalI = i;
-                        selectors.addDrawableChild(ExecutableWidget.instance(0, height, dx - dy - 4, dy)
-                                .setElementHandler(new ColorBoxElement(
-                                        ButtonAction.run(() -> {
-                                            integer.set(finalI);
-                                            indexUpdater.run();
-                                            show.setValue(false);
-                                        }),
-                                        (el) -> supplier.get(),
-                                        ColorSampler.of(Color.GRAY.getRGB()),
-                                        ColorSampler.WHITE,
-                                        (el, rb) -> {
-                                            kvUpdater.run();
-                                            if (integer.get() == finalI) {
-                                                return CommonColors.GREEN;
-                                            } else if (rb) {
-                                                return CommonColors.WHITE;
-                                            } else return null;
-                                        })));
+                        selectors.addDrawableChild(factory.createExecuteButton(
+                                supplier,
+                                () -> List.of(Component.translatable(ex.getKeyName())),
+                                ButtonAction.run(() -> {
+                                    integer.set(finalI);
+                                    indexUpdater.run();
+                                    show.setValue(false);
+                                }),
+                                () -> {
+                                    kvUpdater.run();
+                                    return integer.get() == finalI;
+                                },
+                                0,
+                                height,
+                                dx - dy,
+                                dy));
                         height += dy;
                     }
                     return selectors;
@@ -215,9 +235,14 @@ public class EnumAttrKeyValue<T> extends BaseAttrKeyValue<T> {
             return subScreen;
         } else {
             // no choice
-            return ExecutableWidget.instance(x + 1, y + 1, dx - 2, dy - 2)
-                    .setElementHandler(new ButtonElement(TextProvider.of(Component.empty()), ButtonAction.empty())
-                            .withTooltips(TooltipHandler.of(List.of(Component.translatable(ex.getKeyName())))));
+            return factory.createExecuteButton(
+                    () -> Component.empty(),
+                    () -> List.of(Component.translatable(ex.getKeyName())),
+                    ButtonAction.empty(),
+                    x,
+                    y,
+                    dx,
+                    dy);
         }
     }
 }

@@ -27,6 +27,7 @@ import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.NetworkUtils;
 import me.matl114.utils.RenderUtils;
+import me.matl114.utils.render.RenderCollector;
 import me.matl114.versioned.SupportVersion;
 import me.matl114.versioned.api.VDataFlag;
 import me.matl114.versioned.api.VItem;
@@ -116,6 +117,7 @@ public class SpearEnhance extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreGameTick(), this::onPreTick);
+        registerListener(Listener.getPostGameTick(), this::updateKineticPlayerCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(RenderListener.getCustomModelOverride(), this::onReplaceSpearModel);
         registerListener(Listener.getClientPlayerPostSendMovementPoint(), this::onPostTick);
@@ -146,7 +148,7 @@ public class SpearEnhance extends BaseModule {
         return mc.player.getUseItem();
     }
 
-    public void onPreTick(Event<LocalPlayer> tickEvent) {
+    public void onPreTick() {
         if (isUsingSpear(mc.player)) {
             ItemStack stack = getSpear();
             int maxKineticTime = getMaxKineticTime(stack);
@@ -158,21 +160,25 @@ public class SpearEnhance extends BaseModule {
         }
     }
 
+    private final RenderCollector<Entity> kineticPlayerCollector =
+            RenderCollectors.createEntityBoxCollector(false, true, false);
+
+    private void updateKineticPlayerCollector() {
+        kineticPlayerCollector.clear();
+        if (checkNull() || !renderKineticPlayers.get()) return;
+        int color = renderColor.get().withAlpha(64);
+        for (var player : mc.level.players()) {
+            if (player != mc.getCameraEntity() && canSpearKineticAttack(player)) {
+                kineticPlayerCollector.submit(player, color);
+            }
+        }
+    }
+
     public void onRender(Event<Render3D> event) {
         if (renderKineticPlayers.get()) {
             RenderUtils.startDrawVirtual(event.context.stack());
             try {
-                int color = renderColor.get().withAlpha(64);
-                var render = RenderCollectors.createBoxCollector(false, true, false);
-                for (var re : mc.level.players()) {
-                    if (re != mc.getCameraEntity()) {
-                        if (canSpearKineticAttack(re)) {
-                            render.submit(re.getBoundingBox(), color);
-                        }
-                    }
-                }
-                render.render3D(event.context.stack());
-                render.clear();
+                kineticPlayerCollector.render3D(event.context.stack(), event.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(event.context.stack());
             }

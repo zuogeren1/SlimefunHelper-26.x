@@ -3,8 +3,9 @@ package me.matl114.mixins.events;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
+import java.util.Set;
 import me.matl114.accessors.events.ChatHudAccess;
 import me.matl114.accessors.events.ChatHudLineAccess;
 import me.matl114.events.Event;
@@ -40,9 +41,24 @@ public abstract class ChatHudEvents implements ChatHudAccess {
     public String uniqueId;
 
     @Unique
+    private final Set<String> pendingUniqueMessageIds = new HashSet<>();
+
+    @Unique
     @Override
     public void setUniqueMessageId(String id) {
         this.uniqueId = id;
+    }
+
+    @Unique
+    @Override
+    public void addPendingUniqueMessageId(String id) {
+        if (id != null) pendingUniqueMessageIds.add(id);
+    }
+
+    @Unique
+    @Override
+    public void clearPendingUniqueMessageIds() {
+        pendingUniqueMessageIds.clear();
     }
 
     @Unique
@@ -63,11 +79,14 @@ public abstract class ChatHudEvents implements ChatHudAccess {
             GuiMessageTag indicator,
             CallbackInfo ci,
             @Local(argsOnly = true) LocalRef<Component> textLocalRef) {
+        clearPendingUniqueMessageIds();
         if (!Listener.getMessageAddToHud().isEmpty()) {
             Event<Component> addMessageEvent = new Event<>(message, true, true, signatureData, indicator);
             Listener.getMessageAddToHud().handleValue(addMessageEvent);
             if (addMessageEvent.isCancelled()) {
+                clearPendingUniqueMessageIds();
                 ci.cancel();
+                return;
             }
             textLocalRef.set(addMessageEvent.context());
         }
@@ -89,7 +108,9 @@ public abstract class ChatHudEvents implements ChatHudAccess {
             GuiMessageTag indicator,
             CallbackInfo ci,
             @Local GuiMessage line) {
-        ChatHudLineAccess.of(line).setUniqueMessageId(uniqueId);
+        ChatHudLineAccess.of(line).addUniqueMessageId(uniqueId);
+        pendingUniqueMessageIds.forEach(ChatHudLineAccess.of(line)::addUniqueMessageId);
+        clearPendingUniqueMessageIds();
     }
 
     @Unique
@@ -97,8 +118,9 @@ public abstract class ChatHudEvents implements ChatHudAccess {
     public void clearUniqueMessages(String id) {
         try {
             this.trimmedMessages.removeIf(
-                    s -> Objects.equals(ChatHudLineAccess.of(s).getUniqueMessageId(), id));
-            this.allMessages.removeIf(s -> Objects.equals(ChatHudLineAccess.of(s).getUniqueMessageId(), id));
+                    s -> ChatHudLineAccess.of(s).getUniqueMessageIds().contains(id));
+            this.allMessages.removeIf(
+                    s -> ChatHudLineAccess.of(s).getUniqueMessageIds().contains(id));
         } catch (UnsupportedOperationException ignored) {
             // 列表实现可能被第三方替换成不可变实现：这里静默失效，绝不把异常抛回调用方
         }
@@ -126,10 +148,7 @@ public abstract class ChatHudEvents implements ChatHudAccess {
                             target =
                                     "(Lnet/minecraft/client/multiplayer/chat/GuiMessage;Lnet/minecraft/util/FormattedCharSequence;Z)Lnet/minecraft/client/multiplayer/chat/GuiMessage$Line;"))
     private GuiMessage.Line onVisibleLineCreate(GuiMessage.Line original, @Local(argsOnly = true) GuiMessage line) {
-        String unique = ChatHudLineAccess.of(line).getUniqueMessageId();
-        if (unique != null) {
-            ChatHudLineAccess.of(original).setUniqueMessageId(unique);
-        }
+        ChatHudLineAccess.of(line).getUniqueMessageIds().forEach(ChatHudLineAccess.of(original)::addUniqueMessageId);
         return original;
     }
 }

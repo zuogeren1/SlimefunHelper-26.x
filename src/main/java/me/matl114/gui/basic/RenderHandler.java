@@ -2,6 +2,8 @@ package me.matl114.gui.basic;
 
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import me.matl114.renderer.TextRenderers;
+import me.matl114.renderer.text.TextDrawer;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -249,20 +251,35 @@ public interface RenderHandler {
         final int color1 = color;
         return (element, context, mouseX, mouseY, delta, alpha, shouldHighlight) -> {
             drawScrollableText(
-                    context, mc.font, text, 0, 0, element.getTextureWidth(), element.getTextureHeight(), color1);
+                    context,
+                    TextRenderers.get(),
+                    text,
+                    0,
+                    0,
+                    element.getTextureWidth(),
+                    element.getTextureHeight(),
+                    color1);
         };
     }
 
     public static RenderHandler ofAutoScaleText(Component text, int color) {
         return (element, context, mouseX, mouseY, delta, alpha, shouldHighlight) -> {
             RenderHandler.drawScaledText0(
-                    context, mc.font, text, 0, 0, element.getTextureWidth(), element.getTextureHeight(), color, 0);
+                    context,
+                    TextRenderers.get(),
+                    text,
+                    0,
+                    0,
+                    element.getTextureWidth(),
+                    element.getTextureHeight(),
+                    color,
+                    TextAlign.MIDDLE);
         };
     }
 
     public static void drawScrollableText(
             VDrawContext context,
-            Font textRenderer,
+            TextDrawer textRenderer,
             Component text,
             int startX,
             int startY,
@@ -274,7 +291,7 @@ public interface RenderHandler {
 
     public static void drawScrollableText0(
             VDrawContext context,
-            Font textRenderer,
+            TextDrawer textRenderer,
             Component text,
             int centerX,
             int startX,
@@ -288,7 +305,7 @@ public interface RenderHandler {
 
     public static void drawScrollableText0(
             VDrawContext context,
-            Font textRenderer,
+            TextDrawer textRenderer,
             FormattedCharSequence text,
             int centerX,
             int startX,
@@ -296,9 +313,9 @@ public interface RenderHandler {
             int endX,
             int endY,
             int color) {
-        int i = textRenderer.width(text);
+        int i = textRenderer.getWidth(text);
         int var10000 = startY + endY;
-        int j = (var10000 - 9) / 2 + 1;
+        int j = (int) ((var10000 - textRenderer.getTextHeight()) / 2.0F) + 1;
         int k = endX - startX;
         int l;
         if (i > k) {
@@ -308,7 +325,7 @@ public interface RenderHandler {
             double f = Math.sin(1.5707963267948966 * Math.cos(6.283185307179586 * d / e)) / 2.0 + 0.5;
             double g = Mth.lerp(f, 0.0, (double) l);
             context.enableScissor(startX, startY, endX, endY);
-            context.drawText(textRenderer, text, startX - (int) g, j, color, true);
+            context.drawText(textRenderer, text, startX - (int) g, j, color, false);
             context.disableScissor();
         } else {
             l = Mth.clamp(centerX, startX + i / 2, endX - i / 2);
@@ -318,54 +335,88 @@ public interface RenderHandler {
 
     public static void drawScaledText0(
             VDrawContext context,
-            Font textRenderer,
+            TextDrawer textRenderer,
             Component text,
             int startX,
-            int startY,
+            float startY,
             int endX,
-            int endY,
+            float endY,
             int color,
-            int alignment) {
+            TextAlign alignment) {
         drawScaledText0(context, textRenderer, text.getVisualOrderText(), startX, startY, endX, endY, color, alignment);
     }
 
     public static void drawScaledText0(
             VDrawContext context,
-            Font textRenderer,
+            TextDrawer textRenderer,
+            FormattedCharSequence text,
+            int startX,
+            float startY,
+            int endX,
+            float endY,
+            int color,
+            TextAlign alignment) {
+        TextAlign resolvedAlignment = alignment == null ? TextAlign.MIDDLE : alignment;
+        int textStartX = startX;
+        int textEndX = endX;
+        if (resolvedAlignment != TextAlign.MIDDLE) {
+            textStartX += 2;
+            textEndX -= 2;
+        }
+        float i = textRenderer.getWidth(text);
+        int availableWidth = Math.max(0, textEndX - textStartX);
+        // 居中位置
+        float textHeight = textRenderer.getTextHeight();
+        float j = (startY + endY - textHeight) / 2.0F;
+        if (availableWidth > i) {
+            float l =
+                    switch (resolvedAlignment) {
+                        case LEFT -> textStartX;
+                        case RIGHT -> textEndX - i;
+                        case MIDDLE -> (float) (textStartX + textEndX - i + 1) / 2.0F;
+                    };
+            context.getMatrices().pushMatrix();
+            context.getMatrices().translate(l, j);
+            context.drawText(textRenderer, text, 0, 0, color, false);
+            context.getMatrices().popMatrix();
+        } else {
+            float scale = ((float) availableWidth) / (float) i;
+            float scaledHeight = textHeight * scale;
+            float newJ = (startY + endY - scaledHeight) / 2.0F;
+            context.getMatrices().pushMatrix();
+            context.getMatrices().translate(textStartX, newJ);
+            context.getMatrices().scale(scale, scale);
+            context.drawText(textRenderer, text, 0, 0, color, false);
+            context.getMatrices().popMatrix();
+        }
+    }
+
+    public static void drawScrollingText(
+            VDrawContext context,
+            TextDrawer textRenderer,
             FormattedCharSequence text,
             int startX,
             int startY,
             int endX,
             int endY,
             int color,
-            int alignment) {
-        float i = textRenderer.getSplitter().stringWidth(text);
-        int availableWidth = endX - startX;
-        // 居中位置
-        float j = (startY + endY - 9) / 2.0F;
-        if (availableWidth > i) {
-            float l =
-                    switch (alignment) {
-                        case -1 -> startX;
-
-                        case 1 -> endX - i;
-                        // magic, I dont know
-                        default -> (float) (startX + endX - i + 1) / 2.0F;
-                    };
-            context.getMatrices().pushMatrix();
-            context.getMatrices().translate(l, j);
-            context.drawText(textRenderer, text, 0, 0, color, true);
-            context.getMatrices().popMatrix();
-        } else {
-            float scale = ((float) availableWidth) / (float) i;
-            float scaledHeight = 9.0F * scale;
-            float newJ = (startY + endY - scaledHeight) / 2.0F;
-            context.getMatrices().pushMatrix();
-            context.getMatrices().translate(startX, newJ);
-            context.getMatrices().scale(scale, scale);
-            context.drawText(textRenderer, text, 0, 0, color, true);
-            context.getMatrices().popMatrix();
+            TextAlign alignment) {
+        int textWidth = textRenderer.getWidth(text);
+        int availableWidth = Math.max(0, endX - startX - 4);
+        int textY = startY + (int) ((endY - startY - textRenderer.getTextHeight()) / 2) + 1;
+        if (textWidth <= availableWidth) {
+            drawScaledText0(context, textRenderer, text, startX, startY, endX, endY, color, alignment);
+            return;
         }
+
+        int overflow = textWidth - availableWidth;
+        double period = Math.max(overflow * 0.5, 3.0);
+        double phase = (double) Util.getMillis() / 1000.0;
+        int offset =
+                (int) (Math.sin(Math.PI * Math.cos(2.0 * Math.PI * phase / period)) / 2.0 * overflow + overflow / 2.0);
+        context.enableScissor(startX + 2, startY, endX - 2, endY);
+        context.drawText(textRenderer, text, startX + 2 - offset, textY, color, false);
+        context.disableScissor();
     }
 
     public static RenderHandler ofSingleItem(Supplier<ItemStack> item, int x, int y, boolean inSlot) {
@@ -389,7 +440,7 @@ public interface RenderHandler {
             context.getMatrices().pushMatrix();
             context.drawItem(stack, x, y, 114514, 0);
             if (inSlot) {
-                context.drawItemInSlot(mc.font, stack, x, y, null);
+                context.drawItemInSlot(context.getTextDrawer(), stack, x, y, null);
             }
             context.getMatrices().popMatrix();
         }

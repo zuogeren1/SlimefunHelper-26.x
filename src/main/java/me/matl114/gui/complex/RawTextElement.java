@@ -1,6 +1,6 @@
 package me.matl114.gui.complex;
 
-import lombok.Setter;
+import java.util.List;
 import lombok.experimental.Accessors;
 import me.matl114.gui.basic.*;
 import me.matl114.versioned.api.VDrawContext;
@@ -10,38 +10,118 @@ import net.minecraft.util.FormattedCharSequence;
 
 @Accessors(chain = true)
 public class RawTextElement extends AbstractElement {
-    protected final TextProvider text;
+    protected TextProvider text;
 
-    protected final ColorSampler color;
+    protected ColorSampler color;
+    private boolean multiLine;
+    private boolean autoRescale = true;
 
-    @Setter
-    protected int alignment;
+    public RawTextElement setAlignment(TextAlign alignment) {
+        this.text = TextProvider.withAlign(this.text, alignment);
+        return this;
+    }
+
+    public RawTextElement setAutoRescale(boolean autoRescale) {
+        this.autoRescale = autoRescale;
+        return this;
+    }
 
     public static RawTextElement instance(Component text) {
         return new RawTextElement(text, CommonColors.WHITE);
     }
 
     public static RawTextElement instance(TextProvider text) {
-        return new RawTextElement(text, CommonColors.WHITE, 0);
+        return new RawTextElement(text, CommonColors.WHITE);
     }
 
     public RawTextElement(Component text, int color) {
-        this(text, color, 0);
+        this(TextProvider.of(text), color);
     }
 
     public RawTextElement(Component text, int color, int alignment) {
-        this(TextProvider.of(text), color, alignment);
+        this(TextProvider.of(text, TextAlign.fromLegacy(alignment)), color);
     }
 
-    public RawTextElement(TextProvider provider, int color, int alignment) {
-        this(provider, ColorSampler.of(color), alignment);
+    public RawTextElement(Component text, int color, TextAlign alignment) {
+        this(TextProvider.of(text, alignment), color);
     }
 
-    public RawTextElement(TextProvider provider, ColorSampler color, int alignment) {
+    public RawTextElement(TextProvider provider, int color) {
+        this(provider, ColorSampler.of(color));
+    }
+
+    public RawTextElement(TextProvider provider, int color, TextAlign alignment) {
+        this(TextProvider.withAlign(provider, alignment), color);
+    }
+
+    public RawTextElement(TextProvider provider, ColorSampler color) {
+        this(provider, color, false);
+    }
+
+    protected RawTextElement(TextProvider provider, ColorSampler color, boolean multiLine) {
         this.text = provider;
         this.color = color;
+        this.multiLine = multiLine;
+    }
 
-        this.alignment = alignment;
+    public Component getText(DrawableWidget element) {
+        return text.getText(element);
+    }
+
+    public boolean hasText(DrawableWidget element) {
+        return getText(element) != null;
+    }
+
+    public void renderText(DrawableWidget element, VDrawContext context, Component rawText) {
+        if (rawText == null) {
+            return;
+        }
+        float fontHeight = context.getTextDrawer().getTextHeight();
+        float scale = fontHeight > 0 ? Math.max(1, fontHeight) / fontHeight : 1;
+        context.getMatrices().pushMatrix();
+        try {
+            context.getMatrices().scale(scale, scale);
+            renderText(
+                    element,
+                    context,
+                    rawText,
+                    Math.round(element.getTextureWidth() / scale),
+                    Math.round(element.getTextureHeight() / scale));
+        } finally {
+            context.getMatrices().popMatrix();
+        }
+    }
+
+    private void renderText(DrawableWidget element, VDrawContext context, Component rawText, int width, int height) {
+        if (multiLine || rawText.getString().indexOf('\n') >= 0) {
+            renderMultiLine(element, context, rawText, width, height);
+            return;
+        }
+        FormattedCharSequence text1 = rawText.getVisualOrderText();
+        if (!autoRescale) {
+            RenderHandler.drawScrollingText(
+                    context,
+                    context.getTextDrawer(),
+                    text1,
+                    0,
+                    0,
+                    width,
+                    height,
+                    color.getColorInt(),
+                    text.getAlign(element));
+            return;
+        } else {
+            RenderHandler.drawScaledText0(
+                    context,
+                    context.getTextDrawer(),
+                    text1,
+                    0,
+                    0,
+                    width,
+                    height,
+                    color.getColorInt(),
+                    text.getAlign(element));
+        }
     }
 
     @Override
@@ -53,18 +133,35 @@ public class RawTextElement extends AbstractElement {
             float delta,
             float alpha,
             boolean shouldHighlight) {
-        FormattedCharSequence text1 = text.getLabel(element);
-        if (text1 != null) {
+        renderText(element, context, getText(element));
+    }
+
+    private void renderMultiLine(DrawableWidget element, VDrawContext context, Component rawText, int width, int height) {
+        var textDrawer = context.getTextDrawer();
+        List<FormattedCharSequence> lines = textDrawer.wrapLines(rawText, width);
+        int size = lines.size();
+        if (size == 0) {
+            return;
+        }
+        float lineHeight = textDrawer.getTextHeight();
+        float estimated = lineHeight * size;
+        float startY = 0;
+        if (estimated < height) {
+            startY = (height - estimated) / 2;
+        } else {
+            lineHeight = Math.min(lineHeight, height / size);
+        }
+        for (int index = 0; index < size; index++) {
             RenderHandler.drawScaledText0(
                     context,
-                    mc.font,
-                    text1,
+                    textDrawer,
+                    lines.get(index),
                     0,
-                    0,
-                    element.getTextureWidth(),
-                    element.getTextureHeight(),
+                    index * lineHeight + startY,
+                    width,
+                    (index + 1) * lineHeight + startY,
                     color.getColorInt(),
-                    alignment);
+                    text.getAlign(element));
         }
     }
 }

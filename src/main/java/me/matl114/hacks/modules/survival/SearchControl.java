@@ -1,6 +1,5 @@
 package me.matl114.hacks.modules.survival;
 
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -13,7 +12,6 @@ import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.utils.MathUtils;
 import me.matl114.utils.entity.PlayerInputUtils;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.phys.Vec3;
 
 public class SearchControl extends BaseModule {
@@ -46,16 +44,19 @@ public class SearchControl extends BaseModule {
 
     public final DoubleRef rangeSpiral = doubleBuilder(searchControl.add("range-spiral"))
             .defaultValue(32.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
             .show(() -> mode.get().isIn(Mode.SPIRAL))
             .build();
 
     public final DoubleRef rangeRect = doubleBuilder(searchControl.add("range-rect"))
             .defaultValue(192.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
             .show(() -> mode.get().isIn(Mode.RECT))
             .build();
 
     public final DoubleRef rangeCircle = doubleBuilder(searchControl.add("range-circle"))
             .defaultValue(192.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
             .show(() -> mode.get().isIn(Mode.CIRCLE))
             .build();
 
@@ -67,6 +68,7 @@ public class SearchControl extends BaseModule {
 
     public final DoubleRef maxDist = doubleBuilder(searchControl.add("max-distance"))
             .defaultValue(300_000_000.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
             .build();
 
     public final FlagRef outMaxLog =
@@ -108,7 +110,7 @@ public class SearchControl extends BaseModule {
         return this::tickLookRect;
     }
 
-    public void onPreTick(Event<LocalPlayer> event) {
+    public void onPreTick() {
         if (enable.get()) {
             if (currentLookControl == null) {
                 refreshControl();

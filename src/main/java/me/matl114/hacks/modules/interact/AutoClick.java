@@ -1,7 +1,6 @@
 package me.matl114.hacks.modules.interact;
 
 import me.matl114.accessors.hacks.KeyBindAccess;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -30,7 +29,10 @@ public class AutoClick extends BaseModule {
             .defaultValue(true)
             .build();
 
-    public final IntRef cd = intBuilder(root.add("cooldown")).defaultValue(0).build();
+    public final IntRef cd = intBuilder(root.add("cooldown"))
+            .defaultValue(0)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final FlagRef enableLeft = flagBuilder(root.add("left")).build();
 
@@ -48,7 +50,7 @@ public class AutoClick extends BaseModule {
     boolean workLeft;
     boolean workRight;
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (enable.get()) {
             if (cooldown.run(cd.get())) {
                 if (onlyWhenKeyPause.get()) {
@@ -79,7 +81,7 @@ public class AutoClick extends BaseModule {
         }
     }
 
-    public void onPostInputEvent(Event<Void> event) {
+    public void onPostInputEvent() {
         if (workLeft) {
             KeyBindAccess.of(mc.options.keyAttack).resetKeyState();
             workLeft = false;

@@ -14,17 +14,17 @@ import me.matl114.events.RenderListener;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
-import me.matl114.hacks.modules.ac.DisablerManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.QueueMine;
 import me.matl114.hacks.modules.move.PlayerInputManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.WrapColor;
-import me.matl114.hacks.utils.entity.EntityMovementStatus;
 import me.matl114.hacks.utils.enums.BypassMode;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
@@ -177,43 +177,54 @@ public class PrinterRewrite extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
-        registerListener(
-                Listener.getPacketPostHandlePoint().getChannel(ClientboundBlockUpdatePacket.class),
-                this::onBlockUpdate);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onPresetReload);
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
         acceptor.accept(WidgetUtils.withCondition(
-                createTitle("widget.queue-mine.mine.use-argument", 0, dblank, dx, dy),
+                factory.createTitle("widget.queue-mine.mine.use-argument", 0, dblank, dx, dy),
                 () -> supportWater.get() && useIce.get()));
-        acceptor.accept(createTitle("widget.block-rotate.yaw-deceive.use-argument", 0, dblank, dx, dy));
+        acceptor.accept(factory.createTitle("widget.block-rotate.yaw-deceive.use-argument", 0, dblank, dx, dy));
     }
 
     int countDown;
     final RenderCollector<AABB> drawOutlines = RenderCollectors.createBoxCollector(true, false, false);
     boolean needSneak = false;
     boolean drainWater = false;
-    Map<BlockPos, Integer> desyncWaitBlocks = new HashMap<>();
+    Set<BlockPos> desyncWaitBlocks = new HashSet<>();
+    Map<Integer, BlockPos> waterBlocks = new HashMap<>();
 
     public void tickDesyncWaitBlocks() {
-        if (desyncWaitBlocks.isEmpty()) {
-            return;
+        var actionManager = SequencedActionManager.INSTANCE;
+        var blockIter = desyncWaitBlocks.iterator();
+        while (blockIter.hasNext()) {
+            BlockPos pos = blockIter.next();
+            if (!actionManager.isWaitingBlockUseOnResponse(
+                            (useItemOn) -> useItemOn.placingBlockPos().isPresent()
+                                    && Objects.equals(
+                                            useItemOn.placingBlockPos().get(), pos))
+                    && !actionManager.isWaitingBlockResponse(pos)) {
+                blockIter.remove();
+            }
         }
-        int tick = Tasks.getTick();
-        var iter = desyncWaitBlocks.entrySet().iterator();
-        while (iter.hasNext()) {
-            var entry = iter.next();
-            if (entry.getValue() < tick) {
-                iter.remove();
+        var waterIter = waterBlocks.entrySet().iterator();
+        while (waterIter.hasNext()) {
+            var entry = waterIter.next();
+            if (entry.getKey() <= actionManager.getMaxAckSeq()) {
+                waterIter.remove();
             }
         }
     }
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (++countDown >= delay.get()) {
             countDown = 0;
         } else {
@@ -241,7 +252,7 @@ public class PrinterRewrite extends BaseModule {
                                 && !clientState.isAir()
                                 && !clientState.liquid()
                                 && !clientState.canBeReplaced()
-                                && !desyncWaitBlocks.containsKey(checkPos)
+                                && !desyncWaitBlocks.contains(checkPos)
                                 && canBeReplaceTo(clientState, state)) {
                             if (doMultiReplace(checkPos, clientState, state)) {
                                 placeCount++;
@@ -257,7 +268,8 @@ public class PrinterRewrite extends BaseModule {
                                                         || state.getFluidState().getType() == Fluids.WATER))
                                         || (clientState.getBlock() == state.getBlock()
                                                 && clientState.getFluidState() != state.getFluidState()))
-                                && !desyncWaitBlocks.containsKey(checkPos)) {
+                                && !desyncWaitBlocks.contains(checkPos)
+                                && !isWaitingWaterBucketAt(checkPos)) {
                             // fluid state change
                             FluidState fluidState = clientState.getFluidState();
                             FluidState targetState = state.getFluidState();
@@ -295,7 +307,7 @@ public class PrinterRewrite extends BaseModule {
         if (needSneak) {
             needSneak = false;
             if (autoSneak.get()) {
-                PlayerInputManager.INSTANCE.addSneakModifier(0, true, Math.max(delay.get() - 1, 0), 2);
+                PlayerInputManager.INSTANCE.addSneakModifier(0, true, Math.max(delay.get() - 1, 0), 1);
             }
         }
         if (drainWater) {
@@ -369,15 +381,23 @@ public class PrinterRewrite extends BaseModule {
             }
             enableRot.set(BypassMode.NO_BYPASS);
             try {
+                if (!InteractionTasks.canHandleInteract(mode.get(), result.val())) {
+                    putCanNotPlace(pos);
+                    return false;
+                }
                 Runnable callback = InvExtra.INSTANCE.swapItemToHand(idx, false, GhostHandMode.INV_SWAP);
                 if (callback == null) {
                     putCanNotPlace(pos);
                     return false;
                 }
-                handlePlace(result.val());
+                if (!handlePlace(result.val())) {
+                    InteractionTasks.finishInteractGhostHand(mode.get(), callback);
+                    putCanNotPlace(pos);
+                    return false;
+                }
                 // sb grimac
                 if (returnBlock.get()) {
-                    callback.run();
+                    InteractionTasks.finishInteractGhostHand(mode.get(), callback);
                 }
                 putSuccessPlace(pos);
                 return true;
@@ -403,6 +423,8 @@ public class PrinterRewrite extends BaseModule {
         if (useIce.get()
                 && fluidState.getType() == Fluids.WATER
                 && (clientState.isAir() || clientState.liquid() || clientState.canBeReplaced())) {
+            var actionManager = SequencedActionManager.INSTANCE;
+            int previousSequence = actionManager.lastBlockPlace == null ? -1 : actionManager.lastBlockPlace.index();
             if (doPlace(
                     pos,
                     Blocks.ICE.defaultBlockState(),
@@ -418,7 +440,7 @@ public class PrinterRewrite extends BaseModule {
                             0);
                 }
 
-                desyncWaitBlocks.put(pos, Tasks.getTick() + 20);
+                desyncWaitBlocks.add(pos);
                 return true;
             }
         }
@@ -443,13 +465,9 @@ public class PrinterRewrite extends BaseModule {
 
                 Runnable callback = InvExtra.INSTANCE.swapItemToHand(item, false, GhostHandMode.INV_SWAP);
                 if (callback != null) {
-                    EntityMovementStatus<Player> playerStatus = new EntityMovementStatus<>(mc.player);
-                    EntityUtils.setEntityPitchSafe(mc.player, rot.x);
-                    PlayerStateManager.setPlayerYawSafe(mc.player, rot.y);
-                    mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
-                    playerStatus.restoreRotation();
+                    InteractionTasks.interactItem(InteractionHand.MAIN_HAND, rot.x, rot.y, true, swingHand.get());
                     suc = true;
-                    desyncWaitBlocks.put(pos, Tasks.getTick() + 20);
+                    waterBlocks.put(mc.level.getBlockStatePredictionHandler().currentSequenceNr, pos);
                     if (returnBlock.get()) {
                         callback.run();
                     }
@@ -470,6 +488,13 @@ public class PrinterRewrite extends BaseModule {
 
     public boolean canBeReplaceTo(BlockState fromState, BlockState toState) {
         return InteractUtils.canBeReplaceTo(fromState, toState);
+    }
+
+    private boolean isWaitingWaterBucketAt(BlockPos pos) {
+        var actionManager = SequencedActionManager.INSTANCE;
+        return waterBlocks.entrySet().stream()
+                .anyMatch(entry ->
+                        entry.getValue().equals(pos) && actionManager.isWaitingItemUseResponse(entry.getKey()));
     }
 
     private boolean isDesyncStateInteractTransition(BlockState currentState, BlockState targetState) {
@@ -603,15 +628,23 @@ public class PrinterRewrite extends BaseModule {
                     hitResult = new FlagEntry<>(false, InteractionTasks.createHitResult(pos, mc.player.position()));
                 }
                 if (InteractUtils.canInteractAndPlace(mc.player, hitResult)) {
+                    if (!InteractionTasks.canHandleInteract(mode.get(), hitResult.val())) {
+                        putCanNotPlace(pos);
+                        return false;
+                    }
                     Runnable runnable = InvExtra.INSTANCE.swapItemToHand(re.index(), false, GhostHandMode.INV_SWAP);
                     if (runnable != null) {
-                        InteractionTasks.handlePlaceMode(mode.get(), hitResult.val(), InteractionHand.MAIN_HAND);
+                        if (!InteractionTasks.handlePlaceMode(mode.get(), hitResult.val(), InteractionHand.MAIN_HAND)) {
+                            InteractionTasks.finishInteractGhostHand(mode.get(), runnable);
+                            putCanNotPlace(pos);
+                            return false;
+                        }
                         putSuccessPlace(pos);
                         if (isDesyncStateInteractTransition(currentState, targetState)) {
-                            desyncWaitBlocks.put(pos, Tasks.getTick() + 20);
+                            desyncWaitBlocks.add(pos);
                         }
                         if (returnBlock.get()) {
-                            runnable.run();
+                            InteractionTasks.finishInteractGhostHand(mode.get(), runnable);
                         }
                         return true;
                     }
@@ -626,23 +659,14 @@ public class PrinterRewrite extends BaseModule {
         return false;
     }
 
-    private void onBlockUpdate(Event<ClientboundBlockUpdatePacket> event) {
-        if (enable.get() && !desyncWaitBlocks.isEmpty()) {
-            BlockPos pos = event.context.getPos();
-            Integer waitUntil = desyncWaitBlocks.get(pos);
-            if (waitUntil != null) {
-                desyncWaitBlocks.put(pos, Math.min(waitUntil, Tasks.getTick() + 2));
-            }
-        }
-    }
-
     public void tickTryDrainWater() {}
 
-    public void handlePlace(BlockHitResult result) {
+    public boolean handlePlace(BlockHitResult result) {
         if (!mode.get().isLegal()) {
             InteractionTasks.interactBlock(InteractionHand.MAIN_HAND, result, swingHand.get());
+            return true;
         } else {
-            InteractionTasks.handlePlaceMode(mode.get(), result, InteractionHand.MAIN_HAND, swingHand.get());
+            return InteractionTasks.handlePlaceMode(mode.get(), result, InteractionHand.MAIN_HAND, swingHand.get());
         }
     }
 
@@ -651,7 +675,7 @@ public class PrinterRewrite extends BaseModule {
         if (enable.get() && render.get()) {
             RenderUtils.startDrawVirtual(stack);
             try {
-                drawOutlines.render3D(stack);
+                drawOutlines.render3D(stack, event.context().partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(stack);
             }
@@ -659,7 +683,12 @@ public class PrinterRewrite extends BaseModule {
     }
 
     public void onPresetReload(Event<EventContainer<ModulePreset>> event) {
-        mode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
-        airplace.set(!event.context.getValue().hasAC());
+        ModulePreset preset = event.context.getValue();
+        if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (!preset.isOptionPreset()) {
+            mode.set(LegalInteractMode.getFromPreset(preset));
+            airplace.set(!preset.hasAC());
+        }
     }
 }

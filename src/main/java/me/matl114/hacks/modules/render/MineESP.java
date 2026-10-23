@@ -120,7 +120,7 @@ public class MineESP extends BaseModule {
     final RenderCollector<AABB> progressRenderer = RenderCollectors.createBoxCollector(true, true, false);
     final RenderCollector<RenderElements.Text> textRenderer = RenderCollectors.createTextCollector();
 
-    public void onUpdate(Event<LocalPlayer> eventUpdate) {
+    public void onUpdate() {
         textRenderer.clear();
         frameRenderer.clear();
         progressRenderer.clear();
@@ -199,9 +199,9 @@ public class MineESP extends BaseModule {
         if (enable.get()) {
             RenderUtils.startDrawVirtual(event.context.stack());
             try {
-                frameRenderer.render3D(event.context.stack());
-                progressRenderer.render3D(event.context.stack());
-                textRenderer.render3D(event.context.stack());
+                frameRenderer.render3D(event.context.stack(), event.context.partialTicks());
+                progressRenderer.render3D(event.context.stack(), event.context.partialTicks());
+                textRenderer.render3D(event.context.stack(), event.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(event.context.stack());
             }
@@ -452,17 +452,17 @@ public class MineESP extends BaseModule {
 
     private void drawCellProgress(VDrawContext vdraw, double centerX, double centerY, int progressPercentage) {
         String text = progressPercentage + "%";
-        int textWidth = mc.font.width(text);
-        int fontHeight = mc.font.lineHeight;
+        int textWidth = vdraw.getTextDrawer().getWidth(text);
+        float textHeight = vdraw.getTextDrawer().getTextHeight() + 1;
         float maxSize = Math.max(1.0F, gridCellSize.get() - 2.0F);
-        float scale = Math.min(1.0F, Math.min(maxSize / textWidth, maxSize / fontHeight));
+        float scale = Math.min(1.0F, Math.min(maxSize / textWidth, maxSize / textHeight));
         int color = colorProgress.get().withAlpha(255);
 
         vdraw.pushMatrix();
         try {
             vdraw.getMatrices().translate((float) centerX, (float) centerY);
             vdraw.getMatrices().scale(scale, scale);
-            vdraw.drawText(mc.font, text, -textWidth / 2, -fontHeight / 2, color, true);
+            vdraw.drawText(vdraw.getTextDrawer(), text, -textWidth / 2, Math.round(-textHeight / 2.0F), color, false);
         } finally {
             vdraw.popMatrix();
         }

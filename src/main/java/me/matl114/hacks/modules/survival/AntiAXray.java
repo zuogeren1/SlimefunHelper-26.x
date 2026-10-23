@@ -3,7 +3,6 @@ package me.matl114.hacks.modules.survival;
 import java.util.HashSet;
 import java.util.Set;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.MineTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -57,7 +56,7 @@ public class AntiAXray extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch);
+        registerListener(Listener.getPlayerRespawnPoint(), this::clearSimpleDetectionCache);
         registerListener(Listener.getPreGameTick(), this::onTick);
     }
 
@@ -70,15 +69,11 @@ public class AntiAXray extends BaseModule {
     TimerExecutor timer = new TimerExecutor();
     TimerExecutor timerClear = new TimerExecutor();
 
-    public void onTick(Event<LocalPlayer> player) {
+    public void onTick() {
         if (enable.get()) {
             timerClear.run(1200, this::clearSimpleDetectionCache);
             timer.run(20, this::doSimpleDetection);
         }
-    }
-
-    public void onWorldSwitch(Event<Level> event) {
-        clearSimpleDetectionCache();
     }
 
     public void clearSimpleDetectionCache() {

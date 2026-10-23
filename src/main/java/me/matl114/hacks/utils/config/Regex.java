@@ -9,7 +9,6 @@ import lombok.Getter;
 import lombok.experimental.Accessors;
 import me.matl114.gui.Constants;
 import me.matl114.gui.basic.ButtonAction;
-import me.matl114.gui.basic.ExecutableWidget;
 import me.matl114.gui.basic.SubScreenWidget;
 import me.matl114.gui.basic.TooltipHandler;
 import me.matl114.gui.elements.IconElement;
@@ -30,18 +29,23 @@ public class Regex implements NBTParsable<Regex>, Predicate<String> {
             NBTTypes.createComapFlatMap("regex", NBTTypes.STRING_TYPE, WrapperFactory.of(Regex::new, Regex::regex));
 
     static {
-        AttrKeyValue.CustomWidgetGenerator<Regex> regexWidget = TYPE.customWidgetGenerator();
-        AttrKeyValue.CustomWidgetGenerator<Regex> newWidget = (s, x, y, dx, dy) -> {
+        AttrKeyValue.CustomWidgetGenerator<Regex> regexWidget = TYPE.customWidgetFactory();
+        AttrKeyValue.CustomWidgetGenerator<Regex> newWidget = (factory, s, x, y, dx, dy) -> {
             SubScreenWidget subScreenWidget = new SubScreenWidget(x, y, dx, dy);
-            subScreenWidget.addDrawableChild(regexWidget.generateWidget(s, 0, 0, dx - dy, dy));
-            subScreenWidget.addDrawableChild(ExecutableWidget.instance(dx - dy, 0, dy, dy)
-                    .setElementHandler(
-                            IconElement.fixedGui(Constants.SEARCH_TEXTURE_SPRITE, ButtonAction.run(Regex::runHelpRegex))
-                                    .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                            "widget.nbt-parsable.regex.rules.tooltips", "")))));
+            subScreenWidget.addDrawableChild(regexWidget.generateWidget(factory, s, 0, 0, dx - dy, dy));
+            subScreenWidget.addDrawableChild(factory.createElement(
+                    IconElement.fixedGui(Constants.SEARCH_TEXTURE_SPRITE, ButtonAction.run(Regex::runHelpRegex))
+                            .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
+                                    "widget.nbt-parsable.regex.rules.tooltips", ""))),
+                    null,
+                    null,
+                    dx - dy,
+                    0,
+                    dy,
+                    dy));
             return subScreenWidget;
         };
-        TYPE.customWidgetGenerator(newWidget);
+        TYPE.customWidgetFactory(newWidget);
     }
 
     private static final String HELP_URL =

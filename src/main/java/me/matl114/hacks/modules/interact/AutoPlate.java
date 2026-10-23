@@ -13,8 +13,8 @@ import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
-import me.matl114.hacks.modules.ac.DisablerManager;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
@@ -60,11 +60,15 @@ public class AutoPlate extends BaseModule {
 
     public final FlagRef airplace = flagBuilder(autoPlate.add("air-place")).build();
 
-    public final IntRef delay =
-            intBuilder(autoPlate.add("delay")).defaultValue(5).build();
+    public final IntRef delay = intBuilder(autoPlate.add("delay"))
+            .defaultValue(5)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
-    public final IntRef mul =
-            intBuilder(autoPlate.add("multiply")).defaultValue(1).build();
+    public final IntRef mul = intBuilder(autoPlate.add("multiply"))
+            .defaultValue(1)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public final DoubleRef expandRange = doubleBuilder(autoPlate.add("expand-range"))
             .defaultValue(2.0D)
@@ -153,7 +157,7 @@ public class AutoPlate extends BaseModule {
 
     int timer;
 
-    public void onInput(Event<Void> event) {
+    public void onInput() {
         if (checkNull()) return;
         if (enable.get()) {
             if (++timer >= delay.get()) {
@@ -218,17 +222,20 @@ public class AutoPlate extends BaseModule {
                             mc.player.position(), blockHitResult.val().getBlockPos(), range.get())
                     && InteractUtils.getBlockPlacement(state.getBlock(), mc.player, mc.level, blockHitResult.val())
                             != null) {
+                if (!InteractionTasks.canHandleInteract(mode.get(), blockHitResult.val())) break;
                 Runnable runnable = InvExtra.INSTANCE.swapItemToHand(supplyBlock, false, GhostHandMode.INV_SWAP);
                 if (runnable == null) break;
                 stack.add(runnable);
                 if (useBlockRotate.get()) {
                     BlockRotate.INSTANCE.addTempStateSchematic(bp, state);
                 }
-                InteractionTasks.handlePlaceMode(
+                boolean completed = InteractionTasks.handlePlaceMode(
                         mode.get(), blockHitResult.val(), InteractionHand.MAIN_HAND, swingHand.get());
-                mc.level.setBlock(bp, state, WorldUtils.UPDATE_BLOCK_NO_PHYSICS);
+                if (completed) {
+                    mc.level.setBlock(bp, state, WorldUtils.UPDATE_BLOCK_NO_PHYSICS);
+                }
                 cnt += 1;
-                if (cnt >= multiply) {
+                if (!completed || cnt >= multiply) {
                     break;
                 }
             }
@@ -236,7 +243,7 @@ public class AutoPlate extends BaseModule {
         if (returnBlock.get()) {
             int size = stack.size();
             for (var i = size - 1; i >= 0; i--) {
-                stack.get(i).run();
+                InteractionTasks.finishInteractGhostHand(mode.get(), stack.get(i));
             }
         }
     }
@@ -245,7 +252,7 @@ public class AutoPlate extends BaseModule {
         if (enable.get() && render.get()) {
             RenderUtils.startDrawVirtual(eventVDraw.context.stack());
             try {
-                drawOutlines.render3D(eventVDraw.context.stack());
+                drawOutlines.render3D(eventVDraw.context.stack(), eventVDraw.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(eventVDraw.context.stack());
             }
@@ -253,7 +260,12 @@ public class AutoPlate extends BaseModule {
     }
 
     public void onPresetReload(Event<EventContainer<ModulePreset>> event) {
-        mode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
-        airplace.set(!event.context.getValue().hasAC());
+        ModulePreset preset = event.context.getValue();
+        if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (!preset.isOptionPreset()) {
+            mode.set(LegalInteractMode.getFromPreset(preset));
+            airplace.set(!preset.hasAC());
+        }
     }
 }

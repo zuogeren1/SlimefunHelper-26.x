@@ -3,13 +3,14 @@ package me.matl114.hacks.modules.combat;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.CombatTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.DoubleRef;
@@ -18,16 +19,20 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.AttributeUtils;
+import me.matl114.utils.DamageUtils;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeMap;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ShieldItem;
 
 public class AttackAura extends BaseModule {
     public final ModulePath attBot = makePath(Configs.COMBAT_CONFIG, "att-bot");
@@ -57,6 +62,9 @@ public class AttackAura extends BaseModule {
             .defaultValue(true)
             .build();
 
+    public final FlagRef deathPredict =
+            flagBuilder(respectCooldown.add("death-predict")).build();
+
     public final FlagRef cooldownUsePacketTime = builder(respectCooldown.add("packet-time"), Boolean.class)
             .defaultValue(true)
             .build();
@@ -68,6 +76,7 @@ public class AttackAura extends BaseModule {
 
     public final IntRef maxAttackInterval = intBuilder(respectCooldown.add("max-attack-interval"))
             .defaultValue(50)
+            .validator(Configs.INT_NONNEGATIVE)
             .show(this.cooldownUsePacketTime::get)
             .build();
 
@@ -89,9 +98,14 @@ public class AttackAura extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle("widget.attack.attack.use-argument", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle("widget.attack.attack.use-argument", 0, dblank, dx, dy));
     }
 
     private int interval;
@@ -114,26 +128,80 @@ public class AttackAura extends BaseModule {
     }
 
     private boolean isCooldown(Attack.AttackSettings settings, Entity entity) {
+        IndexEntry<ItemStack> currentWeapon = Attack.selectBestWeapon(settings, entity);
+        AttributeMap swapContainer = AttributeUtils.getAttributeWith(
+                mc.player,
+                ServerFeature.INSTANCE.attributeSwap.get()
+                        ? Map.of()
+                        : Map.of(EquipmentSlot.MAINHAND, currentWeapon.val()));
+        double rawAttackDamage = swapContainer.getValue(Attributes.ATTACK_DAMAGE);
+        if (entity instanceof LivingEntity livingEntity
+                && livingEntity.isUsingItem()
+                && livingEntity.getActiveItem().getItem() instanceof ShieldItem
+                && settings.fastBreakShieldSwap().isPresent()
+                && !VItem.getInstance().isAxe(currentWeapon.val())
+                && rawAttackDamage > 10.0D
+                && DamageUtils.getRealAttackDamage(
+                                mc.player,
+                                entity,
+                                currentWeapon.val(),
+                                PlayerStateManager.INSTANCE.fallDistance,
+                                PlayerStateManager.INSTANCE.getTicksSinceLastAttack(),
+                                ServerFeature.INSTANCE.attributeSwap.get())
+                        > 3.1F) {
+            return true;
+        }
         if (cooldownUsePacketTime.get() && Tasks.getTick() - lastArua >= maxAttackInterval.get()) {
             return true;
         }
         int lastTime = cooldownUsePacketTime.get() ? PlayerStateManager.INSTANCE.lastAttackStrengthResetTick : lastArua;
         int strength = Tasks.getTick() - lastTime;
-        IndexEntry<ItemStack> currentWeapon = Attack.selectBestWeapon(settings, entity);
         if (settings.maceSwap()
                 && currentWeapon.val().is(Items.MACE)
                 && PlayerStateManager.INSTANCE.fallDistance > 1.5) {
-            return lastArua + 10 <= Tasks.getTick();
+            if (entity instanceof Player pl) {
+                var re = CombatManager.INSTANCE.getDamageTracker(pl);
+                if (!(re != null && re.getInvulnerabilityTicks() > 0)) {
+                    return true;
+                }
+            } else {
+                if (Tasks.getTick() >= lastArua + 10) {
+                    return true;
+                }
+            }
         }
-        AttributeMap swapContainer =
-                AttributeUtils.getAttributeWith(mc.player, Map.of(EquipmentSlot.MAINHAND, currentWeapon.val()));
+        if (deathPredict.get()
+                && entity instanceof LivingEntity target
+                && canPredictLethalAttack(target)
+                && DamageUtils.getFinalAttackDamageAgainst(
+                                mc.player,
+                                currentWeapon.val(),
+                                DamageUtils.getRealAttackDamage(
+                                        mc.player,
+                                        target,
+                                        currentWeapon.val(),
+                                        PlayerStateManager.INSTANCE.fallDistance,
+                                        PlayerStateManager.INSTANCE.getTicksSinceLastAttack(),
+                                        ServerFeature.INSTANCE.attributeSwap.get()),
+                                DamageUtils.createContext(target))
+                        > target.getHealth() + target.getAbsorptionAmount()) {
+            return true;
+        }
         double attackSpeed = swapContainer.getValue(Attributes.ATTACK_SPEED);
         float perTick = (float) (1.0 / attackSpeed * 20.0);
         float progress = (float) Mth.clamp(((float) strength + 0.5) / perTick, 0.0F, 1.0F);
         return progress >= cooldownProgress.get();
     }
 
-    public void onTick(Event<LocalPlayer> tickEvent) {
+    private boolean canPredictLethalAttack(LivingEntity target) {
+        if (!(target instanceof Player playerTarget)) {
+            return true;
+        }
+        PlayerStateManager.PlayerStatus status = PlayerStateManager.INSTANCE.getPlayerStatus(playerTarget);
+        return status != null && status.visibleStatusEffects.isEmpty();
+    }
+
+    public void onTick() {
         if (mc.player == null) return;
         if (enable.get()) {
             Attack attack = CombatTasks.getAttack();

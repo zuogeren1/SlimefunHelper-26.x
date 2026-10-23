@@ -1,9 +1,12 @@
 package me.matl114.hacks.modules.move;
 
+import java.util.Optional;
 import me.matl114.events.Event;
-import me.matl114.hacks.MovTasks;
+import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.task.MovementManager;
+import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
@@ -13,7 +16,6 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.versioned.api.VPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.phys.Vec3;
@@ -29,11 +31,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
 
     public FloatingUtils() {
         super("FloatingUtils");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         INSTANCE = this;
     }
 
@@ -93,6 +91,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
     @Override
     public void registerAll() {
         super.registerAll();
+        registerListener(Listener.getPreGameTick(), this::onPreGameTick);
     }
 
     @Override
@@ -111,17 +110,16 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
                 || forceFloatingThisTick;
     }
 
-    @Override
-    public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {
+    public void onPreGameTick() {
+        if (checkNull()) return;
         if (!workGrimFloatingThisTick() && enableElytraSlowFall.get()) {
             if (mc.player.isFallFlying() && !mc.player.onGround()) {
                 boolean rotateYaw = Tasks.getTick() % 2 == 0;
-                movementManagerEvent.context.pushImportantRotation(true, rotateYaw);
-                EntityUtils.setEntityPitchSafe(mc.player, 0);
-                if (rotateYaw) {
-                    PlayerStateManager.setPlayerYawSafe(mc.player, mc.player.getYRot() + 180);
-                }
-                movementManagerEvent.context.markForResetRot();
+                RotationManager.INSTANCE.request(RotationManager.ofDirection(
+                                Optional.of(0.0F),
+                                rotateYaw ? Optional.of(mc.player.getYRot() + 180.0F) : Optional.empty())
+                        .applyMoveFix(false)
+                        .priority(0));
             }
         }
     }

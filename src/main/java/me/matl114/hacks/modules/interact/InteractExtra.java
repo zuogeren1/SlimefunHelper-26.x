@@ -7,6 +7,7 @@ import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.utils.RayCastCalculator;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
@@ -23,7 +24,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2i;
 
-public class InteractExtra extends BaseModule {
+public class InteractExtra extends BaseModule implements RayCastCalculator<BlockPos> {
     public final ModulePath interactFix = makePath(Configs.INTERACT_CONFIG, "interact-fix");
     public static InteractExtra INSTANCE;
 
@@ -106,8 +107,10 @@ public class InteractExtra extends BaseModule {
             .defaultValue(false)
             .build();
 
-    public final IntRef holdUseStartTick =
-            intBuilder(interactFix.add("hold-use-start-tick")).defaultValue(4).build();
+    public final IntRef holdUseStartTick = intBuilder(interactFix.add("hold-use-start-tick"))
+            .defaultValue(4)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final FlagRef clientUsingStateFix = builder(interactFix.add("client-using-state-fix"), Boolean.class)
             .defaultValue(true)
@@ -122,6 +125,16 @@ public class InteractExtra extends BaseModule {
     public double getBlockReachDistance() {
         return mc.player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE)
                 + (mc.player.isPassenger() ? ridingReachDistance.get() : reachDistance.get());
+    }
+
+    @Override
+    public AABB getEffectiveBox(BlockPos target) {
+        return new AABB(target);
+    }
+
+    @Override
+    public double getReachDistance(BlockPos val) {
+        return getBlockReachDistance();
     }
 
     private final double[] FALL_FLYING_EYE_HEIGHTS = {0.4D, 1.62D, 1.27D};
@@ -165,23 +178,6 @@ public class InteractExtra extends BaseModule {
             return false;
         }
         return getPotentialEyeHeights(pos).anyMatch(ps -> box.distanceToSqr(ps) < MathUtils.s2(range));
-    }
-
-    public Vec3 getBestInteractEyePos(Vec3 pos, BlockHitResult blockHitResult) {
-        BlockPos blockPos = blockHitResult.getBlockPos();
-        //        Vec3 plateCenter = Vec3.atCenterOf(blockPos).offset(direction, 0.5);
-        //        Vec3 directionVector = Vec3.of(direction.getVector());
-        return getBestInteractEyePos(pos, blockPos);
-    }
-
-    public Vec3 getBestInteractEyePos(Vec3 pos, BlockPos blockPos) {
-        //        Vec3 plateCenter = Vec3.atCenterOf(blockPos).offset(direction, 0.5);
-        //        Vec3 directionVector = Vec3.of(direction.getVector());
-        AABB blockBox = new AABB(blockPos);
-        return getPotentialEyeHeights(pos)
-                .sorted(Comparator.comparingDouble(blockBox::distanceToSqr))
-                .findFirst()
-                .orElseGet(() -> pos.add(mc.player.getEyePosition().subtract(mc.player.position())));
     }
 
     public void onCooldown(Event<Integer> event) {

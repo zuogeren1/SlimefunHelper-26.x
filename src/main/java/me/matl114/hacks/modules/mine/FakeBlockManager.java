@@ -8,6 +8,7 @@ import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.utils.NetworkUtils;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
@@ -31,15 +32,7 @@ public class FakeBlockManager extends BaseModule {
         super.registerAll();
         registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch);
         registerListener(
-                Listener.getPacketPostHandlePoint().getChannel(ClientboundBlockChangedAckPacket.class),
-                this::onBlockACK);
-        registerListener(
-                Listener.getPacketPostHandlePoint().getChannel(ClientboundBlockUpdatePacket.class),
-                this::onBlockUpdate);
-        registerListener(
-                Listener.getPacketPostHandlePoint().getChannel(ClientboundSectionBlocksUpdatePacket.class),
-                this::onChunkDeltaUpdate);
-        registerListener(Listener.getChunkUpdateListener(), this::onChunkUpdate);
+                Listener.getPacketPostHandlePoint().getChannel(ClientboundBlockChangedAckPacket.class), this::onBlockACK);
     }
 
     final Int2ObjectOpenHashMap<BlockPos> fakeMiningBlocks = new Int2ObjectOpenHashMap<>(4);
@@ -97,10 +90,4 @@ public class FakeBlockManager extends BaseModule {
             }
         }
     }
-
-    public void onBlockUpdate(Event<ClientboundBlockUpdatePacket> event) {}
-
-    public void onChunkDeltaUpdate(Event<ClientboundSectionBlocksUpdatePacket> event) {}
-
-    public void onChunkUpdate(Event<ChunkPos> chunkUpdate) {}
 }

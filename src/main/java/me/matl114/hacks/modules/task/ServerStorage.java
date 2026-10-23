@@ -13,12 +13,12 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import lombok.Getter;
 import lombok.With;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.annotations.Broadcast;
 import me.matl114.events.annotations.ExtraArgs;
 import me.matl114.events.channels.EventChannel;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.NBTTypes;
@@ -82,8 +82,13 @@ public class ServerStorage extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
         var pth = path.add("persistent-storage-name-mapper");
         NBTRef<PrimitivePairList<String, String>> ref = new NBTRef<>(new PrimitivePairList<>(
                 "widget.server-storage.ip",
@@ -94,7 +99,7 @@ public class ServerStorage extends BaseModule {
         ref.addUpdateListener(s -> {
             updateServerFolder(serverFolder.withIpToFolder(CollectionUtils.pairListToMap(s.list())));
         });
-        acceptor.accept(createRefEditor(pth.asString(), ref, 0, dblank, dx, dy));
+        acceptor.accept(createRefEditor(pth.asString(), ref, 0, dblank, dx, dy, factory));
         var pth2 = path.add("ip-proxies");
         NBTRef<PrimitivePairList<String, String>> ref2 = new NBTRef<>(new PrimitivePairList<>(
                 "widget.server-storage.proxy",
@@ -104,7 +109,7 @@ public class ServerStorage extends BaseModule {
                 CollectionUtils.mapToPairList(serverFolder.ipProxy())));
         ref2.addUpdateListener(
                 s -> updateServerFolder(serverFolder.withIpProxy(CollectionUtils.pairListToMap(s.list()))));
-        acceptor.accept(createRefEditor(pth2.asString(), ref2, 0, dblank, dx, dy));
+        acceptor.accept(createRefEditor(pth2.asString(), ref2, 0, dblank, dx, dy, factory));
     }
 
     public String getSaveId(String ip) {
@@ -380,17 +385,17 @@ public class ServerStorage extends BaseModule {
         }
     }
 
-    public void onGameJoin(Event<LocalPlayer> eventPlayerEntity) {
+    public void onGameJoin() {
         if (updateServerName()) {
             onLoadStorage();
         }
     }
 
-    public void onGameSwitchWorld(Event<Level> event) {
+    public void onGameSwitchWorld() {
         processAsyncUpdateMapSnapshot(null);
     }
 
-    public void onGameLeave(Event<Void> eventVoid) {
+    public void onGameLeave() {
         processAsyncUpdateMapSnapshot(null);
         RegistryAccess registry = mc.getConnection().registryAccess();
         CompletableFuture.runAsync(() -> onSave(registry));

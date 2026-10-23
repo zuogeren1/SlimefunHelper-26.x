@@ -1,5 +1,6 @@
 package me.matl114.gui.complex.config;
 
+import me.matl114.gui.Constants;
 import me.matl114.utils.ClientUtils;
 
 import java.util.List;
@@ -42,8 +43,8 @@ public class ConfigurateNewStyleScreen extends IndexedScreen<Config, ConfigureLi
         return new ButtonElement(TextProvider.of(Component.literal(val.getConfigName())), ButtonAction.run(() -> {
                     this.setGlobal(val);
                 }))
-                .setInactiveId(ButtonElement.BUTTON)
-                .setActiveId(ButtonElement.BUTTON_HIGHLIGHT)
+                .setInactiveId(Constants.BUTTON_SPRITE)
+                .setActiveId(Constants.BUTTON_HIGHLIGHT_SPRITE)
                 .setActivePredicate((el) -> getGlobal() == val);
     }
 

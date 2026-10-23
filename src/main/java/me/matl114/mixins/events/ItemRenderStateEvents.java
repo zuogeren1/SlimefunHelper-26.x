@@ -45,6 +45,11 @@ public abstract class ItemRenderStateEvents implements ItemRenderStateAccess {
         }
     }
 
+    @Override
+    public void setDisplayContext(ItemDisplayContext displayContext) {
+        this.displayContext = displayContext;
+    }
+
     @Inject(method = "submit", at = @At("RETURN"))
     private void onRender1(
             PoseStack matrices,

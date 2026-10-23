@@ -46,8 +46,9 @@ public record ContainerPosition(ResourceKey<Level> world, int doubleX, int y, in
 
     public boolean isInRenderRange(BlockLocation location, double distance) {
         if (Objects.equals(location.world(), world)) {
-            return MathUtils.s2(doubleX - 2 * location.x()) + MathUtils.s2(doubleZ - 2 * location.z())
-                    <= MathUtils.s2(distance) * 4;
+            return MathUtils.s2((double) (doubleX - 2 * location.x()))
+                            + MathUtils.s2((double) (doubleZ - 2 * location.z()))
+                    <= MathUtils.s2(distance) * 4.0D;
         } else {
             return false;
         }

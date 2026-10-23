@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import java.util.function.Consumer;
 import me.matl114.accessors.events.ClientConnectionAccess;
 import me.matl114.utils.DamageUtils;
+import me.matl114.utils.InventoryUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.RemotePlayer;
@@ -33,7 +34,7 @@ public class FakePlayerEntity extends RemotePlayer {
     }
 
     public void copyEquipmentFrom(Player player) {
-        getInventory().replaceWith(player.getInventory());
+        InventoryUtils.copyInventory(player.getInventory(), getInventory());
     }
 
     public void setFreeze(boolean freeze) {
@@ -57,7 +58,7 @@ public class FakePlayerEntity extends RemotePlayer {
         if (rawDamage <= 0.0F) {
             return 0.0F;
         }
-        rawDamage = DamageUtils.getDamageAfterArmorReduce(rawDamage, damageSource, context);
+        rawDamage = DamageUtils.getDamageAfterArmorReduce(rawDamage, null, damageSource, context);
         if (rawDamage <= 0.0F) {
             return 0.0F;
         }

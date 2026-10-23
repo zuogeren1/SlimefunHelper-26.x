@@ -1,5 +1,6 @@
 package me.matl114.hacks.modules.combat;
 
+import com.google.common.util.concurrent.Runnables;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.PacketManager;
@@ -58,13 +59,15 @@ public class TransactionBlocker extends BaseModule {
     }
 
     public void flush() {
-        PacketManager.flushOutBound((packet) -> {
-            if (isTransactionRelated(packet.packetType())) {
-                return PacketManager.FlushAction.DROP;
-            } else {
-                return PacketManager.FlushAction.QUEUE;
-            }
-        });
+        PacketManager.flushOutBound(
+                (packet) -> {
+                    if (isTransactionRelated(packet.packetType())) {
+                        return PacketManager.FlushAction.DROP;
+                    } else {
+                        return PacketManager.FlushAction.QUEUE;
+                    }
+                },
+                Runnables.doNothing());
     }
 
     public boolean isTransactionRelated(Packet<?> packet) {
@@ -75,7 +78,7 @@ public class TransactionBlocker extends BaseModule {
         return packet == CommonPacketTypes.CLIENTBOUND_PING || packet == CommonPacketTypes.SERVERBOUND_PONG;
     }
 
-    public void onPacketQueue(Event<PacketStorage> packetEvent) {
+    public void onPacketQueue(Event<PacketStorage.Send> packetEvent) {
         if (enable.get() && isTransactionRelated(packetEvent.context.packetType())) {
             packetEvent.cancel();
             Listener.sendPacketNoEvents(new ServerboundPongPacket(0));
@@ -103,7 +106,7 @@ public class TransactionBlocker extends BaseModule {
         }
     }
 
-    public void onPlayerRespawnLook(Event<ClientboundPlayerPositionPacket> event) {
+    public void onPlayerRespawnLook() {
         if (enableC.get() && mc.player != null && mc.player.getAbilities().flying) {
             Debug.chat("Start");
             enable.set(true);

@@ -11,8 +11,8 @@ import java.util.function.Function;
 import me.matl114.gui.Constants;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.*;
-import me.matl114.gui.elements.ButtonElement;
 import me.matl114.gui.elements.IconElement;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.gui.presets.single.CenterScreen;
 import me.matl114.managers.config.*;
 import me.matl114.utils.ChatUtils;
@@ -57,7 +57,7 @@ public class RecordData implements NBTParsable<RecordData> {
         return new MutableRecord(recordMap.keySet().stream().toList(), new LinkedHashMap<>(recordMap));
     }
 
-    private static void openEditorScreen(AttrKeyValue<RecordData> keyValue) {
+    private static void openEditorScreen(AttrKeyValue<RecordData> keyValue, ElementFactory factory) {
         MutableRecord record = keyValue.get().toMutable();
         DrawableWidget widget = WidgetUtils.createMutableRecordEditScreen(
                 Component.translatable("widget.nbt-parsable.record-data.edit-screen.title"),
@@ -65,7 +65,7 @@ public class RecordData implements NBTParsable<RecordData> {
                 record,
                 Function.identity(),
                 WidgetUtils.DEFAULT_CONFIG_SCREEN_LAYOUT,
-                WidgetUtils.DEFAULT_PALETTE);
+                factory);
         CenterScreen newScreen = new CenterScreen(widget);
         newScreen.access().addCloseFuture(() -> {
             keyValue.accept(new RecordData(record.toOrderedMap()));
@@ -81,35 +81,45 @@ public class RecordData implements NBTParsable<RecordData> {
                                     Refs.CODEC.fieldOf("value").forGetter(Pair::getSecond))
                             .apply(oinstance, Pair::new)))
                     .<RecordData>xmap(RecordData::fromRefs, RecordData::toRefs),
-            (custom, x, y, dx, dy) -> {
+            (factory, custom, x, y, dx, dy) -> {
                 SubScreenWidget widget = new SubScreenWidget(x, y, dx, dy);
                 int size = custom.get().map().size();
                 if (size > 0) {
                     int dxx = dx > 2 * dy ? dx - dy : dx;
-                    widget.addDrawableChild(ExecutableWidget.instance(0, 0, dxx, dy)
-                            .setElementHandler(new ButtonElement(
-                                            TextProvider.of(Component.translatable(
-                                                    "widget.nbt-parsable.record-data.open-edit-screen")),
-                                            ButtonAction.run(() -> openEditorScreen(custom)))
-                                    .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                            "widget.nbt-parsable.record-data.open-edit-screen.tooltips", "")))));
+                    widget.addDrawableChild(factory.createExecuteButton(
+                            () -> Component.translatable("widget.nbt-parsable.record-data.open-edit-screen"),
+                            () -> ChatUtils.parseTooltipsTranslation(
+                                    "widget.nbt-parsable.record-data.open-edit-screen.tooltips", ""),
+                            ButtonAction.run(() -> openEditorScreen(custom, factory)),
+                            0,
+                            0,
+                            dxx,
+                            dy));
                     if (dxx < dx) {
-                        widget.addDrawableChild(ExecutableWidget.instance(dxx, 0, dx - dxx, dy)
-                                .setElementHandler(IconElement.fixedGui(
+                        widget.addDrawableChild(factory.createElement(
+                                IconElement.fixedGui(
                                                 Constants.EDITOR_SPRITE,
-                                                ButtonAction.run(() -> openEditorScreen(custom)))
+                                                ButtonAction.run(() -> openEditorScreen(custom, factory)))
                                         .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                                "widget.nbt-parsable.record-data.open-edit-screen.tooltips", "")))));
+                                                "widget.nbt-parsable.record-data.open-edit-screen.tooltips", ""))),
+                                null,
+                                null,
+                                dxx,
+                                0,
+                                dx - dxx,
+                                dy));
                     }
 
                 } else {
-                    widget.addDrawableChild(ExecutableWidget.instance(0, 0, dx, dy)
-                            .setElementHandler(new ButtonElement(
-                                            TextProvider.of(Component.translatable(
-                                                    "widget.nbt-parsable.record-data.no-editable-field")),
-                                            ButtonAction.empty())
-                                    .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                            "widget.nbt-parsable.record-data.no-editable-field.tooltips", "")))));
+                    widget.addDrawableChild(factory.createExecuteButton(
+                            () -> Component.translatable("widget.nbt-parsable.record-data.no-editable-field"),
+                            () -> ChatUtils.parseTooltipsTranslation(
+                                    "widget.nbt-parsable.record-data.no-editable-field.tooltips", ""),
+                            ButtonAction.empty(),
+                            0,
+                            0,
+                            dx,
+                            dy));
                 }
 
                 return widget;

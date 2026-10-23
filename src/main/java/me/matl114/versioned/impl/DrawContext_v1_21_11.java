@@ -3,10 +3,15 @@ package me.matl114.versioned.impl;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.*;
+import me.matl114.renderer.TextRenderers;
+import me.matl114.renderer.text.ResourceFontTextDrawer;
+import me.matl114.renderer.text.TextDrawer;
+import me.matl114.renderer.text.VanillaTextDrawer;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.versioned.accessors.GuiRendererStateAccess;
 import me.matl114.versioned.api.MatrixStack;
 import me.matl114.versioned.api.VDrawContext;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
@@ -16,6 +21,7 @@ import net.minecraft.client.gui.screens.inventory.tooltip.DefaultTooltipPosition
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.state.gui.GuiElementRenderState;
 import net.minecraft.client.renderer.state.gui.GuiRenderState;
+import net.minecraft.client.renderer.state.gui.GuiTextRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -184,13 +190,71 @@ public class DrawContext_v1_21_11 implements VDrawContext {
     }
 
     @Override
-    public void drawText(Font textRenderer, FormattedCharSequence text, int x, int y, int color, boolean shadow) {
-        drawContext.text(textRenderer, text, x, y, getShaderRGB(color), shadow);
+    public void drawText(TextDrawer textDrawer, FormattedCharSequence text, int x, int y, int color, boolean shadow) {
+        TextDrawer current = TextRenderers.resolve(textDrawer);
+        if (current.getClass() == VanillaTextDrawer.class) {
+            drawContext.text(((VanillaTextDrawer) current).unwrap(), text, x, y, getShaderRGB(color), shadow);
+        } else if (current instanceof ResourceFontTextDrawer resourceFontTextDrawer) {
+            addTextState(
+                    resourceFontTextDrawer.unwrap(),
+                    resourceFontTextDrawer.withFont(text),
+                    x,
+                    y,
+                    getShaderRGB(color),
+                    shadow,
+                    resourceFontTextDrawer.getTextYOffset());
+        } else {
+            drawContext.text(fontOf(current), text, x, y, getShaderRGB(color), shadow);
+        }
     }
 
     @Override
-    public void drawText(Font textRenderer, @Nullable String text, int x, int y, int color, boolean shadow) {
-        drawContext.text(textRenderer, text, x, y, getShaderRGB(color), shadow);
+    public void drawText(TextDrawer textDrawer, @Nullable String text, int x, int y, int color, boolean shadow) {
+        if (text == null) {
+            return;
+        }
+        TextDrawer current = TextRenderers.resolve(textDrawer);
+        if (current.getClass() == VanillaTextDrawer.class) {
+            drawContext.text(((VanillaTextDrawer) current).unwrap(), text, x, y, getShaderRGB(color), shadow);
+        } else if (current instanceof ResourceFontTextDrawer resourceFontTextDrawer) {
+            addTextState(
+                    resourceFontTextDrawer.unwrap(),
+                    resourceFontTextDrawer.formattedString(text, true),
+                    x,
+                    y,
+                    getShaderRGB(color),
+                    shadow,
+                    resourceFontTextDrawer.getTextYOffset());
+        } else {
+            drawContext.text(fontOf(current), text, x, y, getShaderRGB(color), shadow);
+        }
+    }
+
+    private static Font fontOf(TextDrawer textDrawer) {
+        Font font = textDrawer.unwrap();
+        return font != null ? font : Minecraft.getInstance().font;
+    }
+
+    /**
+     * 自定义字体没法走原版 {@code text} 提交，只能自己塞一条文字渲染状态；
+     * {@code yOffset} 用来把非 9px 字体的行高校正回原版基线。
+     */
+    private void addTextState(
+            Font font, FormattedCharSequence text, int x, int y, int color, boolean shadow, float yOffset) {
+        if (ARGB.alpha(color) == 0) {
+            return;
+        }
+        drawContext.guiRenderState.addText(new GuiTextRenderState(
+                font,
+                text,
+                new Matrix3x2f(this.drawContext.pose()).translate(0.0F, yOffset),
+                x,
+                y,
+                color,
+                0,
+                shadow,
+                false,
+                this.drawContext.scissorStack.peek()));
     }
 
     @Override
@@ -413,7 +477,7 @@ public class DrawContext_v1_21_11 implements VDrawContext {
     }
 
     @Override
-    public void drawTooltip(Font textRenderer, List<Component> text, Optional<TooltipComponent> data, int x, int y) {
+    public void drawTooltip(List<Component> text, Optional<TooltipComponent> data, int x, int y) {
         var trans = matrixStack.peek3D();
         var point1 = new Vector4f(x, y, 0, 1).mul(trans);
         // Tooltips are draw in delay callback, so transfer before the call
@@ -427,7 +491,12 @@ public class DrawContext_v1_21_11 implements VDrawContext {
         if (!list.isEmpty()) {
             addInternal(() -> {
                 drawContext.tooltip(
-                        textRenderer, list, (int) point1.x, (int) point1.y, DefaultTooltipPositioner.INSTANCE, null);
+                        fontOf(TextRenderers.get()),
+                        list,
+                        (int) point1.x,
+                        (int) point1.y,
+                        DefaultTooltipPositioner.INSTANCE,
+                        null);
             });
         }
     }
@@ -447,7 +516,7 @@ public class DrawContext_v1_21_11 implements VDrawContext {
     }
 
     @Override
-    public void drawItemInSlot(Font textRenderer, ItemStack stack, int x, int y, @Nullable String countOverride) {
-        this.drawContext.itemDecorations(textRenderer, stack, x, y, countOverride);
+    public void drawItemInSlot(TextDrawer textDrawer, ItemStack stack, int x, int y, @Nullable String countOverride) {
+        this.drawContext.itemDecorations(fontOf(textDrawer), stack, x, y, countOverride);
     }
 }

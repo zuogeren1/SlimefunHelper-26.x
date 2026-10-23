@@ -19,8 +19,10 @@ import me.matl114.hacks.RenderTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
+import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
@@ -28,6 +30,7 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.*;
 import me.matl114.utils.*;
+import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.*;
 import net.minecraft.network.chat.Component;
@@ -49,11 +52,7 @@ public class SpearAttack extends BaseModule implements LegalMovementManager.Move
 
     public SpearAttack() {
         super("SpearAttack");
-        if (INSTANCE == null) {
-            INSTANCE = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> INSTANCE);
-        }
-        INSTANCE.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         bindFlag(enable);
     }
 
@@ -73,10 +72,12 @@ public class SpearAttack extends BaseModule implements LegalMovementManager.Move
 
     public final DoubleRef spearDistance = builder(spearModule.add("spear-motion-simulation"), DoubleRef.TYPE)
             .defaultValue(50.0D)
+            .validator(Configs.doubleRange(-200.0D, 200.0D))
             .build();
 
     public final DoubleRef spearMaxTp = builder(spearModule.add("spear-max-tp"), DoubleRef.TYPE)
             .defaultValue(100.0D)
+            .validator(Configs.doubleRange(-200.0D, 200.0D))
             .build();
 
     public final FlagRef spearRender =
@@ -90,6 +91,7 @@ public class SpearAttack extends BaseModule implements LegalMovementManager.Move
     @Override
     public void registerAll() {
         super.registerAll();
+        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::renderPlayerSpearTarget);
         registerListener(
                 Listener.getPacketPoint().getChannel(ServerboundClientTickEndPacket.class), this::onClientTickEnd);
@@ -136,11 +138,6 @@ public class SpearAttack extends BaseModule implements LegalMovementManager.Move
                 .predict(target); // .predictAttackPosition(target);
         Vec3 direction =
                 targetPos.add(0, target.getEyeHeight(target.getPose()), 0).subtract(mc.player.getEyePosition());
-        if (RenderTasks.DEBUG_RENDER_SPEAR) {
-            RenderTasks.registerVirtualRenderTask(new RenderTasks.RenderTask(
-                    RenderTasks.DEBUG_TICK,
-                    new RenderTasks.LineObject(mc.player.getEyePosition(), direction).color(Color.MAGENTA)));
-        }
         double distance = direction.length();
         direction = direction.normalize();
         Vec3 tpDirection = direction.scale(-1);
@@ -229,36 +226,32 @@ public class SpearAttack extends BaseModule implements LegalMovementManager.Move
     int currentWaitBackTick = 0;
 
     private void renderPlayerSpearTarget(Event<Render3D> event) {
-        if (!enable.get()) return;
-        //        if (RenderTasks.DEBUG_RENDER_SPEAR) {
-        //            onSpearAttackRender(event);
-        //        }
-        PoseStack stack = event.context().stack();
-        float tickDelta = event.context.partialTicks();
-        if (spearRender.get()) {
-            RenderUtils.startDrawVirtual(stack);
-            try {
-                if (canSpearAttack()) {
-                    Entity spearEntity = CombatTasks.getTargetSelector()
-                            .searchAttackEntity(spearDistance.get(), false, SpearAttack::isSpearable);
-                    if (spearEntity != null) {
-                        float dist = spearEntity.distanceTo(mc.player);
-                        float opacity = Math.min(0.6F, 0.10F + dist * 0.02F);
-                        AABB box = RenderUtils.getLerpedBox(spearEntity, tickDelta);
-                        RenderUtils.drawSolidBox(
-                                stack,
-                                box.getMinPosition(),
-                                box.getMaxPosition(),
-                                ColorUtils.withAlpha(Color.GREEN, opacity));
-                    }
-                }
-            } finally {
-                RenderUtils.stopDrawVirtual(stack);
-            }
+        if (!enable.get() || !spearRender.get()) return;
+        RenderUtils.startDrawVirtual(event.context().stack());
+        try {
+            targetCollector.render3D(event.context().stack(), event.context().partialTicks());
+        } finally {
+            RenderUtils.stopDrawVirtual(event.context().stack());
         }
     }
 
-    //    private void drawPlayerUseSpearTick(LivingEntity entity, MatrixStack stack) {
+    private void updateRenderCollector() {
+        targetCollector.clear();
+        if (!enable.get() || !spearRender.get() || !canSpearAttack()) return;
+        Entity spearEntity = CombatTasks.getTargetSelector()
+                .searchAttackEntity(spearDistance.get(), false, SpearAttack::isSpearable);
+        if (spearEntity != null) {
+            float dist = spearEntity.distanceTo(mc.player);
+            float opacity = Math.min(0.6F, 0.10F + dist * 0.02F);
+            targetCollector.submit(
+                    spearEntity, ColorUtils.withAlpha(Color.GREEN, opacity).getRGB());
+        }
+    }
+
+    private final RenderCollector<Entity> targetCollector =
+            RenderCollectors.createEntityBoxCollector(false, true, false);
+
+    //    private void drawPlayerUseSpearTick(LivingEntity entity, PoseStack stack) {
     //        AttackRangeComponent attackRange = entity.getAttackRange();
     //        Vec3d startEye = entity.getEyePos();
     //        Vec3d direction = entity.getHeadRotationVector();
@@ -419,6 +412,7 @@ public class SpearAttack extends BaseModule implements LegalMovementManager.Move
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        if (event.context().getValue().isOptionPreset()) return;
         ModulePreset preset = event.context().getValue();
         switch (preset) {
             case HACKING, VANILLA -> {

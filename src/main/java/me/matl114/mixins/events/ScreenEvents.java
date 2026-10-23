@@ -10,10 +10,14 @@ import lombok.Setter;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.accessors.interfaces.MetadataHolder;
 import me.matl114.events.Listener;
+import me.matl114.events.RenderListener;
+import me.matl114.events.impl.RenderScreen;
 import me.matl114.gui.basic.DisplayWidget;
+import me.matl114.versioned.api.VDrawContext;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.components.events.AbstractContainerEventHandler;
 import net.minecraft.client.gui.components.events.GuiEventListener;
@@ -193,4 +197,73 @@ public abstract class ScreenEvents extends AbstractContainerEventHandler impleme
             parent = null;
         }
     }
+
+    @Inject(
+            method = "extractRenderStateWithTooltipAndSubtitles",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/client/gui/screens/Screen;extractBackground(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V",
+                            shift = At.Shift.BEFORE),
+            cancellable = true)
+    private void onRenderPre(
+            GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
+        if (!RenderListener.getRenderScreen()
+                .fireEvent(new RenderScreen(
+                        VDrawContext.of(context),
+                        (Screen) (Object) this,
+                        RenderScreen.Stage.PRE,
+                        mouseX,
+                        mouseY,
+                        deltaTicks))) {
+            ci.cancel();
+        }
+    }
+
+    @Inject(
+            method = "extractRenderStateWithTooltipAndSubtitles",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/client/gui/screens/Screen;extractRenderState(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V",
+                            shift = At.Shift.BEFORE),
+            cancellable = true)
+    private void onRenderMid(
+            GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
+        if (!RenderListener.getRenderScreen()
+                .fireEvent(new RenderScreen(
+                        VDrawContext.of(context),
+                        (Screen) (Object) this,
+                        RenderScreen.Stage.MID,
+                        mouseX,
+                        mouseY,
+                        deltaTicks))) {
+            ci.cancel();
+        }
+    }
+
+    @Inject(
+            method = "extractRenderStateWithTooltipAndSubtitles",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lnet/minecraft/client/gui/GuiGraphicsExtractor;extractDeferredElements(IIF)V",
+                            shift = At.Shift.BEFORE),
+            cancellable = true)
+    private void onRenderPost(
+            GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks, CallbackInfo ci) {
+        if (!RenderListener.getRenderScreen()
+                .fireEvent(new RenderScreen(
+                        VDrawContext.of(context),
+                        (Screen) (Object) this,
+                        RenderScreen.Stage.POST,
+                        mouseX,
+                        mouseY,
+                        deltaTicks))) {
+            ci.cancel();
+        }
+    }
 }
+

@@ -3,6 +3,7 @@ package me.matl114.gui.elements;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import me.matl114.gui.basic.*;
+import me.matl114.plugins.MainPlugin;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.resources.Identifier;
@@ -16,16 +17,19 @@ public class SlotElement extends AbstractElement {
     final Container inventory;
     final int index;
     final SlotClickCallback callback;
-
-    protected static final Identifier SLOT_RESOURCE =
-            new Identifier("slimefunhelper", "textures/custom/recipecontainer.png");
+    protected final ColorSampler color;
+    protected static final Identifier SLOT_RESOURCE = MainPlugin.identifier("textures/custom/recipecontainer.png");
     protected static final int u0 = 0;
     protected static final int v0 = 222;
     protected static final int vheight = 18;
     protected static final int uheight = 18;
 
     public SlotElement(ItemStack itemStack) {
-        this(new SimpleContainer(itemStack), 0);
+        this(new SimpleContainer(itemStack), 0, ColorSampler.WHITE);
+    }
+
+    public SlotElement(ItemStack itemStack, ColorSampler sampler) {
+        this(new SimpleContainer(itemStack), 0, sampler);
     }
 
     public static SlotElement instance(ItemStack itemStack) {
@@ -37,7 +41,7 @@ public class SlotElement extends AbstractElement {
     }
 
     public SlotElement(ItemStack itemStack, SlotClickCallback callback) {
-        this(new SimpleContainer(itemStack), 0, callback);
+        this(new SimpleContainer(itemStack), 0, ColorSampler.WHITE, callback);
     }
 
     public SlotElement(Supplier<ItemStack> sup) {
@@ -45,21 +49,35 @@ public class SlotElement extends AbstractElement {
     }
 
     public SlotElement(Container inventory) {
-        this(inventory, 0, SlotClickCallback.DEFAULT);
+        this(inventory, 0, ColorSampler.WHITE, SlotClickCallback.DEFAULT);
     }
 
     public SlotElement(Container inventory, int index) {
-        this(inventory, index, SlotClickCallback.DEFAULT);
+        this(inventory, index, ColorSampler.WHITE, SlotClickCallback.DEFAULT);
+    }
+
+    public SlotElement(Container inventory, int index, ColorSampler color) {
+        this(inventory, index, color, SlotClickCallback.DEFAULT);
     }
 
     public SlotElement(Container inventory, int index, SlotClickCallback callback) {
+        this(inventory, index, ColorSampler.WHITE, callback);
+    }
+
+    public SlotElement(Container inventory, int index, ColorSampler color, SlotClickCallback callback) {
         this.inventory = inventory;
         this.index = index;
         this.callback = callback;
+        this.color = color;
     }
 
     protected void renderSlotFrame(VDrawContext context) {
-        context.drawTexture(SLOT_RESOURCE, 0, 0, u0, v0, uheight, vheight);
+        context.setShaderColor(this.color.getColorInt());
+        try {
+            context.drawTexture(SLOT_RESOURCE, 0, 0, u0, v0, uheight, vheight);
+        } finally {
+            context.setShaderColor(-1);
+        }
     }
 
     @Override

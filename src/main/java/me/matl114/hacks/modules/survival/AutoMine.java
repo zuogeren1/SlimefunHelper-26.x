@@ -38,8 +38,8 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.utils.AttributeUtils;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.utils.AttributeUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.ItemStackUtils;
 import me.matl114.utils.MathUtils;
@@ -127,11 +127,15 @@ public class AutoMine extends BaseModule {
             .validator(Configs.INT_POSITIVE)
             .build();
 
-    public final DoubleRef collectEnterDistance =
-            doubleBuilder(root.add("collect-enter-distance")).defaultValue(8.0).build();
+    public final DoubleRef collectEnterDistance = doubleBuilder(root.add("collect-enter-distance"))
+            .defaultValue(8.0)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
+            .build();
 
-    public final DoubleRef collectSearchRadius =
-            doubleBuilder(root.add("collect-search-radius")).defaultValue(8.0).build();
+    public final DoubleRef collectSearchRadius = doubleBuilder(root.add("collect-search-radius"))
+            .defaultValue(8.0)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
+            .build();
 
     public final FlagRef mineDuringCollect =
             flagBuilder(root.add("mine-during-collect")).defaultValue(true).build();
@@ -185,7 +189,7 @@ public class AutoMine extends BaseModule {
         pathingSchedular.disable();
     }
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (checkNull() || !enable.get()) {
             return;
         }
@@ -561,7 +565,6 @@ public class AutoMine extends BaseModule {
                 }
             }
             InvExtra.INSTANCE.swapItemToHand(bestStack.index(), false, GhostHandMode.INV_SWAP);
-            AttributeUtils.updateAttribute(mc.player);
             float speed = MineExtra.INSTANCE.predictBlockBreakingSpeedAt(lastMinePos);
             tryMine += 1;
             Vec3 shouldFacing = Vec3.atCenterOf(lastMinePos).subtract(mc.player.getEyePosition());

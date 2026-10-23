@@ -11,10 +11,15 @@ import net.minecraft.client.Options;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.game.GamePacketTypes;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
+import net.minecraft.world.phys.Vec2;
 
 public class PlayerInputUtils {
     public static Input of(LocalPlayer player) {
         return new Input(player.input.keyPresses);
+    }
+
+    public static Input of(net.minecraft.client.player.ClientInput input) {
+        return new Input(input.keyPresses);
     }
 
     public static Input of(net.minecraft.world.entity.player.Input input) {
@@ -188,9 +193,21 @@ public class PlayerInputUtils {
             return this;
         }
 
-        protected Input applyInput(net.minecraft.client.player.ClientInput input) {
+        public Input applyInput(net.minecraft.client.player.ClientInput input) {
             input.keyPresses = toPlayerInput();
             return this;
+        }
+
+        private static Vec2 compatMovementVectorWithViaFabric(Vec2 vec2f) {
+            // shit,
+            return ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(21, 4)
+                    ? vec2f
+                    : vec2f.normalized();
+        }
+
+        public void syncMovementVector(net.minecraft.client.player.ClientInput input, float iqBoost) {
+            input.moveVector =
+                    compatMovementVectorWithViaFabric(new Vec2(this.sidewaysSpeed(), this.forwardSpeed()));
         }
 
         public Input applyInput(Options options) {

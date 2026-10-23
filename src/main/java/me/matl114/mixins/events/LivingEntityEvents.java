@@ -105,9 +105,7 @@ public abstract class LivingEntityEvents extends Entity
             Event<Integer> jumpEvent = new Event<>(10, true, true);
             Listener.getPlayerNotFlyJumpPoint().handleValue(jumpEvent);
             nextJumpCooldown = jumpEvent.context();
-            if (jumpEvent.isCancelled()) {
-
-            } else {
+            if (!jumpEvent.isCancelled()) {
                 original.call(instance);
             }
         } else {
@@ -191,7 +189,8 @@ public abstract class LivingEntityEvents extends Entity
             }
             tickEquipment();
 
-            if (ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)) {
+            if (checkClientPlayer()
+                    && ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)) {
                 AttributeUtils.overrideViaAttributes(getClientLastEquipmentSnapshot(), this.getAttributes());
             }
         }

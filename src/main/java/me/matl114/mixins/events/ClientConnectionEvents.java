@@ -1,5 +1,6 @@
 package me.matl114.mixins.events;
 
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
@@ -54,6 +55,9 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
 
     @Shadow
     private int sentPackets;
+
+    @Shadow
+    private static <T extends PacketListener> void genericsFtw(Packet<T> packet, PacketListener listener) {}
 
     @Unique
     ProtocolInfo<?> currentInBoundState;
@@ -200,10 +204,6 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
         if (this.receiving == PacketFlow.SERVERBOUND) {
             return;
         }
-        if (PacketManager.handleQueueOutPacket(packet, (Connection) (Object) this)) {
-            ci.cancel();
-            return;
-        }
         Packet<?> packetToSend = Listener.sendC2SPacket((Connection) (Object) this, packet);
         if (packetToSend != packet) {
             if (packetToSend == null) {
@@ -223,14 +223,21 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
         Listener.getPacketPostScheduleSendPoint().broadcast(packet, this);
     }
 
-    @Inject(method = "doSendPacket", at = @At("RETURN"))
-    private void sendPacketPost(Packet<?> packet, ChannelFutureListener listener, boolean flush, CallbackInfo ci) {
+    @WrapMethod(method = "doSendPacket")
+    private void sendPacketPost(
+            Packet<?> packet, ChannelFutureListener listener, boolean flush, Operation<Void> original) {
         // do not handle serverbound packet
-        if (this.receiving == PacketFlow.SERVERBOUND) {
-            return;
+        if (this.receiving != PacketFlow.SERVERBOUND) {
+            if (PacketManager.handleQueueOutPacket(
+                    packet,
+                    (packet2, flush2) -> {
+                        original.call(packet2, listener, flush2);
+                    },
+                    (Connection) (Object) this)) {
+                return;
+            }
         }
-        Listener.getPacketPostSendPoint().broadcast(packet, this);
-        // .handleValue(new Event<>(packet, false, false, (ClientConnection) (Object) this));
+        original.call(packet, listener, flush);
     }
 
     @WrapOperation(
@@ -262,6 +269,11 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
             BandwidthDebugMonitor packetSizeLogger,
             CallbackInfo ci) {
         Listener.getConnectionChannelInitialize().broadcast(pipeline, side, local);
+    }
+
+    @Override
+    public void applyPacket(Packet<?> packet, PacketListener listener) {
+        genericsFtw(packet, listener);
     }
 
     @Override

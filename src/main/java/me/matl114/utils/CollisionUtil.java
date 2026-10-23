@@ -1834,7 +1834,7 @@ public final class CollisionUtil {
         final int minBlockY =
                 Math.max((minSection << 4) - 1, net.minecraft.util.Mth.floor(aabb.minY - COLLISION_EPSILON) - 1);
         final int maxBlockY = Math.min(
-                (((world.getMaxSectionY() - 1)) << 4) + 16,
+                (((world.getMaxSectionY())) << 4) + 16,
                 net.minecraft.util.Mth.floor(aabb.maxY + COLLISION_EPSILON) + 1);
 
         final int minBlockZ = net.minecraft.util.Mth.floor(aabb.minZ - COLLISION_EPSILON) - 1;

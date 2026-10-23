@@ -5,7 +5,6 @@ import java.net.URI;
 import java.util.*;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.events.RenderListener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
@@ -37,10 +36,6 @@ public class RenderExtra extends BaseModule {
     public final FlagRef nightVision =
             builder(render.add("nightvision"), Boolean.class).defaultValue(true).build();
 
-    public final FlagRef noBobWorld = builder(render.add("no-world-bob-view"), FlagRef.TYPE)
-            .defaultValue(true)
-            .build();
-
     public final FlagRef noWurstHud =
             flagBuilder(render.add("disable-wurst-hud")).build();
 
@@ -52,8 +47,6 @@ public class RenderExtra extends BaseModule {
         super.registerAll();
         registerListener(
                 Listener.getPacketPoint().getChannel(ClientboundResourcePackPushPacket.class), this::onResourceRequest);
-
-        registerListener(RenderListener.getApplyWorldBobView(), this::onApplyBobView);
     }
 
     public void onResourceRequest(Event<ClientboundResourcePackPushPacket> resourceEvent) {
@@ -79,12 +72,6 @@ public class RenderExtra extends BaseModule {
                     Component.literal("Download url:").withStyle(ChatFormatting.GREEN),
                     Component.literal(sendPacket.url()).setStyle(st).withStyle(ChatFormatting.YELLOW));
             resourceEvent.cancel();
-        }
-    }
-
-    public void onApplyBobView(Event<PoseStack> event) {
-        if (noBobWorld.get()) {
-            event.cancel();
         }
     }
 }

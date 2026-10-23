@@ -113,7 +113,7 @@ public class NewStyleModel extends BaseModule {
         event.context().addAll(ResourceUtils.lookupOurModelResources(event.getArgs(0), "new-version"));
     }
 
-    public void onRefreshCache(Event<ResourceManager> event) {
+    public void onRefreshCache() {
         cache.clear();
         cacheItem.clear();
         for (Item item : BuiltInRegistries.ITEM) {

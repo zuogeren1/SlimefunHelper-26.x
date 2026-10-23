@@ -11,10 +11,14 @@ import me.matl114.accessors.events.EntityAccess;
 import me.matl114.accessors.hacks.KeyBindAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.impl.EventContainer;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.api.ModulePreset;
+import me.matl114.hacks.modules.interact.AutoSurround;
 import me.matl114.hacks.modules.interact.Interact;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
@@ -65,8 +69,10 @@ public class AntiCrystal extends BaseModule {
     public final KeyBindRef hotkey =
             moduleEntry(root.addHotkey(), new MultiKeyBind(), root.addEnable()).build();
 
-    public final DoubleRef progressPercentage =
-            doubleBuilder(root.add("progress-percentage")).defaultValue(0.66).build();
+    public final DoubleRef progressPercentage = doubleBuilder(root.add("progress-percentage"))
+            .defaultValue(0.66)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
+            .build();
 
     public final FlagRef onlyAround = flagBuilder(root.add("only-around-self")).build();
 
@@ -87,6 +93,7 @@ public class AntiCrystal extends BaseModule {
 
     public final DoubleRef eachLevelDelay = doubleBuilder(fireworks.add("each-level-effective"))
             .defaultValue(10.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
             .build();
 
     public final FlagRef onlyCeiling = builder(fireworks.add("only-ceiling"), Boolean.class)
@@ -124,20 +131,33 @@ public class AntiCrystal extends BaseModule {
             .defaultValue(4)
             .build();
 
-    public final IntRef arrowEffectiveTicks =
-            intBuilder(bows.add("arrow-effective-ticks")).defaultValue(1150).build();
+    public final IntRef arrowEffectiveTicks = intBuilder(bows.add("arrow-effective-ticks"))
+            .defaultValue(1150)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
         registerListener(Listener.getPostHandleInputEvents(), this::onPostInputEvent);
+        registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
+    }
+
+    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        ModulePreset preset = event.context.getValue();
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle("widget.interact.interact-block.use-argument", 0, dblank, dx, dy));
     }
 
     TimerExecutor useTimer = new TimerExecutor();
@@ -205,7 +225,7 @@ public class AntiCrystal extends BaseModule {
     Runnable bowCallback = null;
     Vec3 targetPoint;
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (checkNull()) return;
         if (bowCallback != null) {
             if (mc.player.isUsingItem()) {
@@ -224,9 +244,11 @@ public class AntiCrystal extends BaseModule {
                         if (!ViaFabricPlusHooks.isSupportDupRot() && mc.player.getTicksUsingItem() >= ticks.get() - 1) {
                             var pitchYaw = EntityUtils.rotationToPitchYaw(
                                     targetPoint.subtract(mc.player.getEyePosition()).normalize());
-                            PlayerInputManager.INSTANCE.addInputModifier(PlayerInputManager.Modifier.empty(0)
-                                    .withPitch(pitchYaw.x)
-                                    .withYaw(pitchYaw.y));
+                            PlayerInputManager.INSTANCE.addInputModifier(
+                                    PlayerInputManager.Modifier.empty(0)
+                                            .withPitch(pitchYaw.x)
+                                            .withYaw(pitchYaw.y),
+                                    0);
                         }
                     }
                 } else {
@@ -471,7 +493,7 @@ public class AntiCrystal extends BaseModule {
         }
     }
 
-    public void onPostInputEvent(Event<Void> event) {
+    public void onPostInputEvent() {
         if (checkNull()) return;
     }
 }

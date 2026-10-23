@@ -19,6 +19,7 @@ import me.matl114.gui.elements.ButtonElement;
 import me.matl114.gui.elements.IconElement;
 import me.matl114.gui.elements.LabelElement;
 import me.matl114.gui.elements.MultiLineTextElement;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.gui.presets.lists.ListEntryWidgetController;
 import me.matl114.gui.presets.single.CenterScreen;
 import me.matl114.gui.presets.single.ConfirmingWidgetScreen;
@@ -72,31 +73,38 @@ public class ConnectionProxy extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
         acceptor.accept(ExecutableWidget.instance(0, dblank, dx, dy)
-                .setElementHandler(new ButtonElement(
-                                (el -> {
-                                    var currentSelected = proxyList.getSelected();
-                                    if (currentSelected != null) {
-                                        return Component.translatable("widget.connection-proxy.proxy-list-editor")
-                                                .append(Component.literal(currentSelected.name()
-                                                        + "(%s:%s:%d)"
-                                                                .formatted(
-                                                                        currentSelected
-                                                                                .type()
-                                                                                .name(),
-                                                                        currentSelected.address(),
-                                                                        currentSelected.port())));
-                                    } else {
-                                        return Component.translatable("widget.connection-proxy.proxy-list-editor")
-                                                .append("None");
-                                    }
-                                }),
-                                ButtonAction.run(this::openProxyListEditScreen))
-                        .withTooltips(TooltipHandler.of(Constants.openListEditTooltips()))));
+                .setElementHandler(factory.createButton(
+                        (el -> {
+                            var currentSelected = proxyList.getSelected();
+                            if (currentSelected != null) {
+                                return Component.translatable("widget.connection-proxy.proxy-list-editor")
+                                        .append(Component.literal(currentSelected.name()
+                                                + "(%s:%s:%d)"
+                                                        .formatted(
+                                                                currentSelected
+                                                                        .type()
+                                                                        .name(),
+                                                                currentSelected.address(),
+                                                                currentSelected.port())));
+                            } else {
+                                return Component.translatable("widget.connection-proxy.proxy-list-editor")
+                                        .append("None");
+                            }
+                        }),
+                        TooltipHandler.of(Constants.openListEditTooltips()),
+                        ButtonAction.run(() -> this.openProxyListEditScreen(factory)),
+                        () -> true,
+                        () -> false)));
     }
 
-    public void openProxyListEditScreen() {
+    public void openProxyListEditScreen(ElementFactory factory) {
         List<MutableRecord> currentList = new ArrayList<>(proxyList.entries().stream()
                 .map(s -> MutableRecord.of(ProxyEntry.KEYS, s))
                 .toList());
@@ -106,7 +114,7 @@ public class ConnectionProxy extends BaseModule {
         ListEntryWidgetController controller = ListEntryWidgetController.mutable(
                 currentList,
                 () -> MutableRecord.of(ProxyEntry.KEYS, ProxyEntry.EMPTY),
-                (v) -> createEditRenderHandler(v, index),
+                (v) -> createEditRenderHandler(v, index, factory),
                 30,
                 220);
         ConfirmingWidgetScreen confirmScreen = new ConfirmingWidgetScreen(
@@ -123,12 +131,13 @@ public class ConnectionProxy extends BaseModule {
         confirmScreen.access().openFromCurrent();
     }
 
-    public DrawableWidget createEditRenderHandler(MutableRecord argsMap, MutableObject<MutableRecord> index) {
+    public DrawableWidget createEditRenderHandler(
+            MutableRecord argsMap, MutableObject<MutableRecord> index, ElementFactory factory) {
         SubScreenWidget subScreen = new SubScreenWidget(0, 0, 220, 20);
         ExecutableWidget.instance(2, 2, 16, 16)
-                .setElementHandler(IconElement.statedGuiPredicate(
-                        ButtonElement.BUTTON,
-                        ButtonElement.BUTTON_INACTIVE,
+                .setElementHandler(factory.createButton(
+                        TextProvider.of(Component.empty()),
+                        TooltipHandler.of(List.of()),
                         ButtonAction.run(() -> {
                             if (argsMap != index.getValue()) {
                                 index.setValue(argsMap);
@@ -136,28 +145,26 @@ public class ConnectionProxy extends BaseModule {
                                 index.setValue(null);
                             }
                         }),
-                        (bl) -> {
-                            return argsMap == index.getValue();
-                        }))
+                        () -> true,
+                        () -> argsMap == index.getValue()))
                 .addToSub(subScreen);
         DisplayWidget.instance(45, 0, 100, 20)
-                .setRenderHandler(
-                        new LabelElement(ClickGui.INSTANCE.backGroundColor.get().withAlpha(64)))
+                .setRenderHandler(ClickGui.INSTANCE.getGuiElementFactory().createBackground())
                 .addToSub(subScreen);
         ExecutableWidget.instance(45, 0, 100, 20)
-                .setElementHandler(new MultiLineTextElement(
+                .setElementHandler(factory.createText(
                         (el) -> {
                             ProxyEntry entry = argsMap.toRecord(ProxyEntry.class);
                             return Component.literal("%s\n(%s:%s:%d)"
                                     .formatted(entry.name(), entry.type().name(), entry.address(), entry.port()));
                         },
-                        ClickGui.INSTANCE.configColor.get().withAlpha(255),
-                        0))
+                        TooltipHandler.of(List.of())))
                 .addToSub(subScreen);
 
         ExecutableWidget.instance(155, 0, 60, 20)
-                .setElementHandler(new ButtonElement(
+                .setElementHandler(factory.createExecuteButton(
                         TextProvider.of(Component.translatable("widget.connection-proxy.open-editor")),
+                        TooltipHandler.of(List.of()),
                         ButtonAction.run(() -> {
                             var re = WidgetUtils.createMutableRecordEditScreen(
                                     Component.translatable("widget.connection-proxy.open-editor.title"),
@@ -165,7 +172,7 @@ public class ConnectionProxy extends BaseModule {
                                     argsMap,
                                     s -> "widget.connection-proxy." + s,
                                     WidgetUtils.DEFAULT_CONFIG_SCREEN_LAYOUT,
-                                    WidgetUtils.DEFAULT_PALETTE);
+                                    factory);
                             new CenterScreen(re).access().openFromCurrent();
                         })))
                 .addToSub(subScreen);

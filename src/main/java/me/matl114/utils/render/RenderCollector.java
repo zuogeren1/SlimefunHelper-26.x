@@ -11,9 +11,25 @@ public interface RenderCollector<B> {
 
     void clear();
 
-    void render3D(PoseStack matrices);
+    void render3D(PoseStack matrices, float partialTick);
 
-    void render2D(VDrawContext vDrawContext);
+    void render2D(VDrawContext vDrawContext, float partialTick);
+
+    /**
+     * 旧调用点入口：拿不到 partialTick 的场合按 0 处理（插值静止）。
+     *
+     * @deprecated 新代码请用带 {@code partialTick} 的重载
+     */
+    @Deprecated
+    default void render3D(PoseStack matrices) {
+        render3D(matrices, 0.0F);
+    }
+
+    /** @deprecated 新代码请用带 {@code partialTick} 的重载 */
+    @Deprecated
+    default void render2D(VDrawContext vDrawContext) {
+        render2D(vDrawContext, 0.0F);
+    }
 
     public abstract static class Impl<B> implements RenderCollector<B> {
         protected List<IndexEntry<B>> entries = new ArrayList<>();

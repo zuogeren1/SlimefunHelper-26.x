@@ -15,14 +15,17 @@ import java.util.stream.Stream;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
+import me.matl114.events.Event;
 import me.matl114.managers.command.MainCommand;
 import me.matl114.events.channels.ListenerPoint;
 import me.matl114.gui.basic.*;
 import me.matl114.gui.complex.config.DefaultedKeyValueInputWidget;
-import me.matl114.gui.elements.ColorLabelTextElement;
+import me.matl114.gui.interfaces.CustomElementFactory;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.modules.task.ClickGui;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.config.StringFormat;
+import me.matl114.hacks.utils.gui.CustomGuiConfig;
 import me.matl114.managers.*;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.IHotKey;
@@ -177,8 +180,8 @@ public abstract class BaseModule implements ModuleListProvider {
         portPaths.put(oldPath, newPath);
         var unknown = oldPath.getConfig().get(oldPath.toPath());
         if (unknown != null) {
-            oldPath.getConfig().setValueNoNew(null, oldPath.toPath());
-            newPath.getConfig().setValueNoNew(unknown, newPath.toPath());
+            oldPath.getConfig().setValue(null, oldPath.toPath());
+            newPath.getConfig().setValue(unknown, newPath.toPath());
         }
     }
 
@@ -260,6 +263,32 @@ public abstract class BaseModule implements ModuleListProvider {
         registeredPoints.add(listener);
     }
 
+    public <W extends Event<?>> void registerListener(ListenerPoint<W> listener, Runnable handler) {
+        registerListener(listener, handler, 0, false);
+    }
+
+    public <W extends Event<?>> void registerListener(ListenerPoint<W> listener, Runnable handler, int p) {
+        registerListener(listener, handler, p, false);
+    }
+
+    public <W extends Event<?>> void registerListener(
+            ListenerPoint<W> listener, Runnable handler, boolean ignoreCancelled) {
+        registerListener(listener, handler, 0, ignoreCancelled);
+    }
+
+    public <W extends Event<?>> void registerListener(
+            ListenerPoint<W> listener, Runnable handler, int p, boolean ignoreCancelled) {
+        registerListener(
+                listener,
+                (eve) -> {
+                    if (ignoreCancelled && eve.isCancelled()) {
+                        return;
+                    }
+                    handler.run();
+                },
+                p);
+    }
+
     public void registerCommandBootstrap(Consumer<MainCommand> handler) {
         MainCommand.Bootstrap bootstrap = registerReason(handler::accept, REASON_COMMAND);
         MainCommand.registerCommandBootstrap(bootstrap);
@@ -316,7 +345,8 @@ public abstract class BaseModule implements ModuleListProvider {
             }
             Class<?> clazz = this.getClass();
             try {
-                Method method = clazz.getMethod("addCustomWidgets", Consumer.class, int.class, int.class, int.class);
+                Method method = clazz.getMethod(
+                        "addCustomWidgets", Consumer.class, int.class, int.class, int.class, ElementFactory.class);
                 if (method.getDeclaringClass() != BaseModule.class) {
                     showInGui = true;
                     return true;
@@ -331,11 +361,11 @@ public abstract class BaseModule implements ModuleListProvider {
     private final Set<SimpleHotKey> registeredHotkeys = new LinkedHashSet<>();
 
     public <T> WrapperSettingBuilder<T> builder(Config config, Class<T> type) {
-        return new WrapperSettingBuilder<>(config.asRef(), config, type, this);
+        return new WrapperSettingBuilder<>(config, type, this);
     }
 
     public <T> WrapperSettingBuilder<T> builder(Config config, String[] path, Class<T> type) {
-        return new WrapperSettingBuilder<>(config.asRef(), config, type, this).path(path);
+        return new WrapperSettingBuilder<>(config, type, this).path(path);
     }
 
     public <T> WrapperSettingBuilder<T> builder(ModulePath path, Class<T> type) {
@@ -348,6 +378,10 @@ public abstract class BaseModule implements ModuleListProvider {
 
     public WrapperSettingBuilder<Boolean> flagBuilder(ModulePath path) {
         return flagBuilder(path.getConfig(), path.toPath());
+    }
+
+    public WrapperSettingBuilder<Boolean> flagBuilder(ModulePath path, boolean defaultVal) {
+        return builder(path.getConfig(), Boolean.class).path(path.toPath()).defaultValue(defaultVal);
     }
 
     public WrapperSettingBuilder<Integer> intBuilder(ModulePath path) {
@@ -395,7 +429,7 @@ public abstract class BaseModule implements ModuleListProvider {
     public WrapperSettingBuilder<MultiKeyBind> moduleEntry(
             Config config, String[] hotkeyPath, MultiKeyBind defaultValue, String[] togglePath) {
         return new WrapperModuleSettingBuilder(
-                        config.asRef(), config, this, new ModuleEntry(config, togglePath, hotkeyPath))
+                        config, this, new ModuleEntry(config, togglePath, hotkeyPath))
                 .defaultValue(defaultValue)
                 .registerHotkey(HotKeyUtils.getToggleHandler(config, togglePath))
                 .registerModuleEntry();
@@ -408,10 +442,7 @@ public abstract class BaseModule implements ModuleListProvider {
             String[] togglePath,
             Supplier<Component> descriptor) {
         return new WrapperModuleSettingBuilder(
-                        config.asRef(),
-                        config,
-                        this,
-                        new MetaDataModuleEntry(config, togglePath, hotkeyPath, descriptor))
+                        config, this, new MetaDataModuleEntry(config, togglePath, hotkeyPath, descriptor))
                 .defaultValue(defaultValue)
                 .registerHotkey(HotKeyUtils.getToggleHandler(config, togglePath))
                 .registerModuleEntry();
@@ -419,7 +450,7 @@ public abstract class BaseModule implements ModuleListProvider {
 
     public WrapperSettingBuilder<MultiKeyBind> toggleHotkey(
             Config config, String[] path, MultiKeyBind defaultValue, String[] togglePath) {
-        return new WrapperSettingBuilder<>(config.asRef(), config, KeyBindRef.TYPE, this)
+        return new WrapperSettingBuilder<>(config, KeyBindRef.TYPE, this)
                 .path(path)
                 .defaultValue(defaultValue)
                 .registerHotkey(HotKeyUtils.getToggleHandler(config, togglePath));
@@ -467,71 +498,39 @@ public abstract class BaseModule implements ModuleListProvider {
 
     // todo: remake config screen
 
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {}
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank, ElementFactory factory) {}
 
     protected static final int indexWidth = 140;
     protected static final int blankWidth = 10;
+    protected static ElementFactory ELEMENT_FACTORY = new CustomElementFactory(() -> CustomGuiConfig.DEFAULT);
+    protected static ElementFactory CONFIG_FACTORY = new CustomElementFactory(() -> CustomGuiConfig.DEFAULT);
 
     public static SubScreenWidget createSubWidget(int x, int y, int dx, int dy) {
         return new SubScreenWidget(x, y, dx, dy);
     }
 
     public static DrawableWidget createLabel(String translationKey, int x, int y, int dx, int dy) {
-        return ExecutableWidget.instance(x, y, dx, dy)
-                .setElementHandler(new ColorLabelTextElement(
-                                TextProvider.of(Component.translatable(translationKey)),
-                                () -> ClickGui.INSTANCE.textColor.get().withAlpha(255),
-                                () -> ClickGui.INSTANCE.configColor.get().withAlpha(ClickGui.INSTANCE.labelAlpha.get()))
-                        .withTooltips(TooltipHandler.of(
-                                ChatUtils.parseTooltipsTranslation(translationKey + ".tooltips", ""))));
+        return ELEMENT_FACTORY.createLabel(translationKey, x, y, dx, dy);
     }
 
     public static DrawableWidget createLabel(
             Supplier<Component> text, Supplier<List<Component>> tooltips, int x, int y, int dx, int dy) {
-        return ExecutableWidget.instance(x, y, dx, dy)
-                .setElementHandler(new ColorLabelTextElement(
-                                el -> text.get(),
-                                () -> ClickGui.INSTANCE.textColor.get().withAlpha(255),
-                                () -> ClickGui.INSTANCE.configColor.get().withAlpha(ClickGui.INSTANCE.labelAlpha.get()))
-                        .withTooltips(TooltipHandler.of(tooltips)));
+        return ELEMENT_FACTORY.createLabel(text, tooltips, x, y, dx, dy);
     }
 
     public static DrawableWidget createTitle(String translationKey, int x, int y, int dx, int dy) {
-        return DisplayWidget.instance(x, y, dx, dy)
-                .setRenderHandler(new ColorLabelTextElement(
-                                TextProvider.of(Component.translatable(translationKey)),
-                                () -> ClickGui.INSTANCE.textColor.get().withAlpha(255),
-                                () -> ClickGui.INSTANCE.moduleListColor.get().withAlpha(255))
-                        .withTooltips(TooltipHandler.of(
-                                ChatUtils.parseTooltipsTranslation(translationKey + ".tooltips", ""))));
+        return ELEMENT_FACTORY.createTitle(translationKey, x, y, dx, dy);
     }
 
     public static DrawableWidget createExecuteButton(
             String translationKey, ButtonAction action, int x, int y, int dx, int dy) {
-        return createExecuteButton(translationKey, action, () -> true, x, y, dx, dy);
+        return ELEMENT_FACTORY.createExecuteButton(translationKey, action, x, y, dx, dy);
     }
 
     public static DrawableWidget createExecuteButton(
             String translationKey, ButtonAction action, BooleanSupplier active, int x, int y, int dx, int dy) {
-        return ExecutableWidget.instance(x, y, dx, dy)
-                .setElementHandler(new ColorBoxElement(
-                                action,
-                                TextProvider.of(Component.translatable(translationKey)),
-                                () -> ClickGui.INSTANCE
-                                        .configColor
-                                        .get()
-                                        .withAlpha(
-                                                active.getAsBoolean()
-                                                        ? ClickGui.INSTANCE.buttonActiveAlpha.get()
-                                                        : ClickGui.INSTANCE.buttonInactiveAlpha.get()),
-                                () -> ClickGui.INSTANCE.textColor.get().withAlpha(255),
-                                (el, bl) -> {
-                                    if (bl) {
-                                        return -1;
-                                    } else return null;
-                                })
-                        .withTooltips(TooltipHandler.of(
-                                ChatUtils.parseTooltipsTranslation(translationKey + ".tooltips", ""))));
+        return ELEMENT_FACTORY.createExecuteButton(translationKey, action, active, x, y, dx, dy);
     }
 
     public static DrawableWidget createExecuteButton(
@@ -543,24 +542,7 @@ public abstract class BaseModule implements ModuleListProvider {
             int y,
             int dx,
             int dy) {
-        return ExecutableWidget.instance(x, y, dx, dy)
-                .setElementHandler(new ColorBoxElement(
-                                action,
-                                el -> (text.get()),
-                                () -> ClickGui.INSTANCE
-                                        .configColor
-                                        .get()
-                                        .withAlpha(
-                                                condition.getAsBoolean()
-                                                        ? ClickGui.INSTANCE.buttonActiveAlpha.get()
-                                                        : ClickGui.INSTANCE.buttonInactiveAlpha.get()),
-                                () -> ClickGui.INSTANCE.textColor.get().withAlpha(255),
-                                (el, bl) -> {
-                                    if (bl) {
-                                        return -1;
-                                    } else return null;
-                                })
-                        .withTooltips(TooltipHandler.of(tooltips)));
+        return ELEMENT_FACTORY.createExecuteButton(text, tooltips, action, condition, x, y, dx, dy);
     }
 
     public static DrawableWidget createExecuteButton(
@@ -571,42 +553,17 @@ public abstract class BaseModule implements ModuleListProvider {
             int y,
             int dx,
             int dy) {
-        return createExecuteButton(text, tooltips, action, () -> true, x, y, dx, dy);
+        return ELEMENT_FACTORY.createExecuteButton(text, tooltips, action, x, y, dx, dy);
     }
 
     public static DrawableWidget createToggleButton(
             String translationKey, ValueAccessor<Boolean> value, int x, int y, int dx, int dy) {
-        return createToggleButton(translationKey, value, x, y, dx, dy, true);
+        return ELEMENT_FACTORY.createToggleButton(translationKey, value, x, y, dx, dy);
     }
 
     public static DrawableWidget createToggleButton(
             String translationKey, ValueAccessor<Boolean> value, int x, int y, int dx, int dy, boolean frame) {
-        return ExecutableWidget.instance(x, y, dx, dy)
-                .setElementHandler(new ColorBoxElement(
-                                ButtonAction.run(() -> {
-                                    value.setValue(!value.getValue());
-                                }),
-                                TextProvider.of(Component.translatable(translationKey)),
-                                () -> ClickGui.INSTANCE
-                                        .configColor
-                                        .get()
-                                        .withAlpha(
-                                                value.getValue()
-                                                        ? ClickGui.INSTANCE.buttonActiveAlpha.get()
-                                                        : ClickGui.INSTANCE.buttonInactiveAlpha.get()),
-                                () -> ClickGui.INSTANCE.textColor.get().withAlpha(255),
-                                (el, nl) -> {
-                                    if (frame && value.getValue()) {
-                                        return ClickGui.INSTANCE
-                                                .moduleListColor
-                                                .get()
-                                                .withAlpha(255);
-                                    } else if (nl) {
-                                        return -1;
-                                    } else return null;
-                                })
-                        .withTooltips(TooltipHandler.of(
-                                ChatUtils.parseTooltipsTranslation(translationKey + ".tooltips", ""))));
+        return ELEMENT_FACTORY.createToggleButton(translationKey, value, frame, x, y, dx, dy);
     }
 
     public static DrawableWidget createToggleButton(
@@ -617,7 +574,7 @@ public abstract class BaseModule implements ModuleListProvider {
             int y,
             int dx,
             int dy) {
-        return createToggleButton(text, tooltips, value, x, y, dx, dy, true);
+        return ELEMENT_FACTORY.createToggleButton(text, tooltips, value, true, x, y, dx, dy);
     }
 
     public static DrawableWidget createToggleButton(
@@ -629,31 +586,7 @@ public abstract class BaseModule implements ModuleListProvider {
             int dx,
             int dy,
             boolean frame) {
-        return ExecutableWidget.instance(x, y, dx, dy)
-                .setElementHandler(new ColorBoxElement(
-                                ButtonAction.run(() -> {
-                                    value.setValue(!value.getValue());
-                                }),
-                                el -> text.get(),
-                                () -> ClickGui.INSTANCE
-                                        .configColor
-                                        .get()
-                                        .withAlpha(
-                                                value.getValue()
-                                                        ? ClickGui.INSTANCE.buttonActiveAlpha.get()
-                                                        : ClickGui.INSTANCE.buttonInactiveAlpha.get()),
-                                () -> ClickGui.INSTANCE.textColor.get().withAlpha(255),
-                                (el, nl) -> {
-                                    if (frame && value.getValue()) {
-                                        return ClickGui.INSTANCE
-                                                .moduleListColor
-                                                .get()
-                                                .withAlpha(255);
-                                    } else if (nl) {
-                                        return -1;
-                                    } else return null;
-                                })
-                        .withTooltips(TooltipHandler.of(tooltips)));
+        return ELEMENT_FACTORY.createToggleButton(text, tooltips, value, frame, x, y, dx, dy);
     }
 
     public static DrawableWidget createElement(
@@ -664,14 +597,8 @@ public abstract class BaseModule implements ModuleListProvider {
             int y,
             int dx,
             int dy) {
-        var element = elementHandler;
-        if (tooltips != null) {
-            element = element.withTooltips(TooltipHandler.of(tooltips));
-        }
-        if (action != null) {
-            element = new BoxElement(action).withElement(element);
-        }
-        return ExecutableWidget.instance(x, y, dx, dy).setElementHandler(element);
+        return ELEMENT_FACTORY.createElement(
+                elementHandler, tooltips == null ? null : TooltipHandler.of(tooltips), action, x, y, dx, dy);
     }
 
     public static DrawableWidget createElement(
@@ -682,19 +609,21 @@ public abstract class BaseModule implements ModuleListProvider {
             int y,
             int dx,
             int dy) {
-        var element = new BoxElement(action == null ? ButtonAction.empty() : action).combineRender(elementHandler);
-        if (tooltips != null) {
-            element = element.withTooltips(TooltipHandler.of(tooltips));
-        }
-        return ExecutableWidget.instance(x, y, dx, dy).setElementHandler(element);
+        return ELEMENT_FACTORY.createElement(
+                elementHandler, tooltips == null ? null : TooltipHandler.of(tooltips), action, x, y, dx, dy);
     }
 
     public static DrawableWidget createRefEditor(String path, Ref<?> ref, int x, int y, int dx, int dy) {
+        return createRefEditor(path, ref, x, y, dx, dy, ELEMENT_FACTORY);
+    }
+
+    public static DrawableWidget createRefEditor(
+            String path, Ref<?> ref, int x, int y, int dx, int dy, ElementFactory factory) {
         return new DefaultedKeyValueInputWidget(
-                x, y, dx, dy, indexWidth, blankWidth, dx - indexWidth - blankWidth, ref, path) {
+                x, y, dx, dy, indexWidth, blankWidth, dx - indexWidth - blankWidth - y, ref, path, factory) {
             @Override
             public DrawableWidget createKeyLabel() {
-                return createLabel(this::getTranslationName, this::getTooltips, 0, 0, dkey, dy);
+                return factory.createLabel(this::getTranslationName, this::getTooltips, 0, 0, dkey, dy);
             }
         };
     }
@@ -780,7 +709,7 @@ public abstract class BaseModule implements ModuleListProvider {
         }
     }
 
-    public static class WrapperSettingBuilder<W> extends Config.SettingBuilder<W> {
+    public static class WrapperSettingBuilder<W> extends ConfigSettingBuilder<W> {
         BaseModule module;
         WrapperConfigRef<W> wrapperConfig;
         SimpleHotKey hotkey;
@@ -792,8 +721,8 @@ public abstract class BaseModule implements ModuleListProvider {
             return wrapperConfig;
         }
 
-        public WrapperSettingBuilder(MapRef ref, Config rootConfig, Class<W> clazz, BaseModule module) {
-            super(ref, rootConfig, clazz);
+        public WrapperSettingBuilder(Config rootConfig, Class<W> clazz, BaseModule module) {
+            super(rootConfig, clazz);
             this.module = module;
         }
 
@@ -886,8 +815,8 @@ public abstract class BaseModule implements ModuleListProvider {
     public static class WrapperModuleSettingBuilder extends WrapperSettingBuilder<MultiKeyBind> {
         ModuleEntry moduleEntry;
 
-        public WrapperModuleSettingBuilder(MapRef ref, Config rootConfig, BaseModule module, ModuleEntry moduleEntry) {
-            super(ref, rootConfig, KeyBindRef.TYPE, module);
+        public WrapperModuleSettingBuilder(Config rootConfig, BaseModule module, ModuleEntry moduleEntry) {
+            super(rootConfig, KeyBindRef.TYPE, module);
             this.moduleEntry = moduleEntry;
             this.path(moduleEntry.hotkeyPath);
         }

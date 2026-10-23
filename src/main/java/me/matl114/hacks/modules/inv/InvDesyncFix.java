@@ -37,6 +37,8 @@ public class InvDesyncFix extends BaseModule {
 
     public final FlagRef useItemFix = flagBuilder(root.add("use-item")).build();
 
+    public final FlagRef useItemFix2 = flagBuilder(root.add("use-item-fix")).build();
+
     public final FlagRef finishUseFix = flagBuilder(root.add("finish-use")).build();
 
     public final FlagRef totemFix = flagBuilder(root.add("totem-fix")).build();
@@ -63,11 +65,16 @@ public class InvDesyncFix extends BaseModule {
         serverHandler.incrementStateId();
     }
 
+    private void makeDesync() {
+        var serverHandler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        serverHandler.stateId = (serverHandler.stateId - 2) & 32767;
+    }
+
     public void onUseItem(Event<ServerboundUseItemPacket> event) {
         if (checkNull()) return;
         if (event.isCancelled()) return;
         if (enable.get()
-                && useItemFix.get()
+                && (useItemFix.get() || useItemFix2.get())
                 && !LivingEntityAccess.of(mc.player).isTrackedUsingItem()) {
             InteractionHand hand = event.context.getHand();
             ItemStack stack =
@@ -75,7 +82,8 @@ public class InvDesyncFix extends BaseModule {
             ItemStack currentStack = mc.player.getItemInHand(hand);
             if (!ItemStack.isSameItemSameComponents(stack, currentStack)
                     || InteractUtils.isInteractAcceptable(mc.level, mc.player, stack)) {
-                PacketManager.schedulePostScheduleCallback(event.context, this::nextRevision);
+                PacketManager.schedulePostScheduleCallback(
+                        event.context, useItemFix.get() ? this::nextRevision : this::makeDesync);
             }
         }
     }
@@ -86,12 +94,10 @@ public class InvDesyncFix extends BaseModule {
             if (event.context.getEventId() == EntityEvent.USE_ITEM_COMPLETE && finishUseFix.get()) {
                 // abort revision, force desync
                 // fix grim shit.
-                nextRevision();
-                nextRevision();
+                makeDesync();
             }
             if (event.context.getEventId() == EntityEvent.PROTECTED_FROM_DEATH && totemFix.get()) {
-                nextRevision();
-                nextRevision();
+                makeDesync();
             }
         }
     }

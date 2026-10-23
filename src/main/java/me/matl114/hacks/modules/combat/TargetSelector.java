@@ -10,6 +10,8 @@ import java.util.function.Predicate;
 import java.util.stream.DoubleStream;
 import java.util.stream.Stream;
 import lombok.Getter;
+import me.matl114.gui.interfaces.ElementFactory;
+import me.matl114.hacks.utils.RayCastCalculator;
 import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.basic.*;
 import me.matl114.hacks.ChatTasks;
@@ -51,7 +53,7 @@ import net.minecraft.world.scores.PlayerTeam;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
-public class TargetSelector extends BaseModule {
+public class TargetSelector extends BaseModule implements RayCastCalculator<Entity> {
     public static TargetSelector INSTANCE;
     public final ModulePath attack = makePath(Configs.COMBAT_CONFIG, "attack");
 
@@ -63,8 +65,16 @@ public class TargetSelector extends BaseModule {
     public final FlagRef grimExpandEyeHeight =
             flagBuilder(attack.add("use-grim-expand-eye-height")).build();
 
-    public final NBTRef<EntityTypeRegex> whiteListTypes = builder(attack.add("whitelist"), EntityTypeRegex.class)
-            .defaultValue(new EntityTypeRegex(new Regex("^(monster|!endermite|player)$")))
+    public final FlagRef grimInterpolateBox =
+            flagBuilder(attack.add("use-grim-interpolation-box")).build();
+
+    public final DoubleRef realMaxExtraDistance = doubleBuilder(attack.add("max-extra-distance-ignore-expanding"))
+            .defaultValue(3.6D)
+            .validator(Configs.doubleRange(1.0D, 10.0D))
+            .build();
+
+    public final NBTRef<EntityTypeEntrySet> whiteListTypes = builder(attack.add("whitelist"), EntityTypeEntrySet.class)
+            .defaultValue(new EntityTypeEntrySet(new Regex("^(monster|!endermite|player)$")))
             .build();
 
     public final NBTRef<Regex> friendNameRegex = builder(attack.add("friends"), Regex.class)
@@ -130,7 +140,7 @@ public class TargetSelector extends BaseModule {
         var path = attack.add(KEY_FRIENDS);
         if (path.getConfig().contains(path.toPath())) {
             var re = path.getConfig().getList(path.toPath());
-            path.getConfig().setValueNoNew(null, path.toPath());
+            path.getConfig().setValue(null, path.toPath());
             if (re != null) {
                 onListChange(new FriendListStorage(re.get(), Map.of()));
             }
@@ -165,12 +175,48 @@ public class TargetSelector extends BaseModule {
         return DoubleStream.of(mc.player.dimensions.eyeHeight());
     }
 
+    @Override
+    public AABB getEffectiveBox(Entity entity) {
+        if (grimInterpolateBox.get() && entity instanceof RemotePlayer) {
+            return CombatExtra.INSTANCE.getTracker(entity).getInteractBox(entity);
+        }
+        return entity.getBoundingBox();
+    }
+
+    public Stream<Vec3> getPotentialEyeHeights(Vec3 pos) {
+        return getPotentialEyeHeights().mapToObj(i -> pos.add(0, i, 0));
+    }
+
     public boolean isWithinAttackRange(Vec3 pos, Entity entity) {
-        return isWithinAttackRange(pos, entity.getBoundingBox(), CombatExtra.INSTANCE.getAttackAtTargetRange(entity));
+        // add real place check if more than 3
+        Vec3 syncPos = PositionPredict.INSTANCE.getPredictor(entity).getCurrentSyncedPos();
+        AABB syncBox = entity.dimensions.makeBoundingBox(syncPos);
+        if (syncBox.distanceToSqr(pos.add(0, mc.player.getEyeHeight(), 0))
+                >= MathUtils.s2(CombatExtra.INSTANCE.getAttackRangeAttribute() + realMaxExtraDistance.get())) {
+            return false;
+        }
+        return isWithinAttackRange(pos, getEffectiveBox(entity), CombatExtra.INSTANCE.getAttackAtTargetRange(entity));
+    }
+
+    public boolean isWithinAttackRange(Vec3 pos, Entity entity, double range) {
+        if (!entity.trackingPosition().equals(Vec3.ZERO)) {
+            Vec3 syncPos = PositionPredict.INSTANCE.getPredictor(entity).getCurrentSyncedPos();
+            AABB syncBox = entity.dimensions.makeBoundingBox(syncPos);
+            if (syncBox.distanceToSqr(pos.add(0, mc.player.getEyeHeight(), 0))
+                    >= MathUtils.s2(range + realMaxExtraDistance.get())) {
+                return false;
+            }
+        }
+        return isWithinAttackRange(pos, getEffectiveBox(entity), range);
+    }
+
+    public boolean isWithinAttackRange(Vec3 pos, AABB box) {
+        return isWithinAttackRange(pos, box, CombatExtra.INSTANCE.getAttackRange());
     }
 
     public boolean isWithinAttackRange(Vec3 pos, AABB box, double range) {
-        if (box.distanceToSqr(pos) > MathUtils.s2(range + 3 + mc.player.dimensions.eyeHeight())) {
+        if (box.distanceToSqr(pos.add(0, mc.player.getEyeHeight(), 0))
+                >= MathUtils.s2(range + realMaxExtraDistance.get())) {
             // filter all outofrange
             // optimize calculation
             return false;
@@ -178,6 +224,26 @@ public class TargetSelector extends BaseModule {
         return getPotentialEyeHeights()
                 .mapToObj(s -> pos.add(0, s, 0))
                 .anyMatch(ps -> box.distanceToSqr(ps) < MathUtils.s2(range));
+    }
+
+    @Override
+    public double getReachDistance(Entity val) {
+        return CombatExtra.INSTANCE.getAttackAtTargetRange(val);
+    }
+
+    public Vec3 getBestAttackEyePos(Vec3 pos, Entity entity) {
+        AABB box = getEffectiveBox(entity);
+        var poses = getPotentialEyeHeights().mapToObj(s -> pos.add(0, s, 0)).toList();
+        Vec3 playerPos = pos.add(mc.player.getEyePosition().subtract(mc.player.position()));
+        double s2 = box.distanceToSqr(playerPos);
+        for (var pp : poses) {
+            double s3 = box.distanceToSqr(pp);
+            if (s3 < s2) {
+                s2 = s3;
+                playerPos = pp;
+            }
+        }
+        return playerPos;
     }
 
     public Vec3 getBestAttackEyePos(Vec3 pos, AABB box) {
@@ -192,6 +258,10 @@ public class TargetSelector extends BaseModule {
             }
         }
         return playerPos;
+    }
+
+    public Vec3 getEntityRayCast(Vec3 pos, Entity entity) {
+        return getRaycast(pos, entity);
     }
 
     public Optional<Vec3> getBestAttackEyePos(Vec3 pos, AABB box, double range) {
@@ -257,7 +327,7 @@ public class TargetSelector extends BaseModule {
         }
     }
 
-    public void openEditFriendsScreen() {
+    public void openEditFriendsScreen(ElementFactory factory) {
         List<Pair<String, String>> playerListCopy = playerList.toPairList();
         NBTRef<PrimitivePairList<String, String>> holder = new NBTRef<>(new PrimitivePairList<>(
                 "widget.friend-list.friend-name",
@@ -266,7 +336,7 @@ public class TargetSelector extends BaseModule {
                 NBTTypes.STRING_TYPE,
                 playerListCopy));
         var keyValue = holder.createKeyValue("");
-        DrawableWidget drawableWidget = keyValue.generateValueWidget(0, 0, 300, 20);
+        DrawableWidget drawableWidget = keyValue.generateValueWidget(factory, 0, 0, 300, 20);
         // open edit screen
         keyValue.addListener((pairList) -> onListChange(FriendListStorage.create(pairList.list())));
 
@@ -458,7 +528,7 @@ public class TargetSelector extends BaseModule {
         nearby = Math.max(nearby, CombatExtra.INSTANCE.getAttackAtTargetRange(e));
         Vec3 predictedPlayerPos =
                 mc.player.position().add(mc.player.getDeltaMovement().scale(mc.player.isFallFlying() ? ticks : 0));
-        return isWithinAttackRange(predictedPlayerPos, e.getBoundingBox(), nearby);
+        return isWithinAttackRange(predictedPlayerPos, e, nearby);
     }
 
     public Entity searchAttackEntity(double nearby, boolean autoSelect) {
@@ -644,22 +714,27 @@ public class TargetSelector extends BaseModule {
                             .subBuilder(SubCommand.taskBuilder())
                             .name("gui")
                             .helper("message.command.friends_command.friends.gui.help")
-                            .post(e -> e.executor(CommandContext.run(this::openEditFriendsScreen)))
+                            .post(e -> e.executor(CommandContext.run(() -> openEditFriendsScreen(CONFIG_FACTORY))))
                             .complete())
                     .complete();
         }
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        acceptor.accept(createExecuteButton(
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        acceptor.accept(factory.createExecuteButton(
                 "widget.friend-list.edit-friend-list",
-                ButtonAction.run(this::openEditFriendsScreen),
+                ButtonAction.run(() -> openEditFriendsScreen(factory)),
                 0,
                 dblank,
                 dx,
                 dy));
-        acceptor.accept(createTitle("widget.friend-list.command", 0, dblank, dx, dy));
+        acceptor.accept(factory.createTitle("widget.friend-list.command", 0, dblank, dx, dy));
     }
 
     public static record FriendListStorage(List<String> friends, Map<String, String> alias) {

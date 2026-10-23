@@ -9,37 +9,43 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigLoader;
+import me.matl114.plugins.SlimefunHelperPlugin;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.resources.Identifier;
 
 public class Configs {
-    public static void loadConfigs() {
-        if (true) {
-            MINE_CONFIG.registerGlobal();
-            CHAT_CONFIG.registerGlobal();
-            RENDER_CONFIG.registerGlobal();
-            EXTRA_CONFIG.registerGlobal();
-            COMBAT_CONFIG.registerGlobal();
-            INV_CONFIG.registerGlobal();
-            MOV_CONFIG.registerGlobal();
-            INTERACT_CONFIG.registerGlobal();
-            SURVIVAL_CONFIG.registerGlobal();
-            SLIMEFUN_CONFIG.registerGlobal();
-            MODEL_CONFIG.registerGlobal();
-            MISC_CONFIG.registerGlobal();
-            TOGGLE_CONFIG.registerGlobal();
-        } else {
-            CHAT_CONFIG.registerGlobal();
-            INV_CONFIG.registerGlobal();
-            SLIMEFUN_CONFIG.registerGlobal();
-            MODEL_CONFIG.registerGlobal();
-            MISC_CONFIG.registerGlobal();
-            TOGGLE_CONFIG.registerGlobal();
-        }
+
+    public static void loadConfigs(SlimefunHelperPlugin plugin) {
+        register(plugin, MINE_CONFIG);
+        register(plugin, CHAT_CONFIG);
+        register(plugin, RENDER_CONFIG);
+        register(plugin, EXTRA_CONFIG);
+        register(plugin, COMBAT_CONFIG);
+        register(plugin, INV_CONFIG);
+        register(plugin, MOV_CONFIG);
+        register(plugin, INTERACT_CONFIG);
+        register(plugin, SURVIVAL_CONFIG);
+        register(plugin, SLIMEFUN_CONFIG);
+        register(plugin, MODEL_CONFIG);
+        register(plugin, MISC_CONFIG);
+        register(plugin, TOGGLE_CONFIG);
         if (init) {
             Config.reloadAll();
         } else {
             init = true;
+        }
+    }
+
+    // 旧入口：SlimefunHelper.reloadModConfig() 仍以无参形式调用；接入 PluginManager 后可删
+    public static void loadConfigs() {
+        loadConfigs(null);
+    }
+
+    private static void register(SlimefunHelperPlugin plugin, Config config) {
+        if (plugin == null) {
+            config.registerGlobal(null);
+        } else {
+            plugin.registerConfig(config);
         }
     }
 

@@ -62,12 +62,12 @@ public abstract class IRender2DModule extends BaseModule {
         if (checkNull()) return;
         if (enable.get() && !event.context.hudHidden()) {
             VDrawContext vdraw = event.context.drawContext();
-            vdraw.pushMatrix();
+            vdraw.getMatrices().pushMatrix();
             try {
                 handleRenderPosition(vdraw);
                 render2D(vdraw, event.context.partialTicks());
             } finally {
-                vdraw.popMatrix();
+                vdraw.getMatrices().popMatrix();
             }
         }
     }
@@ -88,6 +88,4 @@ public abstract class IRender2DModule extends BaseModule {
     }
 
     public abstract void render2D(VDrawContext vdraw, float partialTicks);
-
-    public static final float HEIGHT = 9;
 }

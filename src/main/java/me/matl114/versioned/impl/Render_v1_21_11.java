@@ -14,6 +14,8 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.awt.*;
 import java.util.List;
 import java.util.function.Function;
+import me.matl114.plugins.MainPlugin;
+import me.matl114.renderer.TextRenderers;
 import me.matl114.utils.render.ColorQuad;
 import me.matl114.utils.render.Quad;
 import me.matl114.utils.render.UV;
@@ -227,6 +229,33 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
                         .createRenderSetup());
     }));
 
+    /**
+     * 实体高亮管线：拿实体贴图铺在模型面上，不做深度测试。
+     * 片元着色器见 {@code assets/slimefunhelper/shaders/core/entity_highlight.fsh}。
+     */
+    public static final RenderPipeline ENTITY_HIGHLIGHT =
+            RenderPipelines.register(RenderPipeline.builder(RenderPipelines.OUTLINE_SNIPPET)
+                    .withLocation(MainPlugin.identifier("pipeline/entity_highlight"))
+                    .withFragmentShader(MainPlugin.identifier("core/entity_highlight"))
+                    .withDepthStencilState(NO_DEPTH_TEST_STATE)
+                    .withCull(false)
+                    .build());
+
+    /**
+     * 实体高亮层：直接用实体贴图铺在它的模型面上。
+     *
+     * <p>上游原本自己注册一条 {@code OUTLINE} 片段 + 无深度测试的管线；26.2 里
+     * {@code RenderPipelines} 的 snippet 全是 private，独立管线需要 AW 才能拼出来，
+     * 这里先用公开的 {@link RenderPipelines#OUTLINE_NO_CULL}，代价是保留深度测试。
+     */
+    public static Function<Identifier, RenderType> ENTITY_HIGHLIGHT_FACTORY = Util.memoize((identifier -> {
+        return RenderType.create(
+                MainPlugin.ID + ":entity_highlight/" + identifier.toString(),
+                RenderSetup.builder(ENTITY_HIGHLIGHT)
+                        .withTexture("Sampler0", identifier)
+                        .createRenderSetup());
+    }));
+
     // ------------------------------------------------------------------
     // 层提交
     // ------------------------------------------------------------------
@@ -269,6 +298,11 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
 
     public void createSpriteTexturedLayer(TextureAtlasSprite sprite, RenderCallback callback) {
         createLayer(GUI_SPRITE_TEXTURE_3D_FACTORY.apply(sprite.atlasLocation()), callback);
+    }
+
+    @Override
+    public void createEntityHighlightLayer(Identifier path, RenderCallback callback) {
+        createLayer(ENTITY_HIGHLIGHT_FACTORY.apply(path), callback);
     }
 
     public void createGuiLayer(RenderCallback callback) {
@@ -582,8 +616,6 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     // 文字 / 物品（26.2 改为提交到 collector）
     // ------------------------------------------------------------------
 
-    private static final float TEXT_HEIGHT = 9.0f;
-
     @Override
     public void drawTextCameraCoord(
             FormattedCharSequence orderedText,
@@ -598,9 +630,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
         }
         int xAlign = displayPositionFlag % 3;
         int yAlign = displayPositionFlag / 3;
-        int width = mc.font.width(orderedText);
+        var textDrawer = TextRenderers.get();
+        int width = textDrawer.getWidth(orderedText);
         float xStart = -((width * xAlign) / 2.0F);
-        float yStart = -((TEXT_HEIGHT * yAlign) / 2.0F);
+        float yStart = -((textDrawer.getTextHeight() * yAlign) / 2.0F);
         stack.pushPose();
         stack.translate(vec3d.x, vec3d.y, vec3d.z);
         stack.scale(1, -1, 1);

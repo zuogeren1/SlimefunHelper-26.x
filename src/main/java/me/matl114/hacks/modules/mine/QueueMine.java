@@ -44,8 +44,10 @@ public class QueueMine extends BaseModule {
     public final KeyBindRef hotkey = moduleEntry(packetMine.addHotkey(), new MultiKeyBind(), packetMine.addEnable())
             .build();
 
-    public final IntRef queueSize =
-            intBuilder(packetMine.add("queue-size")).defaultValue(2).build();
+    public final IntRef queueSize = intBuilder(packetMine.add("queue-size"))
+            .defaultValue(2)
+            .validator(Configs.intRange(0, 100))
+            .build();
 
     public final FlagRef useDoubleBreak =
             flagBuilder(packetMine.add("double-break")).build();
@@ -55,9 +57,9 @@ public class QueueMine extends BaseModule {
 
     public final FlagRef supportDoubleBreakGhostHand =
             flagBuilder(packetMine.add("double-break-ghost-hand")).build();
-    //
-    //    public final FlagRef rotate = flagBuilder(packetMine.add("rotate-when-break"))
-    //        .build();
+
+    public final FlagRef eatingAbort =
+            flagBuilder(packetMine.add("eating-abort")).build();
 
     public final FlagRef render = flagBuilder(packetMine.add("render")).build();
 
@@ -76,18 +78,25 @@ public class QueueMine extends BaseModule {
 
     int lastSumitTick = 0;
     RenderCollector<AABB> outline = RenderCollectors.createBoxCollector(true, false, false);
+    boolean lastRequestContainsDoubleBreak = false;
 
-    public void onPostInputEvent(Event<Void> eventVoid) {
-        outline.clear();
+    public void onPostInputEvent() {
         if (checkNull()) return;
-        if (lastSumitTick != Tasks.getTick()) {
-            tickQueue();
+
+        if (!(mc.player.isUsingItem() && eatingAbort.get())) {
+            if (lastSumitTick != Tasks.getTick()) {
+                tickQueue();
+            }
+            if (PlayerInteractionAccess.of(mc.gameMode).getCurrentFailBreakPos() != null) {
+                if (useDoubleBreak.get() && supportDoubleBreakGhostHand.get()) {
+                    MineExtra.INSTANCE.tickGhostHandDoubleBreak(
+                            null, MineExtra.INSTANCE.ghostHandFailBreakMode.get(), false);
+                }
+            } else {
+                lastRequestContainsDoubleBreak = false;
+            }
         }
-        if (useDoubleBreak.get()
-                && supportDoubleBreakGhostHand.get()
-                && PlayerInteractionAccess.of(mc.gameMode).getCurrentFailBreakPos() != null) {
-            MineExtra.INSTANCE.tickGhostHandDoubleBreak(null, false);
-        }
+
         for (var re : breakRequest) {
             outline.submit(new AABB(re).inflate(-0.2), color.get().withAlpha(255));
         }
@@ -124,6 +133,7 @@ public class QueueMine extends BaseModule {
                     if (currentCanDoubleBreak) {
                         access.sendFailBreakCurrentPos(null);
                         currentCanDoubleBreak = false;
+                        lastRequestContainsDoubleBreak = true;
                         breakRequest.poll();
                     } else {
                         if (Objects.equals(access.getCurrentMiningPos(), posLatest)) {
@@ -137,6 +147,7 @@ public class QueueMine extends BaseModule {
                 } else if (currentCanDoubleBreak) {
                     access.sendFailBreakCurrentPos(null);
                     currentCanDoubleBreak = false;
+                    lastRequestContainsDoubleBreak = true;
                     breakRequest.poll();
                 } else {
                     break;
@@ -158,13 +169,14 @@ public class QueueMine extends BaseModule {
         if (enable.get()) {
             HitResult hitResult = event.context;
             if (hitResult.getType() == HitResult.Type.BLOCK) {
-                boolean att = event.getArgs(0);
                 BlockHitResult blockHitResult = (BlockHitResult) hitResult;
                 BlockPos pos = blockHitResult.getBlockPos().immutable();
                 event.cancel();
                 if (sumitMine(pos)) {
-                    lastSumitTick = Tasks.getTick();
-                    tickQueue();
+                    if (!(mc.player.isUsingItem() && eatingAbort.get())) {
+                        lastSumitTick = Tasks.getTick();
+                        tickQueue();
+                    }
                     if (breakRequest.size() > queueSize.get()) {
                         breakRequest.poll();
                     }
@@ -188,7 +200,7 @@ public class QueueMine extends BaseModule {
         if (render.get()) {
             RenderUtils.startDrawVirtual(eventRender.context.stack());
             try {
-                outline.render3D(eventRender.context.stack());
+                outline.render3D(eventRender.context.stack(), eventRender.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(eventRender.context.stack());
             }

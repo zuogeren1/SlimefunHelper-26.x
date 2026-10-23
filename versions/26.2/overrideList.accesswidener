@@ -103,3 +103,6 @@ accessible	field	net/minecraft/network/protocol/game/ClientboundMoveEntityPacket
 accessible	class	net/minecraft/client/multiplayer/prediction/BlockStatePredictionHandler$ServerVerifiedState
 accessible	field	net/minecraft/client/multiplayer/prediction/BlockStatePredictionHandler$ServerVerifiedState	sequence	I
 accessible	field	net/minecraft/client/multiplayer/prediction/BlockStatePredictionHandler$ServerVerifiedState	blockState	Lnet/minecraft/world/level/block/state/BlockState;
+accessible	field	net/minecraft/client/renderer/rendertype/RenderType	state	Lnet/minecraft/client/renderer/rendertype/RenderSetup;
+accessible	field	net/minecraft/client/renderer/rendertype/RenderSetup	textures	Ljava/util/Map;
+accessible	class	net/minecraft/client/renderer/rendertype/RenderSetup$TextureBinding

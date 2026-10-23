@@ -289,7 +289,12 @@ public abstract class MinecraftClientMixin implements Cloneable, ClientAccess {
     }
 
     @Unique
-    boolean blockAttack = false;
+    private boolean blockAttack;
+
+    @Inject(method = "startAttack", at = @At("HEAD"))
+    private void resetBlockAttack(CallbackInfoReturnable<Boolean> cir) {
+        blockAttack = false;
+    }
 
     @Inject(
             method = "startAttack",

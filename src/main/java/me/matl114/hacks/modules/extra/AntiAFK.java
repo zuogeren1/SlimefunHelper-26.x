@@ -1,6 +1,7 @@
 package me.matl114.hacks.modules.extra;
 
 import me.matl114.events.Event;
+import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.move.PlayerInputManager;
@@ -33,7 +34,10 @@ public class AntiAFK extends BaseModule {
 
     public final FlagRef rotate = flagBuilder(root.add("rotate")).build();
 
-    public final IntRef delay = intBuilder(root.add("delay")).defaultValue(1200).build();
+    public final IntRef delay = intBuilder(root.add("delay"))
+            .defaultValue(1200)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     boolean lastForward = false;
     boolean lastRotateBack = false;
@@ -60,7 +64,7 @@ public class AntiAFK extends BaseModule {
                 if (jump.get()) {
                     modifier = modifier.withJump(true);
                 }
-                PlayerInputManager.INSTANCE.addInputModifier(modifier, 1);
+                PlayerInputManager.INSTANCE.addInputModifier(modifier, 0);
             }
             if (swing.get()) {
                 mc.player.swing(InteractionHand.MAIN_HAND);

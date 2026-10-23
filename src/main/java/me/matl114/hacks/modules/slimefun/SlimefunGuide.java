@@ -1,5 +1,6 @@
 package me.matl114.hacks.modules.slimefun;
 
+import me.matl114.hacks.utils.recipes.WrapRecipe;
 import static me.matl114.gui.FilterService.*;
 
 import java.util.*;
@@ -194,8 +195,8 @@ public class SlimefunGuide extends BaseModule {
                                                 return false;
                                             }
                                         })),
-                        RecipeTasks.RecipeRecord::output)
-                .setSearchFilter((BiPredicate<String, RecipeTasks.RecipeRecord>) (BiPredicate) RECIPE_FILTER));
+                        WrapRecipe::output)
+                .setSearchFilter((BiPredicate<String, WrapRecipe>) (BiPredicate) RECIPE_FILTER));
     }
 
     public void onClickRecipeType(String type, boolean isLeft) {
@@ -203,7 +204,7 @@ public class SlimefunGuide extends BaseModule {
         List<RecipeEntry> myEntry;
 
         if (RecipeTasks.isVanillaRecipeType(type)) {
-            Map<Identifier, RecipeTasks.RecipeRecord> myCache = RecipeTasks.getAllRecipe();
+            Map<Identifier, WrapRecipe> myCache = RecipeTasks.getAllRecipe();
             myEntry = myCache
                     .values() // RecipeTasks.getRecipeByType(type1)
                     .stream()

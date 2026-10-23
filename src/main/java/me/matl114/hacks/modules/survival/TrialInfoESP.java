@@ -2,17 +2,23 @@ package me.matl114.hacks.modules.survival;
 
 import java.util.*;
 import me.matl114.accessors.access.ChunkAccess;
+import me.matl114.accessors.interfaces.MetadataHolder;
 import me.matl114.events.Event;
+import me.matl114.events.impl.BlockUpdate;
+import me.matl114.events.impl.Render2D;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.utils.config.TracingOption;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.hacks.utils.render.RenderElements;
+import me.matl114.hacks.utils.render.RenderMode;
 import me.matl114.hacks.utils.tasks.TimerExecutor;
 import me.matl114.managers.Configs;
+import me.matl114.managers.config.*;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
@@ -26,22 +32,32 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.TrialSpawnerBlock;
 import net.minecraft.world.level.block.VaultBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.entity.BlockEntityTypes;
 import net.minecraft.world.level.block.entity.TrialSpawnerBlockEntity;
 import net.minecraft.world.level.block.entity.trialspawner.TrialSpawnerState;
 import net.minecraft.world.level.block.entity.vault.VaultBlockEntity;
 import net.minecraft.world.level.block.entity.vault.VaultSharedData;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 public class TrialInfoESP extends BaseModule {
     public TrialInfoESP() {
         super("TrialESP");
+        bindFlag(enable);
     }
 
     public final ModulePath root = makePath(Configs.SURVIVAL_CONFIG, "render-utils.trial-esp");
@@ -56,12 +72,38 @@ public class TrialInfoESP extends BaseModule {
             .validator(Configs.doubleRange(0.1D, 4.0D))
             .build();
 
-    public final NBTRef<WrapColor> color = builder(root.add("color"), WrapColor.class)
+    public final DoubleRef textOffset =
+            doubleBuilder(root.add("text-offset")).defaultValue(1.0D).build();
+
+    public final NBTRef<TracingOption> traceOption = builder(root.add("trace-option"), TracingOption.class)
+            .defaultValue(new TracingOption(true, false))
+            .build();
+
+    public final FlagRef renderEnterPosition =
+            flagBuilder(root.add("render-enter-position")).build();
+
+    public final EnumRef<RenderMode> textMode = builder(root.add("text-mode"), RenderMode.class)
+            .defaultValue(RenderMode.RENDER_2D)
+            .build();
+
+    public final NBTRef<WrapColor> colorSpawner = builder(root.add("color-spawner"), WrapColor.class)
+            .defaultValue(new WrapColor(ChatFormatting.YELLOW))
+            .build();
+
+    public final NBTRef<WrapColor> colorVaultSimple = builder(root.add("color-vault-simple"), WrapColor.class)
             .defaultValue(new WrapColor(ChatFormatting.AQUA))
             .build();
 
-    public final NBTRef<WrapColor> color2 = builder(root.add("color2"), WrapColor.class)
+    public final NBTRef<WrapColor> colorVaultOminous = builder(root.add("color-vault-ominous"), WrapColor.class)
+            .defaultValue(new WrapColor(ChatFormatting.GOLD))
+            .build();
+
+    public final NBTRef<WrapColor> colorNotActive = builder(root.add("color-not-active"), WrapColor.class)
             .defaultValue(new WrapColor(ChatFormatting.RED))
+            .build();
+
+    public final NBTRef<WrapColor> colorMisc = builder(root.add("color-misc"), WrapColor.class)
+            .defaultValue(new WrapColor(ChatFormatting.YELLOW))
             .build();
 
     @Override
@@ -70,17 +112,41 @@ public class TrialInfoESP extends BaseModule {
         registerListener(Listener.getPostGameTick(), this::onTick);
         registerListener(RenderListener.getRender3DEvent(), this::onRender3D);
         registerListener(Listener.getWorldSwitchPoint(), this::onSwitchWorld);
+        registerListener(
+                Listener.getBlockUpdateListener().getChannel(Blocks.TRIAL_SPAWNER), this::onTrialSpawnerActivated);
+        registerListener(RenderListener.getRender2DEvent(), this::onRender2D);
     }
 
-    public RenderCollector<RenderElements.Text> textCollector = RenderCollectors.createTextCollector();
+    public final RenderCollector<RenderElements.Text> textCollector = RenderCollectors.createTextCollector();
+    public final RenderCollector<List<Vec3>> lineRenderCollector = RenderCollectors.createLinesCollector();
+    public final RenderCollector<AABB> boxCollector = RenderCollectors.createBoxCollector(true, false, false);
+    public final RenderCollector<AABB> boxCollector2 = RenderCollectors.createBoxCollector(false, true, false);
+    public final RenderCollector<Vec3> traceCollector = RenderCollectors.createTracerCollector();
+    private static final String TRIAL_MOB_METADATA_KEY = "slimefunhelper:trial_esp/trial_mob";
     private Map<ChunkPos, Set<BlockPos>> cachedVaultsAndTrials = new HashMap<>();
+    private BlockPos enterTrialPosition;
     TimerExecutor cacheClearTimer = new TimerExecutor();
 
-    public void onTick(Event<LocalPlayer> event) {
+    public void onTick() {
         if (cacheClearTimer.run(1000)) {
             cachedVaultsAndTrials = new HashMap<>();
         }
         textCollector.clear();
+        lineRenderCollector.clear();
+        boxCollector.clear();
+        boxCollector2.clear();
+        traceCollector.clear();
+        TracingOption tracingOption = traceOption.get();
+        int miscRgb = colorMisc.get().withAlpha(255);
+        if (enterTrialPosition != null
+                && mc.player != null
+                && mc.player.distanceToSqr(Vec3.atCenterOf(enterTrialPosition)) > 256.0D * 256.0D) {
+            enterTrialPosition = null;
+        }
+        if (renderEnterPosition.get() && enterTrialPosition != null) {
+            Vec3 start = Vec3.atCenterOf(enterTrialPosition);
+            lineRenderCollector.submit(List.of(start, start.add(256.0D, 0.0D, 0.0D)), miscRgb);
+        }
         if (enable.get()) {
             for (var chunk : CommonUtils.chunks(false)) {
                 ChunkPos pos = chunk.getPos();
@@ -95,18 +161,28 @@ public class TrialInfoESP extends BaseModule {
                     cachedVaultsAndTrials.put(pos, sets);
                 }
             }
+            boolean anyTrialNearby = false;
             for (var re : cachedVaultsAndTrials.values()) {
                 for (var bp : re) {
-                    boolean accept = false;
+                    anyTrialNearby = true;
                     BlockEntity be = mc.level.getBlockEntity(bp);
                     List<Component> textLines = new ArrayList<>();
+                    WrapColor color;
                     if (be instanceof TrialSpawnerBlockEntity be1) {
-                        accept = true;
                         BlockState currentState = mc.level.getBlockState(bp);
                         TrialSpawnerState state = currentState.getValue(TrialSpawnerBlock.STATE);
+                        if (state == TrialSpawnerState.COOLDOWN) {
+                            highlightTrialKey(bp, miscRgb, tracingOption);
+                        }
+                        if (state == TrialSpawnerState.ACTIVE) {
+                            markTrialMobs(be1, bp);
+                            color = colorSpawner.get();
+                        }
                         if (state == TrialSpawnerState.WAITING_FOR_PLAYERS) {
+                            color = colorSpawner.get();
                             textLines.add(Component.translatable("message.module.trial-info-esp.display.trial-ready"));
                         } else if (state == TrialSpawnerState.COOLDOWN) {
+                            color = colorNotActive.get();
                             OptionalLong cooldownLong = WorldManager.INSTANCE.getTrialSpawnerCooldownStartTime(be1);
                             String time;
                             if (cooldownLong.isPresent()) {
@@ -118,10 +194,10 @@ public class TrialInfoESP extends BaseModule {
                             } else {
                                 time = "?";
                             }
-                            textLines.add(Component.translatable(
-                                    "message.module.trial-info-esp.display.trial-cooldown", time));
-                            accept = false;
+                            textLines.add(
+                                    Component.translatable("message.module.trial-info-esp.display.trial-cooldown", time));
                         } else if (state != TrialSpawnerState.INACTIVE) {
+                            color = colorNotActive.get();
                             OptionalLong activeLong = WorldManager.INSTANCE.getTrialSpawnerActiveStartTime(be1);
                             String time;
                             if (activeLong.isPresent()) {
@@ -135,6 +211,8 @@ public class TrialInfoESP extends BaseModule {
                             }
                             textLines.add(
                                     Component.translatable("message.module.trial-info-esp.display.trial-active", time));
+                        } else {
+                            color = colorNotActive.get();
                         }
                         var entity = be1.getTrialSpawner()
                                 .getStateData()
@@ -149,37 +227,50 @@ public class TrialInfoESP extends BaseModule {
                         boolean omin = currentState.getValue(VaultBlock.OMINOUS);
                         textLines.add(
                                 omin
-                                        ? Component.translatable(
-                                                "message.module.trial-info.esp.display.vault-type.ominous")
-                                        : Component.translatable(
-                                                "message.module.trial-info.esp.display.vault-type.common"));
-                        VaultSharedData sharedData = be2.getSharedData();
-                        var item = sharedData.hasDisplayItem();
-                        if (item) {
-                            accept = true;
+                                        ? Component.translatable("message.module.trial-info.esp.display.vault-type.ominous")
+                                        : Component.translatable("message.module.trial-info.esp.display.vault-type.common"));
+                        var set = be2.getSharedData().getConnectedPlayers();
+                        Set<UUID> openedPlayers = WorldManager.INSTANCE.getVaultOpenPlayers(be2);
+                        Set<UUID> uid2 = new HashSet<>(openedPlayers);
+                        uid2.removeAll(set);
+                        if (uid2.size() != openedPlayers.size()) {
+                            WorldManager.INSTANCE.recordVaultOpenedBy(be2, uid2);
+                            openedPlayers = uid2;
+                        }
+                        if (!openedPlayers.contains(mc.player.getUUID())) {
                             textLines.add(Component.translatable("message.module.trial-info-esp.display.vault-can-open"));
+                            color = omin ? colorVaultOminous.get() : colorVaultSimple.get();
                         } else {
                             textLines.add(
                                     Component.translatable("message.module.trial-info-esp.display.vault-can-not-open"));
+                            color = colorNotActive.get();
                         }
-                        var set = sharedData.getConnectedPlayers();
-
-                        if (!set.isEmpty()) {
-                            textLines.add(Component.translatable(
-                                    "message.module.trial-info-esp.display.vault-opened-times", set.size()));
-                        }
+                    } else {
+                        continue;
                     }
                     if (!textLines.isEmpty()) {
                         MutableComponent result = Component.empty().append(textLines.get(0));
                         for (int i = 1; i < textLines.size(); i++) {
                             result = result.append(Component.literal("\n")).append(textLines.get(i));
                         }
-                        Vec3 textPos = Vec3.atCenterOf(bp).add(0.0D, 0.4, 0.0D);
+                        Vec3 textPos = Vec3.atCenterOf(bp).add(0.0D, textOffset.get(), 0.0D);
                         textCollector.submit(
                                 new RenderElements.Text(result, textPos, (float) textScale.get()),
-                                accept
-                                        ? color.get().withAlpha(255)
-                                        : color2.get().withAlpha(255));
+                                color.withAlpha(255));
+                    }
+                    if (tracingOption.box()) {
+                        boxCollector.submit(new AABB(bp), color.withAlpha(255));
+                        boxCollector2.submit(new AABB(bp), color.withAlpha(64));
+                    }
+                    if (tracingOption.line()) {
+                        traceCollector.submit(Vec3.atCenterOf(bp), color.withAlpha(255));
+                    }
+                }
+            }
+            if (anyTrialNearby) {
+                for (Entity entity : mc.level.entitiesForRendering()) {
+                    if (hasTrialMobMetadata(entity)) {
+                        submitHighlight(entity, miscRgb, tracingOption);
                     }
                 }
             }
@@ -193,13 +284,85 @@ public class TrialInfoESP extends BaseModule {
         }
         RenderUtils.startDrawVirtual(event.context().stack());
         try {
-            textCollector.render3D(event.context().stack());
+            if (textMode.get().isIn(RenderMode.RENDER_3D)) {
+                textCollector.render3D(event.context().stack(), event.context().partialTicks());
+            }
+            lineRenderCollector.render3D(
+                    event.context().stack(), event.context().partialTicks());
+            traceCollector.render3D(event.context().stack(), event.context().partialTicks());
+            boxCollector.render3D(event.context().stack(), event.context().partialTicks());
+            boxCollector2.render3D(event.context().stack(), event.context().partialTicks());
         } finally {
             RenderUtils.stopDrawVirtual(event.context().stack());
         }
     }
 
-    private void onSwitchWorld(Event<Level> event) {
+    public void onRender2D(Event<Render2D> vdraw) {
+        if (checkNull()) return;
+        if (!enable.get()) {
+            return;
+        }
+        if (textMode.get().isIn(RenderMode.RENDER_2D)) {
+            vdraw.context.drawContext().pushMatrix();
+            try {
+                textCollector.render2D(
+                        vdraw.context.drawContext(), vdraw.context().partialTicks());
+            } finally {
+                vdraw.context.drawContext().popMatrix();
+            }
+        }
+    }
+
+    private void highlightTrialKey(BlockPos spawnerPos, int color, TracingOption tracingOption) {
+        AABB keyBox = new AABB(spawnerPos.above());
+        for (ItemEntity item : mc.level.getEntities(EntityTypes.ITEM, keyBox, entity -> {
+            ItemStack stack = entity.getItem();
+            return stack.is(Items.TRIAL_KEY) || stack.is(Items.OMINOUS_TRIAL_KEY);
+        })) {
+            submitHighlight(item, color, tracingOption);
+        }
+    }
+
+    private void markTrialMobs(TrialSpawnerBlockEntity spawner, BlockPos spawnerPos) {
+        int radius = spawner.getTrialSpawner().getRequiredPlayerRange();
+        AABB range = new AABB(spawnerPos).inflate(radius);
+        for (Entity entity : mc.level.getEntitiesOfClass(Mob.class, range, candidate -> true)) {
+            if (entity instanceof MetadataHolder holder) {
+                holder.getMetadata().put(this, TRIAL_MOB_METADATA_KEY, Boolean.TRUE);
+            }
+        }
+    }
+
+    private boolean hasTrialMobMetadata(Entity entity) {
+        return entity instanceof MetadataHolder holder
+                && !holder.isMetaEmpty()
+                && Boolean.TRUE.equals(holder.getMetadata().get(this, TRIAL_MOB_METADATA_KEY));
+    }
+
+    private void submitHighlight(Entity entity, int color, TracingOption tracingOption) {
+        if (tracingOption.box()) {
+            boxCollector.submit(entity.getBoundingBox(), color);
+        }
+        if (tracingOption.line()) {
+            traceCollector.submit(entity.getBoundingBox().getCenter(), color);
+        }
+    }
+
+    private void onTrialSpawnerActivated(Event<BlockUpdate> event) {
+        if (!enable.get() || enterTrialPosition != null) {
+            return;
+        }
+        BlockState oldState = event.context.oldState();
+        BlockState newState = event.context.newState();
+        if (oldState.getBlock() == Blocks.TRIAL_SPAWNER
+                && newState.getBlock() == Blocks.TRIAL_SPAWNER
+                && oldState.getValue(TrialSpawnerBlock.STATE) != TrialSpawnerState.ACTIVE
+                && newState.getValue(TrialSpawnerBlock.STATE) == TrialSpawnerState.ACTIVE) {
+            enterTrialPosition = event.context.pos().immutable();
+        }
+    }
+
+    private void onSwitchWorld() {
         cachedVaultsAndTrials.clear();
     }
 }

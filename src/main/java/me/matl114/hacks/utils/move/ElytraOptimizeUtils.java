@@ -26,54 +26,90 @@ public class ElytraOptimizeUtils {
     private static final double[] V5_EXTRA_YAWS = {0.0D, 90.0D, 180.0D, 270.0D};
     private static final double V5_FALLBACK_REQUEST_SPEED = 1.7D;
     private static final double V5_EPSILON = 1E-9D;
+    private static final double V3_GREEDY_REQUEST_SPEED = 1.7D;
+    private static final float[] V3_GREEDY_YAWS = {45.0F, 135.0F, 225.0F, 315.0F};
 
-    public static Vec3 calculateBestPullupSpeed(Vec3 vec3d) {
-
-        if (ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V3)) {
-            return calculateBestV3ClimbingSpeed(vec3d);
-        }
-        if (ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V4)) {
-            return calculateBestV4ClimbingSpeed(vec3d);
-        }
-        if (ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V5)) {
-            Vec2 py = EntityUtils.rotationToPitchYaw(vec3d.normalize());
-            if (py.x < V5_PITCH) {
-                return vec3d;
-            }
-            double pitchDeg = -5;
-            if (py.x > pitchDeg) {
-                return vec3d;
-            }
-            return EntityUtils.pitchYawToRotation(V5_PITCH, py.y);
-        }
-        if (ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V5_PULLUP_ONLY)) {
-            return calculateBestV5ClimbingSpeed(vec3d);
-        }
-
-        double horizontal = vec3d.horizontalDistance();
-        if (horizontal < 1E-6) {
-            vec3d = vec3d.with(Direction.Axis.X, 5);
-            horizontal = vec3d.horizontalDistance();
-        }
-        double pitchDeg = ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V1) ? -36 : -54.5;
-        double pitchRad = Math.toRadians(pitchDeg);
-        // 使用 -tan(pitch) 来抵消符号，或者直接用 tan(54.5)
-        double newY = -horizontal * Math.tan(pitchRad);
-        // 等价写法：double newY = horizontal * Math.tan(Math.toRadians(54.5));
-
-        // 4. 返回新的向量（保持 x 和 z 不变，仅替换 y）
-        return vec3d.with(Direction.Axis.Y, newY);
+    public static ElytraExtra.Al getPullupOnlyAl(ElytraExtra.Al al) {
+        return switch (al) {
+            case V3, V3_PULLUP_ONLY -> ElytraExtra.Al.V3_PULLUP_ONLY;
+            case V4, V5, V5_PULLUP_ONLY -> ElytraExtra.Al.V5_PULLUP_ONLY;
+            default -> al;
+        };
     }
 
-    public static float calculateBestPullUpAngle(float yaw) {
-        Vec3 bestRotation = calculateBestPullupSpeed(EntityUtils.pitchYawToRotation(-45, yaw));
-        return EntityUtils.rotationToPitchYaw(bestRotation).x;
+    public static Vec2 calculateBestPullupSpeed(float pitch, float yaw, ElytraExtra.Al al) {
+        if (al == null) return new Vec2(pitch, yaw);
+        Vec3 vec3d = EntityUtils.pitchYawToRotation(pitch, yaw);
+        switch (al) {
+            case V3 -> {
+                return calculateBestV3ClimbingSpeed(pitch, yaw);
+            }
+            case V3_PULLUP_ONLY -> {
+                return calculateBestV3GreedyClimbingSpeed();
+            }
+            case V4 -> {
+                return calculateBestV4ClimbingSpeed(pitch, yaw);
+            }
+            case V5 -> {
+                if (!ViaFabricPlusHooks.isSupportDupRot()) {
+                    return calculateBestV3ClimbingSpeed(pitch, yaw);
+                }
+                if (pitch < V5_PITCH) {
+                    return new Vec2(pitch, yaw);
+                }
+                double pitchDeg = -5;
+                if (pitch > pitchDeg) {
+                    return new Vec2(pitch, yaw);
+                }
+                return new Vec2(V5_PITCH, yaw);
+            }
+            case V5_PULLUP_ONLY -> {
+                return calculateBestV5ClimbingSpeed(pitch, yaw);
+            }
+            case V1 -> {
+                double horizontal = vec3d.horizontalDistance();
+                if (horizontal < 1E-6) {
+                    vec3d = vec3d.with(Direction.Axis.X, 5);
+                    horizontal = vec3d.horizontalDistance();
+                }
+                double pitchDeg = -36;
+                double pitchRad = Math.toRadians(pitchDeg);
+                // 使用 -tan(pitch) 来抵消符号，或者直接用 tan(54.5)
+                double newY = -horizontal * Math.tan(pitchRad);
+                // 等价写法：double newY = horizontal * Math.tan(Math.toRadians(54.5));
+
+                // 4. 返回新的向量（保持 x 和 z 不变，仅替换 y）
+                return new Vec2(-36.0F, yaw);
+            }
+            case V2 -> {
+                double horizontal = vec3d.horizontalDistance();
+                if (horizontal < 1E-6) {
+                    vec3d = vec3d.with(Direction.Axis.X, 5);
+                    horizontal = vec3d.horizontalDistance();
+                }
+                double pitchDeg = -54.5;
+                double pitchRad = Math.toRadians(pitchDeg);
+                // 使用 -tan(pitch) 来抵消符号，或者直接用 tan(54.5)
+                double newY = -horizontal * Math.tan(pitchRad);
+                // 等价写法：double newY = horizontal * Math.tan(Math.toRadians(54.5));
+
+                // 4. 返回新的向量（保持 x 和 z 不变，仅替换 y）
+                return new Vec2(-54.5F, yaw);
+            }
+        }
+        return new Vec2(pitch, yaw);
     }
 
-    public static Vec3 calculateBestV3ClimbingSpeed(Vec3 rotation) {
-        Vec2 py = EntityUtils.rotationToPitchYaw(rotation);
-        float pitchDeg = py.x;
-        float yawDeg = py.y;
+    public static float calculateBestPullUpAngle(float yaw, ElytraExtra.Al al) {
+        return calculateBestPullUpRotation(yaw, al).x;
+    }
+
+    public static Vec2 calculateBestPullUpRotation(float yaw, ElytraExtra.Al al) {
+        return calculateBestPullupSpeed(-45.0F, yaw, al);
+    }
+
+    public static Vec2 calculateBestV3ClimbingSpeed(float pitch, float yaw) {
+        float yawDeg = yaw;
 
         // 2. 计算水平方向的最大分量 M = max(|sin(yaw)|, |cos(yaw)|)
         double yawRad = Math.toRadians(yawDeg);
@@ -90,43 +126,104 @@ public class ElytraOptimizeUtils {
         float newPitchDeg = (float) Math.toDegrees(newPitchRad);
 
         // 4. 用新的俯仰角和原始偏航角重新组合视线方向向量
-        return EntityUtils.pitchYawToRotation(newPitchDeg, yawDeg);
+        return new Vec2(newPitchDeg, yawDeg);
     }
 
-    public static Vec3 calculateBestV4ClimbingSpeed(Vec3 rotation) {
-        Vec2 py = EntityUtils.rotationToPitchYaw(rotation);
-        float yawDeg = py.y;
+    public static Vec2 calculateBestV3GreedyClimbingSpeed() {
+        // Match new18: pair-plan score is horizontal speed over the next two ticks (lambda = 0).
+        Vec3 velocity = PlayerStateManager.INSTANCE.lastKnownClientVelocity;
+        Vec3 previousLook = EntityUtils.pitchYawToRotation(
+                        PlayerStateManager.INSTANCE.lastPitch, PlayerStateManager.INSTANCE.lastYaw)
+                .normalize();
+        float previousYaw = EntityUtils.rotationToPitchYaw(previousLook).y;
+        double autoRescaleAmount = ElytraExtra.INSTANCE.autoRescaleAmount.get();
+        double bestScore = Double.NEGATIVE_INFINITY;
+        float bestYaw = previousYaw;
+        float bestPitch = 45;
+        float bestSecondYaw = previousYaw;
+        for (float firstYaw : V3_GREEDY_YAWS) {
+            Vec2 firstAngles = calculateBestV3ClimbingSpeed(-45.0F, firstYaw);
+            Vec3 firstLook =
+                    EntityUtils.pitchYawToRotation(firstAngles.x, firstAngles.y).normalize();
+            Vec3 firstRequest = firstLook.scale(V3_GREEDY_REQUEST_SPEED);
+            Vec3 firstVelocity = simulateV3GreedyCandidate(
+                    velocity, previousLook, firstRequest, firstAngles.x, firstAngles.y, autoRescaleAmount);
+            for (float secondYaw : V3_GREEDY_YAWS) {
+                Vec2 secondAngles = calculateBestV3ClimbingSpeed(-45.0F, secondYaw);
+                Vec3 secondRequest = EntityUtils.pitchYawToRotation(secondAngles.x, secondAngles.y)
+                        .normalize()
+                        .scale(V3_GREEDY_REQUEST_SPEED);
+                Vec3 secondVelocity = simulateV3GreedyCandidate(
+                        firstVelocity, firstLook, secondRequest, secondAngles.x, secondAngles.y, autoRescaleAmount);
+                double score = firstVelocity.horizontalDistance() + secondVelocity.horizontalDistance();
+                double currentDelta = absoluteYawDelta(firstYaw, previousYaw);
+                double bestDelta = absoluteYawDelta(bestYaw, previousYaw);
+                boolean currentSwitches = firstYaw != secondYaw;
+                boolean bestSwitches = bestYaw != bestSecondYaw;
+                if (score > bestScore
+                        || (Double.compare(score, bestScore) == 0
+                                && (currentSwitches != bestSwitches ? !currentSwitches : currentDelta < bestDelta))) {
+                    bestScore = score;
+                    bestYaw = firstYaw;
+                    bestPitch = firstAngles.x;
+                    bestSecondYaw = secondYaw;
+                }
+            }
+        }
+        return new Vec2(bestPitch, bestYaw);
+    }
+
+    private static Vec3 simulateV3GreedyCandidate(
+            Vec3 velocity, Vec3 previousLook, Vec3 request, float pitch, float yaw, double autoRescaleAmount) {
+        Vec3 savedVelocity = PlayerStateManager.INSTANCE.lastKnownClientVelocity;
+        float savedPitch = PlayerStateManager.INSTANCE.lastPitch;
+        float savedYaw = PlayerStateManager.INSTANCE.lastYaw;
+        Vec2 previousAngles = EntityUtils.rotationToPitchYaw(previousLook);
+        PlayerStateManager.INSTANCE.lastKnownClientVelocity = velocity;
+        PlayerStateManager.INSTANCE.lastPitch = previousAngles.x;
+        PlayerStateManager.INSTANCE.lastYaw = previousAngles.y;
+        try {
+            return applyAxisLimit30_Greedy(request, pitch, yaw, autoRescaleAmount, false);
+        } finally {
+            PlayerStateManager.INSTANCE.lastKnownClientVelocity = savedVelocity;
+            PlayerStateManager.INSTANCE.lastPitch = savedPitch;
+            PlayerStateManager.INSTANCE.lastYaw = savedYaw;
+        }
+    }
+
+    public static Vec2 calculateBestV4ClimbingSpeed(float pitch, float yaw) {
+        float yawDeg = yaw;
         double yawRad = Math.toRadians(yawDeg);
         double sinY = Math.abs(Math.sin(yawRad));
         double cosY = Math.abs(Math.cos(yawRad));
         double m = Math.max(sinY, cosY);
 
-        // applyAxisLimit4 refreshes lastLook via snapAt(...), so the climb-side
-        // horizontal saturation boundary changes from cos(pitch)=0.5/M to
-        // cos(pitch)=1/M-1.
-        double cosPitchCrit = Math.max(-1.0, Math.min(1.0, 1.0 / m - 1.0));
+        double cosPitchCrit =
+                ViaFabricPlusHooks.isSupportDupRot() ? Math.max(-1.0, Math.min(1.0, 1.0 / m - 1.0)) : 0.5 / m;
         float newPitchDeg = (float) -Math.toDegrees(Math.acos(cosPitchCrit));
-        return EntityUtils.pitchYawToRotation(Math.clamp(newPitchDeg, -88, 88), yawDeg);
+        return new Vec2(Math.clamp(newPitchDeg, -88, 88), yawDeg);
     }
 
-    public static Vec3 calculateBestV5ClimbingSpeed(Vec3 rotation) {
-        Vec2 py = EntityUtils.rotationToPitchYaw(rotation);
+    public static Vec2 calculateBestV5ClimbingSpeed(float pitch, float yaw) {
+        if (!ViaFabricPlusHooks.isSupportDupRot()) {
+            return calculateBestV3ClimbingSpeed(pitch, yaw);
+        }
         double requestSpeed = getV5RequestSpeed();
         double autoRescaleAmount = ElytraExtra.INSTANCE.autoRescaleAmount.get();
         Vec3 lastVelocity = PlayerStateManager.INSTANCE.lastKnownClientVelocity;
-        float previousYaw = py.y;
+        float previousYaw = yaw;
         double anchorYaw = lastVelocity.horizontalDistance() > V5_EPSILON
                 ? Math.toDegrees(Math.atan2(-lastVelocity.x, lastVelocity.z))
                 : previousYaw;
 
-        float bestInputYaw = wrapV5Yaw(py.y);
+        float bestInputYaw = wrapV5Yaw(yaw);
         double bestScore = Double.NEGATIVE_INFINITY;
         float bestExtraYaw = 0.0F;
         for (int index = 0; index < V5_YAW_CANDIDATE_COUNT; index++) {
             float inputYaw = wrapV5Yaw(anchorYaw + index);
             for (double extraYaw : V5_EXTRA_YAWS) {
                 double score = scoreV5Candidate(
-                        lastVelocity, inputYaw, (float) extraYaw, V5_PITCH, py.y, requestSpeed, autoRescaleAmount);
+                        lastVelocity, inputYaw, (float) extraYaw, V5_PITCH, yaw, requestSpeed, autoRescaleAmount);
                 double yawDelta = absoluteYawDelta(inputYaw, previousYaw);
                 double bestYawDelta = absoluteYawDelta(bestInputYaw, previousYaw);
                 if (score > bestScore + V5_EPSILON
@@ -140,7 +237,7 @@ public class ElytraOptimizeUtils {
                 }
             }
         }
-        return EntityUtils.pitchYawToRotation(V5_PITCH, bestInputYaw);
+        return new Vec2(V5_PITCH, bestInputYaw);
     }
 
     private record V5Bounds(double uMinX, double uMaxX, double uMinY, double uMaxY, double uMinZ, double uMaxZ) {}
@@ -248,82 +345,29 @@ public class ElytraOptimizeUtils {
         return bestExtraYaw;
     }
 
-    public static Vec3 calculateBestDownForwardSpeed(Vec3 vec3d, boolean natural) {
-        if (ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V3)) {
-            return calculateBestV3DownForwardSpeed(vec3d, natural);
+    public static Vec2 calculateBestDownForwardSpeed(
+            float pitch, float yaw, ElytraExtra.Al al, boolean natural, boolean downward) {
+        if (al.isIn(ElytraExtra.Al.V3, ElytraExtra.Al.V3_PULLUP_ONLY)) {
+            return downwardLimitor(pitch, yaw, 30.5F, natural, downward);
         }
-        if (ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V4, ElytraExtra.Al.V5)) {
-            return calculateBestV4DownForwardSpeed(vec3d, natural);
+        if (al.isIn(ElytraExtra.Al.V4, ElytraExtra.Al.V5)) {
+            return downwardLimitor(pitch, yaw, 5.0F, natural, downward);
         }
-        if (ElytraExtra.INSTANCE.autoRescaleAl.get().isIn(ElytraExtra.Al.V1)) {
-            double horizontal = vec3d.horizontalDistance();
-            if (horizontal < 1E-6) {
-                vec3d = vec3d.with(Direction.Axis.X, 5);
-                horizontal = vec3d.horizontalDistance();
-            }
-            double pitchDeg = 36;
-            double pitchRad = Math.toRadians(pitchDeg);
-            // 使用 -tan(pitch) 来抵消符号，或者直接用 tan(54.5)
-            double newY = -horizontal * Math.tan(pitchRad);
-            // 等价写法：double newY = horizontal * Math.tan(Math.toRadians(54.5));
-
-            // 4. 返回新的向量（保持 x 和 z 不变，仅替换 y）
-            return vec3d.with(Direction.Axis.Y, newY);
+        if (al.isIn(ElytraExtra.Al.V1)) {
+            return downwardLimitor(pitch, yaw, 36.0F, natural, downward);
         }
-        return vec3d;
+        return new Vec2(pitch, yaw);
     }
 
-    public static Vec3 calculateBestDownwardSpeed(Vec3 vec3d) {
-        Vec3 result = calculateBestDownForwardSpeed(vec3d, false);
-        if (result.y >= -1E-6) {
-            double horizontal = result.horizontalDistance();
-            if (horizontal < 1E-6) {
-                result = result.with(Direction.Axis.X, 5.0D);
-                horizontal = result.horizontalDistance();
-            }
-            result = result.with(Direction.Axis.Y, -horizontal * Math.tan(Math.toRadians(30.5D)));
+    private static Vec2 downwardLimitor(float pitch, float yaw, float bestPitch, boolean natural, boolean downward) {
+        if (downward && pitch > 75) {
+            return new Vec2(pitch, yaw);
         }
-        return result;
-    }
-
-    public static Vec3 calculateBestV3DownForwardSpeed(Vec3 vec3d, boolean natural) {
-        double horizontal = vec3d.horizontalDistance();
-        if (horizontal < 1E-6) {
-            vec3d = vec3d.with(Direction.Axis.X, 5);
-            horizontal = vec3d.horizontalDistance();
+        float pitchDeg = bestPitch;
+        if (natural && pitch < pitchDeg) {
+            return new Vec2(pitch, yaw);
         }
-        Vec2 py = EntityUtils.rotationToPitchYaw(vec3d.normalize());
-        if (py.x > 75) {
-            return vec3d;
-        }
-        double pitchDeg = 30.5;
-        if (natural && py.x < pitchDeg) {
-            return vec3d;
-        }
-        double pitchRad = Math.toRadians(pitchDeg);
-        // 使用 -tan(pitch) 来抵消符号，或者直接用 tan(54.5)
-        double newY = -horizontal * Math.tan(pitchRad);
-        // 等价写法：double newY = horizontal * Math.tan(Math.toRadians(54.5));
-
-        // 4. 返回新的向量（保持 x 和 z 不变，仅替换 y）
-        return vec3d.with(Direction.Axis.Y, newY);
-    }
-
-    public static Vec3 calculateBestV4DownForwardSpeed(Vec3 vec3d, boolean natural) {
-        double horizontal = vec3d.horizontalDistance();
-        if (horizontal < 1E-6) {
-            vec3d = vec3d.with(Direction.Axis.X, 5);
-            horizontal = vec3d.horizontalDistance();
-        }
-        Vec2 py = EntityUtils.rotationToPitchYaw(vec3d.normalize());
-        if (py.x < -70) {
-            return vec3d;
-        }
-        double pitchDeg = 5;
-        if (natural && py.x < pitchDeg) {
-            return vec3d;
-        }
-        return EntityUtils.pitchYawToRotation(5, py.y);
+        return new Vec2(pitchDeg, yaw);
     }
 
     public static void setOverridingFireworkVelocity(Vec3 vec3d) {
@@ -406,7 +450,6 @@ public class ElytraOptimizeUtils {
             if (realApply) setOverridingFireworkVelocity(null);
             return currentMotion;
         }
-        Vec3 predictedMotion = EntityUtils.calculateGlidingVelocity(mc.player, currentMotion, currentRotation, true);
         Vec3 clampedMotion = currentMotion.scale(1 / maxScale);
         // todo : add more angle restrict
         if (clampedMotion.y > 0) {
@@ -415,11 +458,6 @@ public class ElytraOptimizeUtils {
             clampedMotion = clampedMotion.with(Direction.Axis.Y, uMinY);
         }
         clampedMotion = ElytraExtra.INSTANCE.applySpeedLimit(clampedMotion);
-        // 已在盒内，无需缩放
-        if (clampedMotion.lengthSqr() < predictedMotion.lengthSqr()) {
-            if (realApply) setOverridingFireworkVelocity(null);
-            return currentMotion;
-        }
 
         // 需要缩小至盒子边界
         if (realApply) setOverridingFireworkVelocity(clampedMotion); // <-- 保存边界值
@@ -428,6 +466,10 @@ public class ElytraOptimizeUtils {
 
     public static Vec3 applyAxisLimit3(Vec3 currentMotion, float pitch, float yaw, double autoRescaleAmount) {
         return applyAxisLimit3_0(currentMotion, pitch, yaw, autoRescaleAmount, true);
+    }
+
+    public static Vec3 applyAxisLimit3Pullup(Vec3 currentMotion, float pitch, float yaw, double autoRescaleAmount) {
+        return applyAxisLimit3_1(currentMotion, pitch, yaw, autoRescaleAmount, true);
     }
 
     private static Vec3 applyAxisLimit3_0(
@@ -456,7 +498,19 @@ public class ElytraOptimizeUtils {
         return applyAxisLimit30(currentMotion, pitch, yaw, autoRescaleAmount, apply);
     }
 
-    public static Vec3 calculateTowardsTargetV3Direction(Vec3 targetPosition, double speed) {
+    private static Vec3 applyAxisLimit3_1(
+            Vec3 currentMotion, float pitch, float yaw, double autoRescaleAmount, boolean apply) {
+        if (currentMotion.lengthSqr() < 1E-6) {
+            if (apply) setOverridingFireworkVelocity(null);
+            return currentMotion;
+        }
+        if (shouldAbortV3Optimize) {
+            return ElytraExtra.INSTANCE.applyAxisLimit2(currentMotion, pitch, yaw, apply);
+        }
+        return applyAxisLimit30_Greedy(currentMotion, pitch, yaw, autoRescaleAmount, apply);
+    }
+
+    public static Vec3 calculateTowardsTargetV3Direction(ElytraExtra.Al al, Vec3 targetPosition, double speed) {
         Vec3 targetDirection = targetPosition.normalize();
         Vec2 pitchYaw = EntityUtils.rotationToPitchYaw(targetDirection);
         float p = pitchYaw.x;
@@ -482,7 +536,7 @@ public class ElytraOptimizeUtils {
 
         Function<Float, Float> dotFunction = (pitch) -> {
             Vec3 simulateVec3d = EntityUtils.pitchYawToRotation(pitch, y).normalize();
-            Vec3 tickSpeed = simulateAxisLimitSpeed(simulateVec3d.scale(speed), pitch, y);
+            Vec3 tickSpeed = simulateAxisLimitSpeed(al, simulateVec3d.scale(speed), pitch, y);
             float movingPitch = EntityUtils.rotationToPitch(tickSpeed.normalize());
             return movingPitch - p;
         };
@@ -509,7 +563,7 @@ public class ElytraOptimizeUtils {
         return EntityUtils.pitchYawToRotation(midPitch, y);
     }
 
-    public static Vec3 calculateLookTowardsTargetV3Direction(Vec3 targetPosition, double speed) {
+    public static Vec3 calculateLookTowardsTargetV3Direction(ElytraExtra.Al al, Vec3 targetPosition, double speed) {
         Vec3 targetDirection = targetPosition.normalize();
         Vec2 pitchYaw = EntityUtils.rotationToPitchYaw(targetDirection);
         float p = pitchYaw.x;
@@ -535,7 +589,7 @@ public class ElytraOptimizeUtils {
 
         Function<Float, Float> dotFunction = (pitch) -> {
             Vec3 simulateVec3d = EntityUtils.pitchYawToRotation(pitch, y).normalize();
-            Vec3 tickSpeed = simulateAxisLimitSpeed(simulateVec3d.scale(speed), pitch, y);
+            Vec3 tickSpeed = simulateAxisLimitSpeed(al, simulateVec3d.scale(speed), pitch, y);
             Vec3 predictLook = targetPosition.subtract(tickSpeed);
             float realNeedPitch = EntityUtils.rotationToPitch(predictLook.normalize());
             return realNeedPitch - pitch;
@@ -563,11 +617,13 @@ public class ElytraOptimizeUtils {
         return EntityUtils.pitchYawToRotation(midPitch, y);
     }
 
-    public static Vec3 simulateAxisLimitSpeed(Vec3 currentMotion, float pitch, float yaw) {
-        return switch (ElytraExtra.INSTANCE.autoRescaleAl.get()) {
+    public static Vec3 simulateAxisLimitSpeed(ElytraExtra.Al al, Vec3 currentMotion, float pitch, float yaw) {
+        return switch (al) {
             case V1 -> ElytraExtra.INSTANCE.applyAxisLimit1(currentMotion, pitch, yaw, false);
             case V2 -> ElytraExtra.INSTANCE.applyAxisLimit2(currentMotion, pitch, yaw, false);
             case V3 -> applyAxisLimit3_0(
+                    currentMotion, pitch, yaw, ElytraExtra.INSTANCE.autoRescaleAmount.get(), false);
+            case V3_PULLUP_ONLY -> applyAxisLimit3_1(
                     currentMotion, pitch, yaw, ElytraExtra.INSTANCE.autoRescaleAmount.get(), false);
             case V4 -> applyAxisLimit4_0(
                     currentMotion, pitch, yaw, ElytraExtra.INSTANCE.autoRescaleAmount.get(), false);
@@ -653,7 +709,7 @@ public class ElytraOptimizeUtils {
         return result;
     }
 
-    public static Vec3 applyAxisLimit50_Greedy(
+    public static Vec3 applyAxisLimit30_Greedy(
             Vec3 currentMotion, float pitch, float yaw, double autoRescaleAmount, boolean realApply) {
         Vec3 currentRotation = EntityUtils.pitchYawToRotation(pitch, yaw);
         Vec3 lastTickVelocity = PlayerStateManager.INSTANCE.lastKnownClientVelocity;
@@ -802,7 +858,7 @@ public class ElytraOptimizeUtils {
             PlayerStateManager.INSTANCE.lastPitch = extraPitch;
             PlayerStateManager.INSTANCE.lastYaw = extraYaw;
         }
-        Vec3 result = applyAxisLimit50_Greedy(currentMotion, pitch, yaw, autoRescaleAmount, apply);
+        Vec3 result = applyAxisLimit30_Greedy(currentMotion, pitch, yaw, autoRescaleAmount, apply);
         PlayerStateManager.INSTANCE.lastPitch = lastPitch;
         PlayerStateManager.INSTANCE.lastYaw = lastYaw;
         return result;

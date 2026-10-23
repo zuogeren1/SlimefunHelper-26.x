@@ -8,8 +8,9 @@ import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
 
-public abstract class IndexedSubScreen<T, W extends GuiEventListener & Renderable & NarratableEntry>
-        extends SubScreenWidget {
+public abstract class IndexedSubScreen<T, W extends GuiEventListener & Renderable & NarratableEntry> extends SubScreenWidget {
+    private static final int INDEX_SCROLLBAR_GAP = 16;
+
     protected List<T> list;
     protected ListUnmodifiableWidget selectedList;
     private ContentDelegateWidget<W> displayedList;
@@ -42,8 +43,12 @@ public abstract class IndexedSubScreen<T, W extends GuiEventListener & Renderabl
                 this.buttonDy,
                 this.indexDx);
         this.selectedList = new ListUnmodifiableWidget(controller, 0, 0, this.indexDx + 4, this.dy).addToSub(this);
-        this.displayedList =
-                new ContentDelegateWidget<>(this.indexDx, 0, this.dx - this.indexDx, this.dy).addToSub(this);
+        this.displayedList = new ContentDelegateWidget<>(
+                        this.indexDx + INDEX_SCROLLBAR_GAP,
+                        0,
+                        Math.max(1, this.dx - this.indexDx - INDEX_SCROLLBAR_GAP),
+                        this.dy)
+                .addToSub(this);
         T selected = getGlobal();
         selectIndexToDisplay(selected, false);
     }

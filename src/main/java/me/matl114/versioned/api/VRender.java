@@ -50,6 +50,10 @@ public interface VRender {
     @LimitOperation(layer = "TexturedGui", format = "PositionTextureColor")
     public void createSpriteTexturedLayer(TextureAtlasSprite sprite, RenderCallback callback);
 
+    /** 用实体自身贴图重画它的面（实体高亮/ESP 单面绘制）。 */
+    @LimitOperation(layer = "EntityHighlight", format = "PositionTextureColor")
+    public void createEntityHighlightLayer(Identifier path, RenderCallback callback);
+
     @LimitOperation(layer = "Gui", format = "PositionColor")
     public void createGuiLayer(RenderCallback callback);
 

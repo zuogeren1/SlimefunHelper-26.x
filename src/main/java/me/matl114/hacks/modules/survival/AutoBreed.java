@@ -14,6 +14,7 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.combat.TargetSelector;
 import me.matl114.hacks.modules.interact.Interact;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.utils.config.EntityTypeEntrySet;
 import me.matl114.hacks.utils.config.EntityTypeRegex;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.config.WrapColor;
@@ -38,6 +39,7 @@ import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
@@ -73,8 +75,10 @@ public class AutoBreed extends BaseModule {
     public final FlagRef enableFeedBaby =
             flagBuilder(root.add("enable-feed-baby")).build();
 
-    public final IntRef babyFeedLimit =
-            builder(root.add("baby-feed-limit"), Integer.class).defaultValue(3).build();
+    public final IntRef babyFeedLimit = builder(root.add("baby-feed-limit"), Integer.class)
+            .defaultValue(3)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final FlagRef render = flagBuilder(root.add("render")).build();
 
@@ -91,19 +95,24 @@ public class AutoBreed extends BaseModule {
             .defaultValue(new WrapColor(ChatFormatting.AQUA))
             .build();
 
-    public final NBTRef<EntityTypeRegex> entityWhitelist = builder(root.add("entity-whitelist"), EntityTypeRegex.class)
-            .defaultValue(new EntityTypeRegex(new Regex("^(turtle)$")))
+    public final NBTRef<EntityTypeEntrySet> entityWhitelist = builder(
+                    root.add("entity-whitelist"), EntityTypeEntrySet.class)
+            .defaultValue(new EntityTypeEntrySet(new Regex("^(turtle)$")))
             .build();
 
     private final PathingSchedular pathingSchedular = new PathingSchedular();
     private Animal targetAnimal;
     private AnimalPen targetPen;
     private int lastInteractTick;
+    private final RenderCollector<Entity> entityRenderCollector =
+            RenderCollectors.createEntityBoxCollector(true, false, false);
+    private final RenderCollector<AABB> renderCollector = RenderCollectors.createBoxCollector(true, false, false);
 
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
+        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
     }
 
@@ -175,6 +184,22 @@ public class AutoBreed extends BaseModule {
         pathingSchedular.tickPathing(mc.player);
     }
 
+    private void updateRenderCollector() {
+        entityRenderCollector.clear();
+        renderCollector.clear();
+        if (checkNull() || !enable.get() || !render.get() || targetAnimal == null) return;
+        entityRenderCollector.submit(targetAnimal, renderColor.get().withAlpha(255));
+        if (targetPen != null && targetPen.innerBox().contains(targetAnimal.position())) {
+            renderCollector.submit(targetPen.outerBox(), renderPenColor.get().withAlpha(255));
+            for (Animal animal : getBreedTargetsInPen(targetPen)) {
+                if (animal != targetAnimal) {
+                    entityRenderCollector.submit(
+                            animal, renderOtherAnimalColor.get().withAlpha(255));
+                }
+            }
+        }
+    }
+
     public void tickBreed() {
         if (targetAnimal == null
                 || pathingSchedular.isPathing()
@@ -189,8 +214,8 @@ public class AutoBreed extends BaseModule {
         if (restore == null) {
             return;
         }
-        Interact.INSTANCE.interactEntity(targetAnimal);
-        restore.run();
+        boolean completed = Interact.INSTANCE.interactEntity(targetAnimal);
+        Interact.INSTANCE.finishEntityGhostHand(completed, restore);
         if (targetAnimal.isBaby()) {
             incrementBabyBreedCount(targetAnimal);
         }
@@ -215,24 +240,10 @@ public class AutoBreed extends BaseModule {
         if (!enable.get() || !render.get() || targetAnimal == null) {
             return;
         }
-        float partialTicks = event.context.partialTicks();
         RenderUtils.startDrawVirtual(event.context.stack());
         try {
-            RenderCollector<AABB> collector = RenderCollectors.createBoxCollector(true, false, false);
-            collector.submit(
-                    RenderUtils.getLerpedBox(targetAnimal, partialTicks),
-                    renderColor.get().withAlpha(255));
-            if (targetPen != null && targetPen.innerBox().contains(targetAnimal.position())) {
-                collector.submit(targetPen.outerBox(), renderPenColor.get().withAlpha(255));
-                for (Animal animal : getBreedTargetsInPen(targetPen)) {
-                    if (animal != targetAnimal) {
-                        collector.submit(
-                                RenderUtils.getLerpedBox(animal, partialTicks),
-                                renderOtherAnimalColor.get().withAlpha(255));
-                    }
-                }
-            }
-            collector.render3D(event.context.stack());
+            entityRenderCollector.render3D(event.context.stack(), event.context.partialTicks());
+            renderCollector.render3D(event.context.stack(), event.context.partialTicks());
         } finally {
             RenderUtils.stopDrawVirtual(event.context.stack());
         }

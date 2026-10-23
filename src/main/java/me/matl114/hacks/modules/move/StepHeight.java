@@ -6,6 +6,7 @@ import me.matl114.events.Listener;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
@@ -19,16 +20,9 @@ public class StepHeight extends BaseModule implements LegalMovementManager.Movem
     public final ModulePath moveSafety = makePath(Configs.MOV_CONFIG, "move-safety");
     public final ModulePath stepHeight = moveSafety.add("enhance-stepheight");
 
-    public static LegalMovementManager.DelegateMovementModifier instance;
-
     public StepHeight() {
         super("StepHeight");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            // register at here for the first time
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         bindFlag(enable);
     }
 
@@ -58,7 +52,7 @@ public class StepHeight extends BaseModule implements LegalMovementManager.Movem
 
     private Runnable jumpTriggerStepHeight;
 
-    private void onJump(Event<Integer> jumpEvent) {
+    private void onJump() {
         if (jumpTriggerStepHeight != null) {
             jumpTriggerStepHeight.run();
         }

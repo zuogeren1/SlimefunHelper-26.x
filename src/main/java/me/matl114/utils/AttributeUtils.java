@@ -21,21 +21,25 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
-import org.jspecify.annotations.Nullable;
 
 public class AttributeUtils {
     public static double getPlayerBlockInteractionRange(Player player) {
         return player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
     }
 
-    public static AttributeMap getAttributeWith(LivingEntity living, Map<EquipmentSlot, ItemStack> equipmentOverrides) {
-        Map<EquipmentSlot, ItemStack> filterMap = new LinkedHashMap<>(equipmentOverrides);
-        AttributeMap attributeContainer =
-                new AttributeMap(DefaultAttributes.getSupplier((EntityType<? extends LivingEntity>) living.getType()));
+    public static AttributeMap copyAttributes(LivingEntity living) {
+        AttributeMap attributeContainer = new AttributeMap(
+                DefaultAttributes.getSupplier((EntityType<? extends LivingEntity>) living.getType()));
         attributeContainer.assignAllValues(living.getAttributes());
-        for (Map.Entry<EquipmentSlot, ItemStack> entry : filterMap.entrySet()) {
-            var slot = entry.getKey();
-            var itemStack2 = entry.getValue();
+        return attributeContainer;
+    }
+
+    public static AttributeMap getAttributeWith(
+            LivingEntity living, Map<EquipmentSlot, ItemStack> equipmentOverrides) {
+        Map<EquipmentSlot, ItemStack> filterMap = new LinkedHashMap<>(equipmentOverrides);
+        AttributeMap attributeContainer = copyAttributes(living);
+        for (var slot : EquipmentSlot.values()) {
+            var itemStack2 = equipmentOverrides.getOrDefault(slot, living.getItemBySlot(slot));
             ItemStack toBeRemoved = living.getItemBySlot(slot);
             if (!toBeRemoved.isEmpty()) {
                 toBeRemoved.forEachModifier(slot, (attribute, modifier) -> {
@@ -55,7 +59,8 @@ public class AttributeUtils {
                 });
             }
         }
-        if (ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)) {
+        if (living instanceof Player pl
+                && ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)) {
             Map<EquipmentSlot, ItemStack> newMap = new HashMap<>(filterMap);
             for (var re : EquipmentSlot.values()) {
                 if (!newMap.containsKey(re)) {
@@ -71,10 +76,6 @@ public class AttributeUtils {
         LivingEntityAccess.of(living).updateEquipmentAttributeChange();
     }
 
-    public static @Nullable Map<EquipmentSlot, ItemStack> getEquipmentChanges() {
-        return null;
-    }
-
     public static List<Holder<Attribute>> ATTRIBUTES_1_21_1 = List.of(
             MOVEMENT_EFFICIENCY,
             WATER_MOVEMENT_EFFICIENCY,
@@ -82,39 +83,17 @@ public class AttributeUtils {
             SNEAKING_SPEED,
             SUBMERGED_MINING_SPEED,
             ATTACK_KNOCKBACK);
-    //    public static void removeViaFabricAttributes(AttributeContainer container){
-    //        if(ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)){
-    //            // < 1.21.1
-    //            for (var re : ATTRIBUTES_1_21_1) {
-    //                var instance = container.getCustomInstance(re);
-    //                if(instance != null && instance.getBaseValue() != 0.0D){
-    //                    instance.setBaseValue(0.0D);
-    //                    instance.clearModifiers();
-    //                }
-    //            }
-    //        }
-    //    }
-    //
-    //    public static void convertVersionedModifierToViaValue(AttributeContainer container){
-    //        if(ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)){
-    //            // < 1.21.1
-    //            for (var re : ATTRIBUTES_1_21_1) {
-    //                var instance = container.getCustomInstance(re);
-    //                if(instance != null && instance.getValue() != 0.0D){
-    //                    double value = instance.getValue();
-    //                    instance.setBaseValue(value);
-    //                    instance.clearModifiers();
-    //                }
-    //            }
-    //        }
-    //    }
 
-    private static void setAttributeVia(AttributeMap attributeContainer, Holder<Attribute> attribute, double level) {
+    private static void setAttributeVia(
+            AttributeMap attributeContainer, Holder<Attribute> attribute, double level) {
         var attributeInstance = attributeContainer.getInstance(attribute);
-        attributeInstance
-                .removeModifiers(); // Minecraft is applying attribute modifiers in some situations, remove them before
-        // we set the base value
-        attributeInstance.setBaseValue(level);
+        if (attributeInstance != null) {
+            attributeInstance
+                    .removeModifiers(); // Minecraft is applying attribute modifiers in some situations, remove them
+            // before
+            // we set the base value
+            attributeInstance.setBaseValue(level);
+        }
     }
 
     private static int getEquipmentLevel(

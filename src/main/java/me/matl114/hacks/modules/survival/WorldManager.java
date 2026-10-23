@@ -11,6 +11,7 @@ import java.util.function.Consumer;
 import javax.annotation.Nullable;
 import lombok.Getter;
 import lombok.Setter;
+import me.matl114.accessors.events.EntityAccess;
 import me.matl114.accessors.interfaces.EntityInventory;
 import me.matl114.events.Event;
 import me.matl114.events.impl.MetadataUpdate;
@@ -18,6 +19,7 @@ import me.matl114.events.Listener;
 import me.matl114.events.impl.BlockUpdate;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.task.ServerStorage;
 import me.matl114.hacks.utils.world.BlockStorage;
 import me.matl114.hacks.utils.world.EntityStorage;
@@ -39,6 +41,8 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.LongTag;
 import net.minecraft.nbt.StringTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundMerchantOffersPacket;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
@@ -50,13 +54,17 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.trading.ItemCost;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.TrialSpawnerBlock;
+import net.minecraft.world.level.block.VaultBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.entity.TrialSpawnerBlockEntity;
 import net.minecraft.world.level.block.entity.trialspawner.TrialSpawnerState;
+import net.minecraft.world.level.block.entity.vault.VaultBlockEntity;
+import net.minecraft.world.level.block.entity.vault.VaultState;
 import net.minecraft.world.level.block.state.BlockState;
 
 public class WorldManager extends BaseModule {
@@ -93,6 +101,10 @@ public class WorldManager extends BaseModule {
                 this::onVillagerTradeUpdate);
         registerListener(
                 Listener.getBlockUpdateListener().getChannel(Blocks.TRIAL_SPAWNER), this::onTrialSpawnerStateUpdate);
+        registerListener(
+                Listener.getPacketPostHandlePoint()
+                        .getChannel(ClientboundBlockUpdatePacket.class),
+                this::onVaultStateUpdate);
 
         registerListener(
                 Listener.getServerEntitySpawnListener().getChannel(EntityTypes.ENDER_PEARL),
@@ -223,6 +235,61 @@ public class WorldManager extends BaseModule {
 
     public static final String KEY_TRIAL_ACTIVE_GLOBAL_TIME = "slimefunhelper:trial_active_global_time";
 
+    public static final String KEY_VAULT_OPEN_PLAYERS = "slimefunhelper:vault_open_players";
+
+    private static final Codec<List<UUID>> VAULT_OPEN_PLAYERS_CODEC = Codec.list(UUIDUtil.CODEC);
+
+    public Set<UUID> getVaultOpenPlayers(VaultBlockEntity vault) {
+        BlockStatus status = getStatus(vault, false);
+        if (status == null) {
+            return Set.of();
+        }
+        Tag element = NBTUtils.resolve(status.getDataContainer(), KEY_TRIAL_INFO, KEY_VAULT_OPEN_PLAYERS);
+        List<UUID> players = element == null ? null : NBTUtils.toValue(element, VAULT_OPEN_PLAYERS_CODEC);
+        return players == null ? Set.of() : Set.copyOf(players);
+    }
+
+    public boolean hasVaultBeenOpenedBy(VaultBlockEntity vault, UUID player) {
+        return player != null && getVaultOpenPlayers(vault).contains(player);
+    }
+
+    public void recordVaultOpenedBy(VaultBlockEntity vault, Set<UUID> players) {
+        BlockStatus status = getStatus(vault, true);
+        CompoundTag trialInfo = NBTUtils.ensurePath(status.getDataContainer(), KEY_TRIAL_INFO);
+        NBTUtils.putValue(trialInfo, KEY_VAULT_OPEN_PLAYERS, List.copyOf(players), VAULT_OPEN_PLAYERS_CODEC);
+        status.markDirty();
+    }
+
+    public void recordVaultOpenedBy(VaultBlockEntity vault, UUID player) {
+        if (player == null) {
+            return;
+        }
+        BlockStatus status = getStatus(vault, true);
+        CompoundTag trialInfo = NBTUtils.ensurePath(status.getDataContainer(), KEY_TRIAL_INFO);
+        Set<UUID> players = new LinkedHashSet<>(getVaultOpenPlayers(vault));
+        if (players.add(player)) {
+            NBTUtils.putValue(trialInfo, KEY_VAULT_OPEN_PLAYERS, List.copyOf(players), VAULT_OPEN_PLAYERS_CODEC);
+            status.markDirty();
+        }
+    }
+
+    private void onVaultStateUpdate(Event<ClientboundBlockUpdatePacket> event) {
+        if (checkNull()) {
+            return;
+        }
+        ClientboundBlockUpdatePacket packet = event.context;
+        BlockPos pos = packet.getPos();
+        BlockState newState = packet.getBlockState();
+        if (newState.getBlock() != Blocks.VAULT
+                || newState.getValue(VaultBlock.STATE) != VaultState.UNLOCKING
+                || !(mc.level.getBlockEntity(pos) instanceof VaultBlockEntity vault)
+                || !SequencedActionManager.INSTANCE.isWaitingBlockResponse(
+                        pos, stack -> stack.is(Items.TRIAL_KEY) || stack.is(Items.OMINOUS_TRIAL_KEY))) {
+            return;
+        }
+        recordVaultOpenedBy(vault, mc.player.getUUID());
+    }
+
     public void onTrialSpawnerStateUpdate(Event<BlockUpdate> event) {
         if (event.context.oldState().getBlock() == Blocks.TRIAL_SPAWNER
                 && event.context.newState().getBlock() == Blocks.TRIAL_SPAWNER) {
@@ -259,7 +326,9 @@ public class WorldManager extends BaseModule {
     public void onThrownOwnerDataUpdate(Event<Entity> data) {
         if (data.context instanceof Projectile thrown) {
             getStatus(thrown, true).setUpdateCallback((lv) -> {
-                if (lv instanceof Projectile thrown2 && thrown2.getOwner() instanceof Player pl) {
+                if (lv instanceof Projectile thrown2
+                        && EntityAccess.of(thrown2).getLivingTicks() > 250
+                        && thrown2.getOwner() instanceof Player pl) {
                     var bc = getStatus(lv, true);
                     var sub = NBTUtils.ensurePath(bc.getDataContainer(), KEY_PEARL_INFO);
                     sub.put(KEY_PEARL_NAME, StringTag.valueOf(pl.getScoreboardName()));
@@ -333,7 +402,7 @@ public class WorldManager extends BaseModule {
 
     int timer = 0;
 
-    public void onGameTick(Event<LocalPlayer> event) {
+    public void onGameTick() {
         if (checkNull()) return;
         if (++timer < 10) {
             return;
@@ -429,11 +498,15 @@ public class WorldManager extends BaseModule {
             for (var entry : currentEntities.entrySet()) {
                 EntityStatus status = entry.getValue();
                 if (status.isDirty()) {
-                    EntityStorage storage = meta.getEntityStorage(entry.getKey(), true);
+
                     if (!status.isEmpty()) {
+                        EntityStorage storage = meta.getEntityStorage(entry.getKey(), true);
                         storage.put(ENTITY_DATA_KEY, status, EntityStatus.CODEC, manager);
                     } else {
-                        storage.put(ENTITY_DATA_KEY, null);
+                        EntityStorage storage = meta.getEntityStorage(entry.getKey(), false);
+                        if (storage != null) {
+                            storage.put(ENTITY_DATA_KEY, null);
+                        }
                     }
                     status.dirty = false;
                 }

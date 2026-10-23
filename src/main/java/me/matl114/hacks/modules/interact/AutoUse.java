@@ -2,7 +2,6 @@ package me.matl114.hacks.modules.interact;
 
 import me.matl114.accessors.access.ClientAccess;
 import me.matl114.accessors.hacks.KeyBindAccess;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -43,8 +42,10 @@ public class AutoUse extends BaseModule {
     public final FlagRef onlyWhenEnemyNear =
             flagBuilder(path.add("only-when-enemy-near")).build();
 
-    public final DoubleRef nearDistance =
-            doubleBuilder(path.add("enemy-near-distance")).defaultValue(12.0D).build();
+    public final DoubleRef nearDistance = doubleBuilder(path.add("enemy-near-distance"))
+            .defaultValue(12.0D)
+            .validator(Configs.doubleRange(0.0D, 20.0D))
+            .build();
 
     public final FlagRef useFood = flagBuilder(path.add("use-food")).build();
 
@@ -93,7 +94,7 @@ public class AutoUse extends BaseModule {
 
     boolean lastAutoUsingSpear = false;
 
-    public void onInputEvent(Event<Void> event) {
+    public void onInputEvent() {
         if (enable.get() && pass()) {
             if (!mc.player.isUsingItem()) {
                 ItemStack mainHand = mc.player.getMainHandItem();

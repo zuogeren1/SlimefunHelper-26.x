@@ -65,6 +65,7 @@ public class PearlFly extends BaseModule {
 
     public final DoubleRef autoPearlActivateRange = doubleBuilder(pearlPhase.add("auto-activate-range"))
             .defaultValue(0.35)
+            .validator(Configs.doubleRange(0.0D, 2.0D))
             .build();
 
     public final FlagRef useWASDControl =
@@ -114,7 +115,7 @@ public class PearlFly extends BaseModule {
 
     Vec2 pearlThrowRotation = null;
 
-    public void onInputEvent(Event<Void> event) {
+    public void onInputEvent() {
         if (checkNull()) return;
         if (enablePearlPhase.get()) {
             var pose = mc.player.getPose();
@@ -130,21 +131,25 @@ public class PearlFly extends BaseModule {
             if (mc.player.getCooldowns().isOnCooldown(new ItemStack(Items.ENDER_PEARL))) {
                 return;
             }
+            Vec3 facingDirection = EntityUtils.pitchYawToRotation(0, mc.player.getYRot());
             Direction direction = mc.player.getDirection();
             Vec3 pos = Vec3.atCenterOf(mc.player.blockPosition());
             Vec3 ppos = mc.player.position();
-            BlockPos pbpos = mc.player.blockPosition();
 
             BlockPos searchPos;
             if (useWASDControl.get()) {
                 var input = PlayerInputUtils.of(mc.options);
-                Direction right = direction.getCounterClockWise();
-                searchPos = pbpos.offset(direction.getUnitVec3i().multiply(input.forwardSpeed()))
-                        .offset(right.getUnitVec3i().multiply(input.sidewaysSpeed()));
+                Vec3 adAxis = new Vec3(facingDirection.z, 0, -facingDirection.x);
+                Vec3 inputVec = facingDirection
+                        .scale(input.forwardSpeed())
+                        .add(adAxis.scale(input.sidewaysSpeed()))
+                        .normalize();
+                searchPos = BlockPos.containing(ppos.add(inputVec));
                 if (enableJump.get() && input.upwardSpeed() > 0) {
                     searchPos = searchPos.relative(Direction.UP, input.upwardSpeed());
                 }
-                if (!Objects.equals(pbpos, searchPos) && doPearlUse(pbpos, searchPos)) {
+                if (!Objects.equals(mc.player.blockPosition(), searchPos)
+                        && doPearlUse(mc.player.blockPosition(), searchPos)) {
                     enablePearlPhase.set(false);
                     return;
                 }
@@ -155,9 +160,9 @@ public class PearlFly extends BaseModule {
                 Direction search = direction;
                 Direction result = direction;
                 double min = Double.MAX_VALUE;
+                BlockPos pbpos = mc.player.blockPosition();
                 do {
                     BlockPos test = pbpos.relative(search);
-                    BlockState state = mc.level.getBlockState(test);
 
                     if (MathUtils.isInXZRange(ppos, Vec3.atCenterOf(test), 0.5 + autoPearlActivateRange.get())) {
                         double sqd = test.distToCenterSqr(ppos);
@@ -303,8 +308,8 @@ public class PearlFly extends BaseModule {
         if (pearlAimRender.get()) {
             RenderUtils.startDrawVirtual(event.context.stack());
             try {
-                lineCollector.render3D(event.context.stack());
-                hitBoxCollector.render3D(event.context.stack());
+                lineCollector.render3D(event.context.stack(), event.context.partialTicks());
+                hitBoxCollector.render3D(event.context.stack(), event.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(event.context.stack());
             }

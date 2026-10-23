@@ -9,6 +9,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import me.matl114.renderer.TextRenderers;
 import me.matl114.utils.chat.SimpleOrderedTextVisitor;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -335,7 +336,7 @@ public class ChatUtils {
         for (var i = 0; i < len; ++i) {
             int codepoint = string.codePointAt(i);
             FormattedCharSequence text = FormattedCharSequence.codepoint(codepoint, style);
-            float wid = mc.font.getSplitter().stringWidth(text);
+            float wid = TextRenderers.get().getWidth(text);
             if (widthCounter.getValue() + wid > limit) {
                 return i;
             }

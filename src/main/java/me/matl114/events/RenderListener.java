@@ -9,14 +9,15 @@ import me.matl114.events.annotations.Cancelable;
 import me.matl114.events.annotations.ExtraArgs;
 import me.matl114.events.annotations.Modifiable;
 import me.matl114.events.channels.EventChannel;
+import me.matl114.events.channels.EventChannelDispatcher;
 import me.matl114.events.impl.Render2D;
 import me.matl114.events.impl.Render3D;
+import me.matl114.events.impl.RenderScreen;
+import me.matl114.events.impl.RenderSlot;
 import me.matl114.events.model.GuiModel;
 import me.matl114.utils.Debug;
 import net.minecraft.ReportedException;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.renderer.item.ItemModel;
 import net.minecraft.network.chat.Component;
@@ -116,34 +117,13 @@ public class RenderListener {
     }
 
     @Getter
-    @Broadcast
-    @ExtraArgs(
-            value = {AbstractContainerScreen.class, Slot.class},
-            names = {"renderer", "stack"})
-    private static final EventChannel<GuiGraphicsExtractor> renderSlot = new EventChannel<>();
-
-    public static void renderSlotInScreen(
-            GuiGraphicsExtractor context, AbstractContainerScreen<?> renderer, Slot stack) {
-        if (renderSlot.isEmpty()) return;
-        Event<GuiGraphicsExtractor> contextEvent = new Event<>(context, false, false, renderer, stack);
-        renderSlot.handleValue(contextEvent);
-    }
+    @Cancelable
+    private static final EventChannel<RenderSlot> renderSlot = new EventChannel<>();
 
     @Getter
-    @Broadcast
-    @ExtraArgs(
-            value = {AbstractContainerScreen.class, int.class, int.class, float.class},
-            names = {"renderer", "mouseX", "mouseY", "delta"})
-    private static final EventChannel<GuiGraphicsExtractor> renderHandledScreen = new EventChannel<>();
-
-    public static void renderHandledScreen(
-            GuiGraphicsExtractor context, AbstractContainerScreen<?> screen, int mouseX, int mouseY, float delta) {
-        if (renderHandledScreen.isEmpty()) {
-            return;
-        }
-        Event<GuiGraphicsExtractor> contextEvent = new Event<>(context, false, false, screen, mouseX, mouseY, delta);
-        renderHandledScreen.handleValue(contextEvent);
-    }
+    @Cancelable
+    private static final EventChannelDispatcher<RenderScreen> renderScreen = new EventChannelDispatcher<>(
+            (v) -> Listener.screenClassIdentifierMapper.apply(v.screen().getClass()));
 
     @Getter
     @Broadcast

@@ -4,13 +4,11 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 import javax.annotation.Nullable;
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.events.Event;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
 import me.matl114.events.impl.EventContainer;
-import me.matl114.hacks.ACTasks;
 import me.matl114.hacks.CombatTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -18,9 +16,12 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.move.RotationManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
+import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
+import me.matl114.managers.Tasks;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.EnumRef;
 import me.matl114.managers.config.FlagRef;
@@ -30,6 +31,7 @@ import me.matl114.utils.ColorUtils;
 import me.matl114.utils.Debug;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.utils.RenderUtils;
+import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
@@ -72,6 +74,7 @@ public class BowEnhance extends BaseModule {
 
     public DoubleRef tpDistance = builder(bowAtt.add("tp-accelerate"), DoubleRef.TYPE)
             .defaultValue(150.0D)
+            .validator(Configs.doubleRange(-200.0D, 200.0D))
             .show(enableTp::get)
             .build();
 
@@ -91,8 +94,8 @@ public class BowEnhance extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onBowAction, 999);
+        registerListener(Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onBowAction, 999);
+        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRenderAimTarget);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
     }
@@ -156,35 +159,38 @@ public class BowEnhance extends BaseModule {
         }
     }
 
-    public void onRenderAimTarget(Event<Render3D> stackE) {
-        var stack = stackE.context.stack();
-        if (enable.get() && enableAim.get() && renderTarget.get() && mc.player != null && mc.player.isUsingItem()) {
-            float tickDelta = stackE.context.partialTicks();
-            ItemStack itemInUse = mc.player.getUseItem();
-            if (!itemInUse.isEmpty()
-                    && (itemInUse.getItem() instanceof ProjectileWeaponItem
-                            || itemInUse.getItem() instanceof TridentItem)) {
-                RenderUtils.startDrawVirtual(stack);
-                try {
-                    Entity entity =
-                            CombatTasks.getTargetSelector().searchAimableEntity(itemInUse.getItem() instanceof BowItem);
-                    if (entity != null) {
-                        AABB box = RenderUtils.getLerpedBox(entity, tickDelta);
-                        RenderUtils.drawSolidBox(
-                                stack,
-                                box.getMinPosition(),
-                                box.getMaxPosition(),
-                                ColorUtils.withAlpha(Color.GREEN, 0.25F));
-                    }
-                } finally {
-                    RenderUtils.stopDrawVirtual(stack);
-                }
-            }
+    private void updateRenderCollector() {
+        targetCollector.clear();
+        if (!enable.get() || !enableAim.get() || !renderTarget.get() || mc.player == null || !mc.player.isUsingItem()) {
+            return;
+        }
+        ItemStack itemInUse = mc.player.getActiveItem();
+        if (itemInUse.isEmpty()
+                || (!(itemInUse.getItem() instanceof ProjectileWeaponItem)
+                        && !(itemInUse.getItem() instanceof TridentItem))) {
+            return;
+        }
+        Entity entity = CombatTasks.getTargetSelector().searchAimableEntity(itemInUse.getItem() instanceof BowItem);
+        if (entity != null) {
+            targetCollector.submit(
+                    entity, ColorUtils.withAlpha(Color.GREEN, 0.25F).getRGB());
         }
     }
 
-    public void bowActionMovement(
-            Event<ServerboundPlayerActionPacket> event, @Nullable Entity entity, float initialVelocity) {
+    public void onRenderAimTarget(Event<Render3D> stackE) {
+        if (!enable.get() || !enableAim.get() || !renderTarget.get() || mc.player == null) return;
+        RenderUtils.startDrawVirtual(stackE.context.stack());
+        try {
+            targetCollector.render3D(stackE.context.stack(), stackE.context.partialTicks());
+        } finally {
+            RenderUtils.stopDrawVirtual(stackE.context.stack());
+        }
+    }
+
+    private final RenderCollector<Entity> targetCollector =
+            RenderCollectors.createEntityBoxCollector(false, true, false);
+
+    public void bowActionMovement(Event<ServerboundPlayerActionPacket> event, @Nullable Entity entity, float initialVelocity) {
         Vec2 playerPitchYaw = new Vec2(mc.player.getXRot(), mc.player.getYRot());
         var facing = entity == null
                 ? mc.player.getLookAngle().normalize()
@@ -347,47 +353,23 @@ public class BowEnhance extends BaseModule {
         if (entity == null) return;
         event.cancel();
         ServerboundPlayerActionPacket delayedPacket = event.context();
-        ClientPlayerAccess.of(mc.player)
-                .getLegalMovementManager()
-                .addMovementModifier(new LegalMovementManager.MovementModifier() {
-                    @Override
-                    public int priority() {
-                        return PRIORITY_LOW;
+        RotationManager.INSTANCE.request(RotationManager.ofDirection(() -> {
+                    LocalPlayer player = mc.player;
+                    Vec3 targetAt =
+                            CombatTasks.getPositionPredict().predictAimPositionForEntity(entity, initialVelocity);
+                    Vec3 targetAtFacing = targetAt.subtract(player.getEyePosition());
+                    Vec2 pitchYaw =
+                            CombatTasks.calculatePitchYawPredict(initialVelocity, player.getDeltaMovement(), targetAtFacing);
+                    if (Float.isNaN(pitchYaw.x)
+                            || Float.isInfinite(pitchYaw.x)
+                            || Float.isNaN(pitchYaw.y)
+                            || Float.isInfinite(pitchYaw.y)) {
+                        Debug.chat("[Bow Aim] Arrow failed to reach the target");
+                        return null;
                     }
-
-                    @Override
-                    public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {
-                        LocalPlayer player = movementManagerEvent.context().playerStatus.entity;
-                        Vec3 targetAt =
-                                CombatTasks.getPositionPredict().predictAimPositionForEntity(entity, initialVelocity);
-                        Vec3 targetAtFacing = targetAt.subtract(player.getEyePosition());
-                        Vec2 pitchYaw = CombatTasks.calculatePitchYawPredict(
-                                (float) (initialVelocity), player.getDeltaMovement(), targetAtFacing);
-                        if (Float.isNaN(pitchYaw.x)
-                                || Float.isInfinite(pitchYaw.x)
-                                || Float.isNaN(pitchYaw.y)
-                                || Float.isInfinite(pitchYaw.y)) {
-                            Debug.chat("[Bow Aim] Arrow failed to reach the target");
-                            return;
-                        }
-                        movementManagerEvent.context.pushImportantRotation(true, true);
-                        EntityUtils.setEntityPitchSafe(player, pitchYaw.x);
-                        PlayerStateManager.setPlayerYawSafe(player, pitchYaw.y);
-                        movementManagerEvent.context.markForResetRot();
-                    }
-
-                    @Override
-                    public boolean postModify(
-                            Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
-                        // add post packets
-                        // mc.getConnection().sendPacket(actionPacket);
-                        if (true)
-                            ACTasks.addPostTransactionAction((handler) -> {
-                                Listener.sendPacketNoEvents(handler.getConnection(), delayedPacket);
-                            });
-                        return false;
-                    }
-                });
+                    return pitchYaw;
+                })
+                .postTick(() -> Tasks.scheduleDelayedPre(() -> Listener.sendPacketNoEvents(delayedPacket), 0)));
     }
 
     public void bowActionInteractItem(
@@ -529,6 +511,7 @@ public class BowEnhance extends BaseModule {
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        if (event.context().getValue().isOptionPreset()) return;
         ModulePreset preset = event.context().getValue();
         switch (preset) {
             case HACKING, VANILLA -> {

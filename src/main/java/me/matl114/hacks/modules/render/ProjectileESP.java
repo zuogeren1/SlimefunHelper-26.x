@@ -13,11 +13,13 @@ import me.matl114.events.RenderListener;
 import me.matl114.hacks.RenderTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.*;
 import me.matl114.utils.containers.MetaData;
+import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.RandomSource;
@@ -45,6 +47,8 @@ import org.joml.Vector2d;
 import me.matl114.hacks.utils.EntityUtils;
 
 public class ProjectileESP extends BaseModule {
+    private static final double MAX_PROJECTILE_DISTANCE_SQUARED = 256.0 * 256.0;
+
     public final ModulePath detectEntity = makePath(Configs.RENDER_CONFIG, "detect-entity");
     public final ModulePath calculateTrace = detectEntity.add("calculate-trace");
     public static ProjectileESP INSTANCE;
@@ -69,11 +73,17 @@ public class ProjectileESP extends BaseModule {
     public final FlagRef renderArrow =
             flagBuilder(detectEntity.add("render-projectile")).build();
 
+    private final RenderCollector<List<Vec3>> trajectoryCollector = RenderCollectors.createLinesCollector();
+    private final RenderCollector<Entity> entityImpactCollector =
+            RenderCollectors.createEntityBoxCollector(false, true, false);
+    private final RenderCollector<AABB> impactCollector = RenderCollectors.createBoxCollector(false, true, false);
+
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getEntityClientVelocityUpdate(), this::onVelocityFireball);
         registerListener(Listener.getEntityClientVelocityUpdate(), this::onVelocityArrow);
+        registerListener(Listener.getPostGameTick(), this::updateRenderCollectors);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(Listener.getServerEntitySpawnListener(), this::onEntitySpawn);
     }
@@ -99,7 +109,7 @@ public class ProjectileESP extends BaseModule {
     }
 
     public void onVelocityFireballCal(AbstractHurtingProjectile fireball, Vec3 vec) {
-        if (vec.lengthSqr() > 1e-10) {
+        if (isWithinPlayerRange(fireball.position()) && vec.lengthSqr() > 1e-10) {
             EntityAccess<AbstractHurtingProjectile> access = EntityAccess.of(fireball);
             if (access.getMetadata().get(this, flagCalculateProjectile) == null) {
                 access.getMetadata().put(this, flagCalculateProjectile, Boolean.TRUE);
@@ -115,7 +125,7 @@ public class ProjectileESP extends BaseModule {
 
             } else if (entity instanceof AbstractArrow arrow) {
                 Vec3 vec = arrowEvent.context();
-                if (vec.lengthSqr() > 1e-10) {
+                if (isWithinPlayerRange(arrow.position()) && vec.lengthSqr() > 1e-10) {
                     EntityAccess<AbstractArrow> access = EntityAccess.of(arrow);
                     MetaData metaData = access.getMetadata();
                     Integer integer = metaData.get(this, flagCalculateProjectile);
@@ -135,7 +145,7 @@ public class ProjectileESP extends BaseModule {
 
     public static void calLineTrace(Vec3 fireballPosition, Vec3 power, EntityType<?> type) {
         // (x - x0)/px = (y - y0)/py = (z - z0)/pz
-        if (mc.player != null) {
+        if (mc.player != null && isWithinPlayerRange(fireballPosition)) {
             // 给行进方向norm
             power = power.normalize();
             var playerPos = mc.player.getEyePosition();
@@ -167,7 +177,7 @@ public class ProjectileESP extends BaseModule {
     }
 
     public static void calArrowTrace(AbstractArrow arrow) {
-        if (mc.player != null) {
+        if (mc.player != null && isWithinPlayerRange(arrow.position())) {
             if (arrow.getOwner() == mc.player) return;
             if (mc.player.position().distanceToSqr(arrow.position()) < 0.1) {
                 // might be shot by player using something
@@ -212,39 +222,80 @@ public class ProjectileESP extends BaseModule {
         }
     }
 
-    public void onRender(Event<Render3D> stackE) {
-        if (mc.level == null || mc.player == null) return;
-        // no render arrow
-        //        var whitelist = getWhitelisted();
-        // remove whitelist whitelist
+    private void updateRenderCollectors() {
+        trajectoryCollector.clear();
+        entityImpactCollector.clear();
+        impactCollector.clear();
+        if (checkNull() || !enable.get()) return;
 
-        // if(!arrowItem)return;
-        if (enable.get()) {
-            var stack = stackE.context.stack();
-            boolean arrowFlag = renderArrow.get();
-            boolean fireballFlag = renderFireball.get();
-            float tickDelta = stackE.context.partialTicks();
-            RenderUtils.startDrawVirtual(stack);
-            try {
-                for (var fireball : mc.level.entitiesForRendering()) {
-                    if (fireball instanceof AbstractHurtingProjectile explosive) {
-                        if (fireballFlag) {
-                            RenderUtils.drawStripLineVirtual(stack, predictFireballTrace(explosive), Color.RED);
-                        }
-                    }
-                    if (arrowFlag && fireball instanceof AbstractSkeleton arrow && !(arrow instanceof WitherSkeleton)) {
-                        renderSkeletonProjectile(stack, arrow, tickDelta);
-                    } else if (arrowFlag && fireball instanceof Player player) {
-                        renderPlayerProjectile(stack, player, tickDelta);
-                    } else if (arrowFlag && fireball instanceof CrossbowAttackMob user) {
-                        renderCrossbowProjectile(stack, user, tickDelta);
-                    } else if (arrowFlag && fireball instanceof AbstractArrow arrow) {
-                        renderArrowProjectile(stack, arrow, tickDelta);
+        for (var entity : mc.level.entitiesForRendering()) {
+            if (!isWithinPlayerRange(entity.position())) continue;
+            if (entity instanceof AbstractHurtingProjectile explosive && renderFireball.get()) {
+                submitTrajectory(predictFireballTrace(explosive), Color.RED, false);
+            }
+            if (!renderArrow.get()) continue;
+            if (entity instanceof AbstractSkeleton skeleton && !(skeleton instanceof WitherSkeleton)) {
+                if (skeleton.isUsingItem() && skeleton.getUseItem().getItem() instanceof BowItem) {
+                    submitTrajectory(ArrowPredictor.of(skeleton, 0.0F).predictLine(400), Color.YELLOW, true);
+                }
+            } else if (entity instanceof Player player) {
+                submitPlayerTrajectory(player);
+            } else if (entity instanceof CrossbowAttackMob crossbow) {
+                if (crossbow instanceof LivingEntity living
+                        && living.isUsingItem()
+                        && living.getUseItem().getItem() instanceof ProjectileWeaponItem) {
+                    submitTrajectory(ArrowPredictor.of(crossbow, 0.0F).predictLine(400), Color.YELLOW, true);
+                }
+            } else if (entity instanceof AbstractArrow projectile
+                    && !projectile.onGround()
+                    && projectile.getDeltaMovement().lengthSqr() > 1e-5) {
+                submitTrajectory(ArrowPredictor.of(projectile, 0.0F).predictLine(400), Color.RED, true);
+            }
+        }
+    }
+
+    private void submitPlayerTrajectory(Player player) {
+        for (var hand : InteractionHand.values()) {
+            if (player.getItemInHand(hand).getItem() instanceof ProjectileWeaponItem item) {
+                var data = ArrowPredictor.of(player, item, hand, 0.0F).predictLineWithHitResult(400);
+                if (data.getFirst().size() > 3
+                        && isWithinPlayerRange(data.getFirst().getFirst())) {
+                    trajectoryCollector.submit(data.getFirst(), Color.RED.getRGB());
+                    if (data.getSecond() instanceof EntityHitResult hit) {
+                        entityImpactCollector.submit(
+                                hit.getEntity(),
+                                ColorUtils.withAlpha(Color.GREEN, 0.25F).getRGB());
+                    } else {
+                        submitImpact(data.getFirst().getLast());
                     }
                 }
-            } finally {
-                RenderUtils.stopDrawVirtual(stack);
+                return;
             }
+        }
+    }
+
+    private void submitTrajectory(List<Vec3> trajectory, Color color, boolean submitImpact) {
+        if (trajectory.size() <= 3 || !isWithinPlayerRange(trajectory.getFirst())) return;
+        trajectoryCollector.submit(trajectory, color.getRGB());
+        if (submitImpact) submitImpact(trajectory.getLast());
+    }
+
+    private void submitImpact(Vec3 position) {
+        impactCollector.submit(
+                new AABB(position.add(RenderTasks.SMALL_FROM), position.add(RenderTasks.SMALL_TO)),
+                ColorUtils.withAlpha(Color.GREEN, 0.25F).getRGB());
+    }
+
+    public void onRender(Event<Render3D> stackE) {
+        if (!enable.get()) return;
+        var stack = stackE.context.stack();
+        RenderUtils.startDrawVirtual(stack);
+        try {
+            trajectoryCollector.render3D(stack, stackE.context.partialTicks());
+            entityImpactCollector.render3D(stack, stackE.context.partialTicks());
+            impactCollector.render3D(stack, stackE.context.partialTicks());
+        } finally {
+            RenderUtils.stopDrawVirtual(stack);
         }
     }
 
@@ -376,6 +427,8 @@ public class ProjectileESP extends BaseModule {
         }
 
         public List<Vec3> predictLine(int ticks) {
+            Vec3 rangeCenter = mc.player == null ? null : mc.player.position();
+            if (rangeCenter != null && !isWithinPlayerRange(pos, rangeCenter)) return List.of();
             Vec3 arrowPos = pos;
             Vec3 arrowMotion = vec;
             double gravity = EntityUtils.getProjectileGravity(Items.BOW);
@@ -389,6 +442,11 @@ public class ProjectileESP extends BaseModule {
                 path.add(arrowPos);
                 // apply motion
                 arrowPos = arrowPos.add(arrowMotion.scale(0.1));
+                boolean rangeExceeded = rangeCenter != null && !isWithinPlayerRange(arrowPos, rangeCenter);
+                if (rangeExceeded) {
+                    arrowPos = clipToPlayerRange(path.getLast(), arrowPos, rangeCenter);
+                    path.add(arrowPos);
+                }
 
                 // apply air friction
                 arrowMotion = arrowMotion.scale(0.999);
@@ -404,11 +462,14 @@ public class ProjectileESP extends BaseModule {
                         break;
                     }
                 }
+                if (rangeExceeded) break;
             }
             return path;
         }
 
         public Pair<List<Vec3>, HitResult> predictLineWithHitResult(int ticks) {
+            Vec3 rangeCenter = mc.player == null ? null : mc.player.position();
+            if (rangeCenter != null && !isWithinPlayerRange(pos, rangeCenter)) return Pair.of(List.of(), null);
             Vec3 arrowPos = pos;
             Vec3 arrowMotion = vec;
             double gravity = EntityUtils.getProjectileGravity(Items.BOW);
@@ -423,6 +484,11 @@ public class ProjectileESP extends BaseModule {
                 path.add(arrowPos);
                 // apply motion
                 arrowPos = arrowPos.add(arrowMotion.scale(0.1));
+                boolean rangeExceeded = rangeCenter != null && !isWithinPlayerRange(arrowPos, rangeCenter);
+                if (rangeExceeded) {
+                    arrowPos = clipToPlayerRange(path.getLast(), arrowPos, rangeCenter);
+                    path.add(arrowPos);
+                }
 
                 // apply air friction
                 arrowMotion = arrowMotion.scale(0.999);
@@ -442,86 +508,17 @@ public class ProjectileESP extends BaseModule {
                     }
                     result = null;
                 }
+                if (rangeExceeded) break;
             }
             return Pair.of(path, result);
-        }
-    }
-
-    private static void renderSkeletonProjectile(PoseStack stack, AbstractSkeleton entity, float tickDelta) {
-        if (entity.isUsingItem() && entity.getUseItem().getItem() instanceof BowItem) {
-            drawClassicArrowTrajectory(
-                    stack, ArrowPredictor.of(entity, tickDelta).predictLine(400), Color.YELLOW);
-        }
-    }
-
-    private static void renderCrossbowProjectile(PoseStack stack, CrossbowAttackMob pillagerEntity, float tickDelta) {
-        if (pillagerEntity instanceof LivingEntity entity
-                && entity.isUsingItem()
-                && entity.getUseItem().getItem() instanceof ProjectileWeaponItem crossbow) {
-            drawClassicArrowTrajectory(
-                    stack, ArrowPredictor.of(pillagerEntity, tickDelta).predictLine(400), Color.YELLOW);
-            return;
-        }
-    }
-
-    private static void renderPlayerProjectile(PoseStack stack, Player player, float tickDelta) {
-        for (var hand : InteractionHand.values()) {
-            if (player.getItemInHand(hand).getItem() instanceof ProjectileWeaponItem item) {
-                var data = ArrowPredictor.of(player, item, hand, tickDelta).predictLineWithHitResult(400);
-                drawArrowTrajectoryWithHitResult(stack, data.getFirst(), data.getSecond(), tickDelta);
-                // drawClassicArrowTrajectory(stack, ArrowPredictor.of(player, item, hand).predictLine(400));
-                return;
-            }
-        }
-    }
-
-    private static void renderArrowProjectile(PoseStack stack, AbstractArrow arrow, float tickDelta) {
-        // filter on ground arrows
-        if (!arrow.onGround() && arrow.getDeltaMovement().lengthSqr() > 1e-5) {
-            // fix? velocity does not change
-            drawClassicArrowTrajectory(
-                    stack, ArrowPredictor.of(arrow, tickDelta).predictLine(400), Color.RED);
-        }
-    }
-
-    private static void drawClassicArrowTrajectory(PoseStack stack, List<Vec3> vec3ds, Color clr) {
-        // escape little traj
-        if (vec3ds.size() <= 3) return;
-        RenderUtils.drawStripLineVirtual(stack, vec3ds, clr);
-        if (!vec3ds.isEmpty()) {
-            Vec3 finalPosition = vec3ds.get(vec3ds.size() - 1);
-            RenderUtils.drawSolidBox(
-                    stack,
-                    finalPosition.add(RenderTasks.SMALL_FROM),
-                    finalPosition.add(RenderTasks.SMALL_TO),
-                    ColorUtils.withAlpha(Color.GREEN, 0.25F));
-        }
-    }
-
-    private static void drawArrowTrajectoryWithHitResult(
-            PoseStack stack, List<Vec3> vec3ds, HitResult result, float tickDelta) {
-        if (vec3ds.size() <= 3) return;
-        RenderUtils.drawStripLineVirtual(stack, vec3ds, Color.RED);
-        if (!vec3ds.isEmpty()) {
-            if (result == null || result.getType() != HitResult.Type.ENTITY) {
-                Vec3 finalPosition = vec3ds.get(vec3ds.size() - 1);
-                RenderUtils.drawSolidBox(
-                        stack,
-                        finalPosition.add(RenderTasks.SMALL_FROM),
-                        finalPosition.add(RenderTasks.SMALL_TO),
-                        ColorUtils.withAlpha(Color.GREEN, 0.25F));
-            } else {
-                Entity hitEntity = ((EntityHitResult) result).getEntity();
-                AABB box = RenderUtils.getLerpedBox(hitEntity, tickDelta);
-                RenderUtils.drawSolidBox(
-                        stack, box.getMinPosition(), box.getMaxPosition(), ColorUtils.withAlpha(Color.GREEN, 0.25F));
-            }
         }
     }
 
     public static ArrayList<Vec3> predictFireballTrace(AbstractHurtingProjectile fireball) {
         ArrayList<Vec3> trace = new ArrayList<>();
         Vec3 startpos = fireball.position();
+        if (!isWithinPlayerRange(startpos)) return trace;
+        Vec3 rangeCenter = mc.player == null ? null : mc.player.position();
         Vec3 lastPos = startpos;
 
         float drag = 0.95F;
@@ -531,7 +528,12 @@ public class ProjectileESP extends BaseModule {
         trace.add(startpos);
 
         for (int i = 0; i < 400; ++i) {
-            startpos = startpos.add(motion);
+            Vec3 nextPos = startpos.add(motion);
+            boolean rangeExceeded = rangeCenter != null && !isWithinPlayerRange(nextPos, rangeCenter);
+            if (rangeExceeded) {
+                nextPos = clipToPlayerRange(startpos, nextPos, rangeCenter);
+            }
+            startpos = nextPos;
             motion = motion.add(power).scale(drag);
             trace.add(startpos);
             if (trace.size() > 2) {
@@ -541,7 +543,30 @@ public class ProjectileESP extends BaseModule {
                     break;
                 }
             }
+            if (rangeExceeded) break;
         }
         return trace;
+    }
+
+    private static boolean isWithinPlayerRange(Vec3 position) {
+        return mc.player == null || isWithinPlayerRange(position, mc.player.position());
+    }
+
+    private static boolean isWithinPlayerRange(Vec3 position, Vec3 playerPosition) {
+        return playerPosition.distanceToSqr(position) <= MAX_PROJECTILE_DISTANCE_SQUARED;
+    }
+
+    private static Vec3 clipToPlayerRange(Vec3 from, Vec3 to, Vec3 playerPosition) {
+        Vec3 direction = to.subtract(from);
+        Vec3 offset = from.subtract(playerPosition);
+        double a = direction.lengthSqr();
+        if (a <= 1.0E-12) return from;
+
+        double b = 2.0 * offset.dot(direction);
+        double c = offset.lengthSqr() - MAX_PROJECTILE_DISTANCE_SQUARED;
+        double discriminant = Math.max(0.0, b * b - 4.0 * a * c);
+        double fraction = (-b + Math.sqrt(discriminant)) / (2.0 * a);
+        fraction = Math.max(0.0, Math.min(1.0, fraction));
+        return from.add(direction.scale(fraction));
     }
 }

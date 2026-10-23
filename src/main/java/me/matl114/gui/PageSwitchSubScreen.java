@@ -77,7 +77,7 @@ public class PageSwitchSubScreen extends SubScreenWidget {
                                     return Component.literal(this.page + "/" + this.maxPage);
                                 },
                                 CommonColors.WHITE,
-                                0))
+                                TextAlign.MIDDLE))
                         .withInputHandler(InputHandler.scroller((w, a) -> {
                             setPage(getPage() + (a > 0 ? -1 : 1));
                             return true;

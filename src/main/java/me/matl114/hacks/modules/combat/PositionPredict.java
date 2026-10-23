@@ -16,9 +16,8 @@ import me.matl114.events.Event;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.RenderListener;
 import me.matl114.events.packets.PacketStorage;
-import me.matl114.events.packets.PacketStorageImpl;
+import me.matl114.events.packets.PacketStorageRecvImpl;
 import me.matl114.gui.basic.*;
-import me.matl114.gui.elements.ButtonElement;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -41,6 +40,7 @@ import me.matl114.utils.config.kv.EnumAttrKeyValue;
 import me.matl114.utils.config.kv.TypeConvertAttrKeyValue;
 import me.matl114.utils.entity.PlayerInputUtils;
 import me.matl114.versioned.api.VRender;
+import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.Packet;
@@ -121,13 +121,17 @@ public class PositionPredict extends BaseModule {
 
     static final Int2ObjectMap<PredictorImpl> asyncLoadedPlayerPositionTrackers = new Int2ObjectOpenHashMap<>();
 
-    public static void onInBoundPacket(Event<PacketStorage> event) {
-        if (event.<Boolean>getArgs(1) && event.context instanceof PacketStorageImpl impl) {
+    public static void onInBoundPacket(Event<PacketStorage.Recv> event) {
+        if (event.<Boolean>getArgs(1) && event.context instanceof PacketStorageRecvImpl impl) {
             onPacket(impl.packet());
         }
     }
 
     public static Predictor getPlayerPredictor(Entity id) {
+        // only RemotePlayer can accept packet predictor
+        if (id instanceof Player pl && !(pl instanceof RemotePlayer)) {
+            return new LocalEntityPredictor(id);
+        }
         synchronized (asyncLoadedPlayerPositionTrackers) {
             var re = asyncLoadedPlayerPositionTrackers.get(id.getId());
             return re != null ? re : new LocalEntityPredictor(id);
@@ -203,8 +207,8 @@ public class PositionPredict extends BaseModule {
         if (playerSyncPositionPeek.get()) {
             List<AABB> boxes = new ArrayList<>();
             for (var re : mc.level.players()) {
-                Vec3 trackedPos = re.trackingPosition();
-                Vec3 currentPos = getPredictor(re).getCurrentPos();
+                Vec3 trackedPos = re.position();
+                Vec3 currentPos = getPredictor(re).getCurrentSyncedPos();
                 if (currentPos.distanceToSqr(trackedPos) > 1E-2) {
                     boxes.add(re.dimensions.makeBoundingBox(currentPos));
                 }
@@ -388,7 +392,7 @@ public class PositionPredict extends BaseModule {
                                         .fieldOf("mode")
                                         .forGetter(PredictArgument::mode))
                         .apply(s, PredictArgument::new)),
-                (s, x, y, dx, dy) -> {
+                (factory, s, x, y, dx, dy) -> {
                     SubScreenWidget subScreenWidget = SubScreenWidget.instance(x, y, dx, dy);
                     int half = dx / 4;
                     WrapperFactory<Double, PredictArgument> firstWrapper =
@@ -400,36 +404,36 @@ public class PositionPredict extends BaseModule {
 
                     return subScreenWidget
                             .addDrawableChild(DisplayWidget.instance(0, 0, dy, dy)
-                                    .setRenderHandler(new ButtonElement(
-                                                    TextProvider.of(Component.translatableWithFallback(
-                                                            "widget.nbt-parsable.predict-argument.ticks", "F:")),
-                                                    ButtonAction.empty())
-                                            .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                                    "widget.nbt-parsable.predict-argument.ticks.tooltips", "")))))
+                                    .setRenderHandler(factory.createExecuteButton(
+                                            TextProvider.of(Component.translatableWithFallback(
+                                                    "widget.nbt-parsable.predict-argument.ticks", "F:")),
+                                            TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
+                                                    "widget.nbt-parsable.predict-argument.ticks.tooltips", "")),
+                                            ButtonAction.empty())))
                             .addDrawableChild(new TypeConvertAttrKeyValue<>(s, firstWrapper, NBTTypes.DOUBLE_TYPE)
-                                    .generateValueWidget(dy, 0, half - dy, dy))
+                                    .generateValueWidget(factory, dy, 0, half - dy, dy))
                             .addDrawableChild(DisplayWidget.instance(half, 0, dy, dy)
-                                    .setRenderHandler(new ButtonElement(
-                                                    TextProvider.of(Component.translatableWithFallback(
-                                                            "widget.nbt-parsable.predict-argument.history", "H:")),
-                                                    ButtonAction.empty())
-                                            .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                                    "widget.nbt-parsable.predict-argument.history.tooltips", "")))))
+                                    .setRenderHandler(factory.createExecuteButton(
+                                            TextProvider.of(Component.translatableWithFallback(
+                                                    "widget.nbt-parsable.predict-argument.history", "H:")),
+                                            TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
+                                                    "widget.nbt-parsable.predict-argument.history.tooltips", "")),
+                                            ButtonAction.empty())))
                             .addDrawableChild(new TypeConvertAttrKeyValue<>(s, secondWrapper, NBTTypes.INT_TYPE)
-                                    .generateValueWidget(half + dy, 0, half - dy, dy))
+                                    .generateValueWidget(factory, half + dy, 0, half - dy, dy))
                             .addDrawableChild(DisplayWidget.instance(2 * half, 0, dy, dy)
-                                    .setRenderHandler(new ButtonElement(
-                                                    TextProvider.of(Component.translatableWithFallback(
-                                                            "widget.nbt-parsable.predict-argument.mode", "M:")),
-                                                    ButtonAction.empty())
-                                            .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
-                                                    "widget.nbt-parsable.predict-argument.mode.tooltips", "")))))
+                                    .setRenderHandler(factory.createExecuteButton(
+                                            TextProvider.of(Component.translatableWithFallback(
+                                                    "widget.nbt-parsable.predict-argument.mode", "M:")),
+                                            TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
+                                                    "widget.nbt-parsable.predict-argument.mode.tooltips", "")),
+                                            ButtonAction.empty())))
                             .addDrawableChild(new TypeConvertAttrKeyValue<>(
                                             s,
                                             thirdWrapper,
                                             EnumAttrKeyValue.createEnumWidgetGenerator(PredictionMode.class),
                                             WrapperFactory.of(PredictionMode::valueOf, PredictionMode::name))
-                                    .generateValueWidget(2 * half + dy, 0, 2 * half - dy, dy));
+                                    .generateValueWidget(factory, 2 * half + dy, 0, 2 * half - dy, dy));
                 },
                 new PredictArgument(2, 5, PredictionMode.NO_PREDICT));
 

@@ -1,6 +1,7 @@
 package me.matl114.hacks.modules.combat;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.Runnables;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.awt.*;
 import java.util.List;
@@ -62,13 +63,17 @@ public class Blink extends BaseModule {
 
     public final FlagRef autoClose = flagBuilder(blink.add("close-on-delay")).build();
 
-    public final IntRef closeDelay =
-            intBuilder(blink.add("close-delay")).defaultValue(50).build();
+    public final IntRef closeDelay = intBuilder(blink.add("close-delay"))
+            .defaultValue(50)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final FlagRef autoFlush = flagBuilder(blink.add("auto-flush")).build();
 
-    public final IntRef autoFlushDelay =
-            intBuilder(blink.add("auto-flush-period")).defaultValue(20).build();
+    public final IntRef autoFlushDelay = intBuilder(blink.add("auto-flush-period"))
+            .defaultValue(20)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final EnumRef<Action> attackBehaviour = builder(blink.add("attack-behaviour"), Action.class)
             .defaultValue(Action.FLUSH)
@@ -96,6 +101,7 @@ public class Blink extends BaseModule {
 
     public final DoubleRef nearRange = builder(blink.add("enermy-near-range"), DoubleRef.TYPE)
             .defaultValue(3.5D)
+            .validator(Configs.doubleRange(0.0D, 20.0D))
             .build();
 
     public final EnumRef<Action> nearTargetAction = builder(blink.add("on-near-target"), Action.class)
@@ -140,7 +146,7 @@ public class Blink extends BaseModule {
         Debug.chat("[Blink] Disable and flush");
     }
 
-    public void onShutdown(Event<Void> eve) {
+    public void onShutdown() {
         if (enable.get()) {
             enable.set(false);
         }
@@ -148,7 +154,7 @@ public class Blink extends BaseModule {
 
     public void flush() {
         lastAutoDumpTick = Tasks.getTick();
-        PacketManager.flushOutBound();
+        PacketManager.flushOutBound(Runnables.doNothing());
         if (mc.player != null) {
             startPlayerPos = new EntityMovementStatus<>(mc.player);
         }
@@ -179,23 +185,25 @@ public class Blink extends BaseModule {
             try {
                 MutableBoolean afterTeleportExcept = new MutableBoolean(false);
                 lastAutoDumpTick = Tasks.getTick();
-                PacketManager.flushOutBound(packets -> {
-                    var packet = packets.packetType();
-                    if (packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_POS
-                            || packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_ROT
-                            || packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_POS_ROT
-                            || packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_STATUS_ONLY) {
-                        if (afterTeleportExcept.booleanValue()) {
-                            return PacketManager.FlushAction.FLUSH;
-                        }
-                        return PacketManager.FlushAction.DROP;
-                    } else if (packet == GamePacketTypes.SERVERBOUND_PLAYER_INPUT) {
-                        return PacketManager.FlushAction.DROP;
-                    } else if (packet == GamePacketTypes.SERVERBOUND_ACCEPT_TELEPORTATION) {
-                        afterTeleportExcept.setTrue();
-                        return PacketManager.FlushAction.FLUSH;
-                    } else return PacketManager.FlushAction.FLUSH;
-                });
+                PacketManager.flushOutBound(
+                        packets -> {
+                            var packet = packets.packetType();
+                            if (packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_POS
+                                    || packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_ROT
+                                    || packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_POS_ROT
+                                    || packet == GamePacketTypes.SERVERBOUND_MOVE_PLAYER_STATUS_ONLY) {
+                                if (afterTeleportExcept.booleanValue()) {
+                                    return PacketManager.FlushAction.FLUSH;
+                                }
+                                return PacketManager.FlushAction.DROP;
+                            } else if (packet == GamePacketTypes.SERVERBOUND_PLAYER_INPUT) {
+                                return PacketManager.FlushAction.DROP;
+                            } else if (packet == GamePacketTypes.SERVERBOUND_ACCEPT_TELEPORTATION) {
+                                afterTeleportExcept.setTrue();
+                                return PacketManager.FlushAction.FLUSH;
+                            } else return PacketManager.FlushAction.FLUSH;
+                        },
+                        Runnables.doNothing());
             } finally {
                 ClientPlayerAccess.of(mc.player).resyncInput();
                 startPlayerPos.restore();
@@ -203,7 +211,7 @@ public class Blink extends BaseModule {
         }
     }
 
-    public void onTick(Event<Void> tickEvent) {
+    public void onTick() {
         if (enable.get()) {
             if (mc.player != null && startPlayerPos == null) {
                 startPlayerPos = new EntityMovementStatus<>(mc.player);
@@ -243,14 +251,14 @@ public class Blink extends BaseModule {
         }
     }
 
-    public void onDisconnect(Event<Void> disconnect) {
+    public void onDisconnect() {
         enable.set(false);
     }
 
     boolean escapeSwing = false;
     boolean elytraSupportFuckStartFly = false;
 
-    public void onPacketQueue(Event<PacketStorage> packet) {
+    public void onPacketQueue(Event<PacketStorage.Send> packet) {
         if (enable.get()) {
             var pkt = packet.context;
             PacketType<?> pktType = pkt.packetType();

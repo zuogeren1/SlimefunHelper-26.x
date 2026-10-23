@@ -11,9 +11,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import me.matl114.SlimefunHelper;
 import me.matl114.managers.file.FileStorage;
+import me.matl114.managers.file.JsonFileStorageImpl;
 import me.matl114.managers.file.NBTFileStorageImpl;
+import me.matl114.plugins.MainPlugin;
 import me.matl114.utils.Debug;
 import me.matl114.utils.FileUtils;
 import net.fabricmc.loader.api.FabricLoader;
@@ -24,7 +25,7 @@ public class FileManager {
         return INSTANCE;
     }
 
-    public static final String FILE_SAVE_PATH = SlimefunHelper.MOD_ID;
+    public static final String FILE_SAVE_PATH = MainPlugin.ID;
     public static final String INTERNAL_SAVE_PATH = "internal";
     public static final String CONFIG_SAVE_PATH = "config";
     public static final String RUNTIME_SAVE_PATH = "runtime";
@@ -204,12 +205,15 @@ public class FileManager {
     private FileStorage createFileStorage(File file) {
         String name = file.getName();
         // 简单根据扩展名判断是否为 NBT 文件（支持 .nbt, .dat）
+        if (name.endsWith(".json")) {
+            return new JsonFileStorageImpl(file);
+        }
         if (name.endsWith(".nbt") || name.endsWith(".dat")) {
             // 假设 NBTFileStorageImpl 构造函数接受 File
             return new NBTFileStorageImpl(file);
         } else {
             throw new UnsupportedOperationException(
-                    "Unsupported file type: " + name + " (only .nbt/.dat supported for now)");
+                    "Unsupported file type: " + name + " (only .nbt/.dat/.json supported)");
         }
     }
 
@@ -247,9 +251,7 @@ public class FileManager {
                 if (!configFile.getParentFile().exists()) {
                     Files.createDirectories(configFile.toPath().getParent());
                 }
-                Files.copy(
-                        SlimefunHelper.getInstance().getClass().getResourceAsStream("/" + configName),
-                        configFile.toPath());
+                Files.copy(MainPlugin.class.getResourceAsStream("/" + configName), configFile.toPath());
             } catch (Throwable e) {
                 Debug.info("AN INTERNAL ERROR WHILE LOADING DEFAULT CONFIG");
                 Debug.info(e);
@@ -263,7 +265,7 @@ public class FileManager {
         try (FileReader readerConfig = new FileReader(configFile)) {
             config = yaml.load(readerConfig);
             config = (config == null ? new HashMap<>() : config);
-            defaults = yaml.load(SlimefunHelper.getInstance().getClass().getResourceAsStream("/" + configName));
+            defaults = yaml.load(MainPlugin.class.getResourceAsStream("/" + configName));
             defaults = (defaults == null ? new HashMap<>() : defaults);
             syncKeys(config, defaults);
         } catch (Throwable e) {

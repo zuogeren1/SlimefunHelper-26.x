@@ -2,6 +2,7 @@ package me.matl114.hacks.modules.render;
 
 import me.matl114.utils.ClientUtils;
 
+import net.minecraft.client.player.LocalPlayer;
 import static me.matl114.utils.ColorUtils.*;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -27,7 +28,6 @@ import me.matl114.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -80,6 +80,7 @@ public class WorldScanner extends BaseModule {
 
     public IntRef distanceChunk = builder(worldScanner.add("search-radius"), IntRef.TYPE)
             .defaultValue(12)
+            .validator(Configs.intRange(0, 36))
             .build();
 
     public NBTRef<TracingOption> option = builder(worldScanner.add("esp-option"), TracingOption.class)
@@ -117,7 +118,7 @@ public class WorldScanner extends BaseModule {
         super.onDisableModule();
     }
 
-    public void onResetWorldScanner(Event<Void> event) {
+    public void onResetWorldScanner() {
         currentSearchingResult.clear();
     }
 
@@ -201,7 +202,7 @@ public class WorldScanner extends BaseModule {
     int lastLogTick = 0;
     final int MAX_RENDER_BLOCKS = 10_000;
 
-    public void onTick(Event<LocalPlayer> event) {
+    public void onTick() {
         if (!checkNull()
                 && pendingRefreshWhenInGame
                 && (ClientUtils.getScreen(mc) == null || ClientUtils.getScreen(mc) instanceof AbstractContainerScreen<?>)) {
@@ -278,9 +279,9 @@ public class WorldScanner extends BaseModule {
             PoseStack stack = event.context().stack();
             RenderUtils.startDrawVirtual(stack);
             try {
-                boxSolidCollector.render3D(stack);
-                boxOutlineCollector.render3D(stack);
-                traceLineCollector.render3D(stack);
+                boxSolidCollector.render3D(stack, event.context().partialTicks());
+                boxOutlineCollector.render3D(stack, event.context().partialTicks());
+                traceLineCollector.render3D(stack, event.context().partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(stack);
             }

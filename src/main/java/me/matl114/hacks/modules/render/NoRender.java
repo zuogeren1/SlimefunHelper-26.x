@@ -1,10 +1,12 @@
 package me.matl114.hacks.modules.render;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.RenderListener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
-import me.matl114.hacks.utils.config.EntityTypeRegex;
+import me.matl114.hacks.utils.config.EntityTypeEntrySet;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.managers.Configs;
@@ -36,6 +38,7 @@ public class NoRender extends BaseModule {
 
     public NoRender() {
         super("NoRender");
+        portConfigs(render.add("no-world-bob-view"), worldEffect.add("no-world-bob-view"));
         bindFlag(enable);
         INSTANCE = this;
     }
@@ -78,6 +81,16 @@ public class NoRender extends BaseModule {
     public final FlagRef noWeather =
             flagBuilder(worldEffect.add("weather-effect")).build();
 
+    public final FlagRef noWorldBobView = builder(worldEffect.add("no-world-bob-view"), FlagRef.TYPE)
+            .defaultValue(true)
+            .build();
+
+    public final FlagRef noBlockAnimation =
+            flagBuilder(worldEffect.add("block-animation")).build();
+
+    public final FlagRef noTextureOffset =
+            flagBuilder(worldEffect.add("texture-offset")).build();
+
     public final FlagRef noNausea = flagBuilder(effectSetting.add("no-nausea")).build();
 
     public final FlagRef noDarkNess =
@@ -100,13 +113,23 @@ public class NoRender extends BaseModule {
 
     public final FlagRef noSpeedFov = flagBuilder(fovEffect.add("speed-up")).build();
 
+    public final FlagRef noSprintFov = flagBuilder(fovEffect.add("sprint")).build();
+
     public final FlagRef noUseItemFov = flagBuilder(fovEffect.add("use-bow")).build();
 
     public final FlagRef ignoreSpawn = flagBuilder(entity.add("force-no")).build();
 
-    public final NBTRef<EntityTypeRegex> types = builder(entity.add("types"), EntityTypeRegex.class)
-            .defaultValue(new EntityTypeRegex(new Regex("^()$")))
+    public final NBTRef<EntityTypeEntrySet> types = builder(entity.add("types"), EntityTypeEntrySet.class)
+            .defaultValue(new EntityTypeEntrySet(new Regex("^()$")))
             .build();
+
+    public final FlagRef noArmorRender = flagBuilder(entity.add("armor-model")).build();
+
+    public final FlagRef noArmorTrimRender =
+            flagBuilder(entity.add("armor-trim")).build();
+
+    public final FlagRef noArmorGlintRender =
+            flagBuilder(entity.add("armor-glint")).build();
 
     public final FlagRef invisibility = flagBuilder(entity.add("invisibility")).build();
 
@@ -123,6 +146,7 @@ public class NoRender extends BaseModule {
         registerListener(
                 Listener.getPacketPoint().getChannel(ClientboundUpdateMobEffectPacket.class), this::doCancelEffect);
         registerListener(Listener.getPacketPoint().getChannel(ClientboundAddEntityPacket.class), this::doCancelSpawn);
+        registerListener(RenderListener.getApplyWorldBobView(), this::onApplyWorldBobView);
         registerListener(
                 Listener.getParticleCreateListener().getChannel(ParticleTypes.RAIN), this::doParticleSpawnWeather);
         registerListener(
@@ -217,6 +241,24 @@ public class NoRender extends BaseModule {
         return isActive() && noWeather.get();
     }
 
+    public boolean noWorldBobView() {
+        return isActive() && noWorldBobView.get();
+    }
+
+    public void onApplyWorldBobView(Event<PoseStack> event) {
+        if (noWorldBobView()) {
+            event.cancel();
+        }
+    }
+
+    public boolean noBlockAnimation() {
+        return isActive() && noBlockAnimation.get();
+    }
+
+    public boolean noTextureOffset() {
+        return isActive() && noTextureOffset.get();
+    }
+
     public boolean noFlyFov() {
         return isActive() && noFlyFov.get();
     }
@@ -227,6 +269,10 @@ public class NoRender extends BaseModule {
 
     public boolean noSpeedFov() {
         return isActive() && noSpeedFov.get();
+    }
+
+    public boolean noSprintFov() {
+        return isActive() && noSprintFov.get();
     }
 
     public boolean noUseItemFov() {
@@ -248,5 +294,17 @@ public class NoRender extends BaseModule {
 
     public boolean noInvisibility() {
         return isActive() && invisibility.get();
+    }
+
+    public boolean noArmorRender() {
+        return isActive() && noArmorRender.get();
+    }
+
+    public boolean noArmorTrimRender() {
+        return isActive() && noArmorTrimRender.get();
+    }
+
+    public boolean noArmorGlintRender() {
+        return isActive() && noArmorGlintRender.get();
     }
 }

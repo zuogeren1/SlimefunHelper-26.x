@@ -7,9 +7,11 @@ import java.util.Set;
 import java.util.function.Function;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.PlayerStateManager;
@@ -60,8 +62,10 @@ public class AutoThrow extends BaseModule {
 
     public final FlagRef avoidEnemies = flagBuilder(root.add("avoid-enemies")).build();
 
-    public final DoubleRef avoidEnemyDistance =
-            doubleBuilder(root.add("avoid-enemies-distance")).defaultValue(1.5).build();
+    public final DoubleRef avoidEnemyDistance = doubleBuilder(root.add("avoid-enemies-distance"))
+            .defaultValue(1.5)
+            .validator(Configs.doubleRange(0.0D, 10.0D))
+            .build();
 
     public final FlagRef eatingAbort = builder(root.add("using-item-abort"), Boolean.class)
             .defaultValue(false)
@@ -86,14 +90,24 @@ public class AutoThrow extends BaseModule {
     public final FlagRef checkDurability =
             flagBuilder(xp.add("check-durability")).build();
 
-    public final IntRef startFixArmorDur =
-            intBuilder(xp.add("start-fixing-durability")).defaultValue(100).build();
+    public final IntRef startFixArmorDur = intBuilder(xp.add("start-fixing-durability"))
+            .defaultValue(100)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
-    public final IntRef stopFixArmorDur =
-            intBuilder(xp.add("stop-fixing-durability")).defaultValue(50).build();
+    public final IntRef stopFixArmorDur = intBuilder(xp.add("stop-fixing-durability"))
+            .defaultValue(50)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
-    public final IntRef delay = intBuilder(xp.add("delay")).defaultValue(3).build();
-    public final IntRef mul = intBuilder(xp.add("multiply")).defaultValue(8).build();
+    public final IntRef delay = intBuilder(xp.add("delay"))
+            .defaultValue(3)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
+    public final IntRef mul = intBuilder(xp.add("multiply"))
+            .defaultValue(8)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public final FlagRef autoClose = flagBuilder(xp.add("auto-close")).build();
 
@@ -109,10 +123,20 @@ public class AutoThrow extends BaseModule {
             .defaultValue(new EntrySet<>(BuiltInRegistries.MOB_EFFECT, List.of()))
             .build();
 
+    public final KeyBindRef manualPotion = hotkey(potions.add("manually-throw"), new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.wrapAsHandler(this::throwPotion))
+            .build();
+
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
+        registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
+    }
+
+    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        ModulePreset preset = event.context.getValue();
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
     }
 
     boolean startMending = false;
@@ -184,14 +208,14 @@ public class AutoThrow extends BaseModule {
 
     int timer = 0;
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (checkNull()) return;
         if (canThrow()) {
             if (eatingAbort.get() && mc.player.isUsingItem()) return;
             if (++timer >= delay.get()) {
-                timer = 0;
                 //
                 if (xpEnable.get()) {
+                    timer = 0;
                     if (checkDurability.get()) {
                         if (startMending) {
                             if (canMend()) {
@@ -216,57 +240,53 @@ public class AutoThrow extends BaseModule {
                 } else {
                     startMending = false;
                 }
-                if (potionEnable.get() && effectCheck.run(5)) {
-                    if (SequencedActionManager.INSTANCE.isWaitingResponse(s -> s.is(Items.SPLASH_POTION))) {
-                        return;
-                    }
-                    // check flying potions
-
-                    Set<Holder<MobEffect>> onePotion = new HashSet<>();
-                    for (var re : keepPotions.get().set()) {
-                        var entry = BuiltInRegistries.MOB_EFFECT.wrapAsHolder(re);
-                        var statusInstance = mc.player.getEffect(entry);
-                        if (statusInstance == null || statusInstance.endsWithin(20)) {
-                            onePotion.add(entry);
-                        }
-                    }
-                    AABB checkUpperAABB =
-                            mc.player.getBoundingBox().inflate(3.6, 8.0, 3.6).expandTowards(0, 5, 0);
-                    mc.level
-                            // 上游是 yarn getEntitiesByType(EntityType.SPLASH_POTION, ...) —— **只匹配喷溅药水**。
-                            // 26.2 没有 Level.getEntitiesByType，等价物是 getEntitiesOfClass；但 AbstractThrownPotion
-                            // 还包含 ThrownLingeringPotion，用它会把附近飞行的滞留药水的效果也算进来、导致少投。
-                            .getEntitiesOfClass(ThrownSplashPotion.class, checkUpperAABB, Predicates.alwaysTrue())
-                            .forEach(potion -> {
-                                var po = potion.getItem().get(DataComponents.POTION_CONTENTS);
-                                if (po != null) {
-                                    po.getAllEffects().forEach(effect -> {
-                                        onePotion.remove(effect.getEffect());
-                                    });
-                                }
-                            });
-                    if (!onePotion.isEmpty()) {
-                        throwItem(
-                                s -> {
-                                    if (s.is(Items.SPLASH_POTION) && s.has(DataComponents.POTION_CONTENTS)) {
-                                        var con = s.get(DataComponents.POTION_CONTENTS);
-                                        if (con == null) return null;
-                                        int totalLevel = 0;
-                                        for (var re : con.getAllEffects()) {
-                                            if (onePotion.contains(re.getEffect())) {
-                                                totalLevel += re.getAmplifier();
-                                            }
-                                        }
-                                        return totalLevel > 0 ? (double) totalLevel : null;
-                                    }
-                                    return null;
-                                },
-                                1);
-                    }
-                }
-            } else {
-                return;
             }
+            if (potionEnable.get() && effectCheck.run(5)) {
+                throwPotion();
+            }
+        }
+    }
+
+    public void throwPotion() {
+        if (SequencedActionManager.INSTANCE.isWaitingItemResponse(s -> s.is(Items.SPLASH_POTION))) {
+            return;
+        }
+        Set<Holder<MobEffect>> onePotion = new HashSet<>();
+        for (var re : keepPotions.get().set()) {
+            var entry = BuiltInRegistries.MOB_EFFECT.wrapAsHolder(re);
+            var statusInstance = mc.player.getEffect(entry);
+            if (statusInstance == null || statusInstance.endsWithin(20)) {
+                onePotion.add(entry);
+            }
+        }
+        AABB checkUpperBox = mc.player.getBoundingBox().inflate(4.0, 8.0, 4.0).expandTowards(0, 40, 0);
+        mc.level
+                .getEntitiesOfClass(ThrownSplashPotion.class, checkUpperBox, Predicates.alwaysTrue())
+                .forEach(potion -> {
+                    var po = potion.getItem().get(DataComponents.POTION_CONTENTS);
+                    if (po != null) {
+                        po.getAllEffects().forEach(effect -> {
+                            onePotion.remove(effect.getEffect());
+                        });
+                    }
+                });
+        if (!onePotion.isEmpty()) {
+            throwItem(
+                    s -> {
+                        if (s.is(Items.SPLASH_POTION) && s.has(DataComponents.POTION_CONTENTS)) {
+                            var con = s.get(DataComponents.POTION_CONTENTS);
+                            if (con == null) return null;
+                            int totalLevel = 0;
+                            for (var re : con.getAllEffects()) {
+                                if (onePotion.contains(re.getEffect())) {
+                                    totalLevel += re.getAmplifier();
+                                }
+                            }
+                            return totalLevel > 0 ? (double) totalLevel : null;
+                        }
+                        return null;
+                    },
+                    1);
         }
     }
 

@@ -55,8 +55,10 @@ public class AutoWeb extends BaseModule {
     public final KeyBindRef hotkey =
             moduleEntry(root.addHotkey(), new MultiKeyBind(), root.addEnable()).build();
 
-    public final DoubleRef interactRange =
-            doubleBuilder(root.add("interact-range")).defaultValue(4.5).build();
+    public final DoubleRef interactRange = doubleBuilder(root.add("interact-range"))
+            .defaultValue(4.5)
+            .validator(Configs.doubleRange(0.0D, 100.0D))
+            .build();
 
     public final EnumRef<LegalInteractMode> mode = builder(root.add("mode"), LegalInteractMode.class)
             .defaultValue(LegalInteractMode.NONE)
@@ -108,7 +110,7 @@ public class AutoWeb extends BaseModule {
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onPreset);
     }
 
-    private void onPreInputEvent(Event<Void> event) {
+    private void onPreInputEvent() {
         if (checkNull() || !enable.get()) {
             return;
         }
@@ -131,8 +133,13 @@ public class AutoWeb extends BaseModule {
 
     private void onPreset(Event<EventContainer<ModulePreset>> event) {
         ModulePreset preset = event.context.getValue();
-        mode.set(LegalInteractMode.getFromPreset(preset));
-        airplace.set(!preset.hasAC());
+        if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
+        if (!preset.isOptionPreset()) {
+            mode.set(LegalInteractMode.getFromPreset(preset));
+            airplace.set(!preset.hasAC());
+        }
     }
 
     private IndexEntry<ItemStack> supplyWeb() {
@@ -141,20 +148,25 @@ public class AutoWeb extends BaseModule {
     }
 
     private boolean placeWeb(IndexEntry<ItemStack> web, BlockHitResult hitResult) {
+        if (!InteractionTasks.canHandleInteract(mode.get(), hitResult)) {
+            return false;
+        }
         Runnable callback = InvExtra.INSTANCE.swapItemToHand(web.index(), offhand.get(), ghostHand.get());
         if (callback == null) {
             return false;
         }
-        InteractionTasks.handlePlaceMode(
+        boolean completed = InteractionTasks.handlePlaceMode(
                 mode.get(), hitResult, offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, swingHand.get());
-        callback.run();
-        return true;
+        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
+        return completed;
     }
 
     private BlockHitResult searchPlaceOption() {
         if (selfWeb.get() && (!selfWebOnlySlow.get() || mc.player.hasEffect(MobEffects.SLOWNESS))) {
             BlockPos pos = mc.player.blockPosition();
-            if (mc.level.getBlockState(pos) != WEB_STATE && !PlayerStateManager.INSTANCE.lastInWeb) {
+            if (mc.level.getBlockState(pos) != WEB_STATE
+                    && !PlayerStateManager.INSTANCE.lastInWeb
+                    && !PlayerStateManager.INSTANCE.lastSlowByBlock) {
                 FlagEntry<BlockHitResult> hitResult = createWebHitResult(mc.player, pos);
                 if (hitResult != null) {
                     return hitResult.val();

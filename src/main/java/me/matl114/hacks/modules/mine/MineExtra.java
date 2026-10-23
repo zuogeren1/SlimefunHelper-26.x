@@ -1,6 +1,5 @@
 package me.matl114.hacks.modules.mine;
 
-import com.google.common.util.concurrent.Runnables;
 import com.mojang.datafixers.util.Pair;
 import java.awt.*;
 import java.util.*;
@@ -8,12 +7,16 @@ import me.matl114.accessors.access.PlayerMoveC2SPacketAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.*;
 import me.matl114.events.Event;
+import me.matl114.events.impl.BlockBreak;
+import me.matl114.events.impl.BlockUpdate;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
+import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.WrapColor;
@@ -47,10 +50,13 @@ import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import org.spongepowered.asm.mixin.Unique;
 
 public class MineExtra extends BaseModule {
     public static MineExtra INSTANCE;
+
+    private record PendingFailBreak(int seqNum, BlockPos pos, int startBreakTick) {}
+
+    private PendingFailBreak pendingFailBreak;
 
     public MineExtra() {
         super("MineExtra");
@@ -72,11 +78,6 @@ public class MineExtra extends BaseModule {
             .defaultValue(Mode.NO_BYPASS)
             .build();
 
-    public final IntRef grimAcCounterThreshold = builder(fastbreak.add("grim-punishment-threshold"), Integer.class)
-            .defaultValue(500)
-            .show(() -> fastBreakBypassMode.get() == Mode.BYPASS_GRIM_LEGIT)
-            .build();
-
     public final DoubleRef breakThreshold = builder(fastbreak.add("break-threshold"), Double.class)
             .defaultValue(0.99)
             .validator(Configs.doubleRange(0.0, 1.1))
@@ -84,33 +85,15 @@ public class MineExtra extends BaseModule {
 
     public final IntRef breakSpeedExtraTicks = builder(fastbreak.add("break-speed-extra-ticks"), IntRef.TYPE)
             .defaultValue(1)
+            .validator(Configs.intRange(0, 5))
             .build();
 
-    public final FlagRef cooldownOverride = builder(fastbreak.add("cooldown-override"), Boolean.class)
-            .defaultValue(true)
+    public final IntRef grimACProgressThreshold = builder(
+                    fastbreak.add("grim-progress-punishment-threshold"), Integer.class)
+            .defaultValue(150)
+            .validator(Configs.intRange(0, 1000))
+            .show(() -> fastBreakBypassMode.get().isIn(Mode.BYPASS_GRIM_LEGIT))
             .build();
-
-    public final IntRef breakCooldown = builder(fastbreak.add("break-cooldown"), Integer.class)
-            .defaultValue(5)
-            .validator(Configs.INT_NONNEGATIVE)
-            .build();
-
-    public final FlagRef fasterVanillaBreak = builder(fastbreak.add("vanilla-break"), Boolean.class)
-            .defaultValue(true)
-            .build();
-
-    public final FlagRef vanillaFastBreakFix = builder(fastbreak.add("vanilla-fast-break-fix"), Boolean.class)
-            .defaultValue(false)
-            .build();
-
-    //    public final FlagRef enableReach = toggle(REACH_TOGGLE).showConfig().build();
-    //
-    //    public final KeyBindRef reachKeybind = toggleHotkey(
-    //                    REACH_TOGGLE, new MultiKeyBind(KeyCode.KEY_LEFT_CONTROL, KeyCode.KEY_R))
-    //            .build();
-
-    public final FlagRef doubleBreak =
-            flagBuilder(fastbreak.add("double-break")).build();
 
     public final FlagRef optimizeOneBlock =
             flagBuilder(fastbreak.add("same-block-optimize")).build();
@@ -122,44 +105,117 @@ public class MineExtra extends BaseModule {
             .show(ghostHandMine::get)
             .build();
 
-    public final FlagRef ghostHandFailBreak =
-            flagBuilder(fastbreak.add("ghost-hand-fail-break")).build();
-
-    public final FlagRef multiBreakFix =
-            flagBuilder(fastbreak.add("fix-multi-break")).build();
-
-    public final NBTRef<OptionalPrimitive<Integer>> cooldownFix = builder(
-                    fastbreak.add("cooldown-punishment-fix"), OptionalPrimitive.INT_TYPE)
-            .defaultValue(new OptionalPrimitive<>(true, NBTTypes.INT_TYPE, 5))
+    public final EnumRef<GhostHandMode> ghostHandPreferredMode = builder(
+                    fastbreak.add("ghost-hand-preferred-mode"), GhostHandMode.class)
+            .defaultValue(GhostHandMode.INV_SWAP)
             .build();
 
-    public final FlagRef swingFix =
-            flagBuilder(fastbreak.add("fix-swing-packet")).build();
+    public final ModulePath cooldownGroup = fastbreak.add("cooldown-manage");
+    public final FlagRef cooldownOverride = builder(cooldownGroup.add("cooldown-override"), Boolean.class)
+            .defaultValue(true)
+            .build();
+
+    public final IntRef breakCooldown = builder(cooldownGroup.add("break-cooldown"), Integer.class)
+            .defaultValue(5)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
+
+    public final IntRef grimAcCooldownThreshold = builder(
+                    cooldownGroup.add("grim-cooldown-punishment-threshold"), Integer.class)
+            .defaultValue(150)
+            .validator(Configs.intRange(0, 1000))
+            .show(() -> fastBreakBypassMode.get().isIn(Mode.BYPASS_GRIM_LEGIT, Mode.BYPASS_GRIM_BAD_PACKETS))
+            .build();
+    public final NBTRef<OptionalPrimitive<Integer>> cooldownFix = builder(
+                    cooldownGroup.add("cooldown-punishment-fix"), OptionalPrimitive.INT_TYPE)
+            .defaultValue(new OptionalPrimitive<>(true, NBTTypes.INT_TYPE, 5))
+            .show(() -> quickMine.get() && this.fastBreakBypassMode.get().isIn(Mode.BYPASS_GRIM_BAD_PACKETS))
+            .build();
+
+    public final NBTRef<OptionalPrimitive<Integer>> startCooldownFix = builder(
+                    cooldownGroup.add("cooldown-punishment-fix-start-mine"), OptionalPrimitive.INT_TYPE)
+            .defaultValue(new OptionalPrimitive<>(false, NBTTypes.INT_TYPE, 8))
+            .show(() -> quickMine.get()
+                    && this.fastBreakBypassMode.get().isIn(Mode.BYPASS_GRIM_BAD_PACKETS, Mode.BYPASS_GRIM_LEGIT))
+            .build();
+
+    public final ModulePath vanillaBreak = fastbreak.add("vanilla-break");
+
+    {
+        portConfigs(fastbreak.add("vanilla-fast-break-fix"), vanillaBreak.add("vanilla-fast-break-fix"));
+        portConfigs(fastbreak.add("no-swing-for-vanilla-break"), vanillaBreak.add("no-swing-for-vanilla-break"));
+    }
+
+    public final FlagRef fasterVanillaBreak = builder(vanillaBreak.add("faster-vanilla-break"), Boolean.class)
+            .defaultValue(true)
+            .build();
+
+    public final FlagRef vanillaFastBreakFix = builder(vanillaBreak.add("vanilla-fast-break-fix"), Boolean.class)
+            .defaultValue(false)
+            .build();
 
     public final FlagRef noSwing =
-            flagBuilder(fastbreak.add("no-swing-for-vanilla-break")).build();
+            flagBuilder(vanillaBreak.add("no-swing-for-vanilla-break")).build();
 
-    public final FlagRef silent = flagBuilder(fastbreak.add("silent-break")).build();
+    public final ModulePath doubleBreakMine = fastbreak.add("double-break-mine");
+
+    {
+        portConfigs(fastbreak.add("double-break"), doubleBreakMine.addEnable());
+        portConfigs(fastbreak.add("ghost-hand-fail-break"), doubleBreakMine.add("ghost-hand"));
+    }
+
+    public final FlagRef doubleBreak = flagBuilder(doubleBreakMine.addEnable()).build();
+
+    public final FlagRef doubleBreakVanilla = builder(doubleBreakMine.add("enable-vanilla-behavior"), Boolean.class)
+            .defaultValue(true)
+            .build();
+
+    public final FlagRef ghostHandFailBreak =
+            flagBuilder(doubleBreakMine.add("ghost-hand")).build();
+
+    public final EnumRef<GhostHandMode> ghostHandFailBreakMode = builder(
+                    doubleBreakMine.add("ghost-hand-mode"), GhostHandMode.class)
+            .defaultValue(GhostHandMode.INV_SWAP)
+            .build();
+
+    public final FlagRef ghostHandFailBreakEatingAbort =
+            flagBuilder(doubleBreakMine.add("eating-abort")).build();
+
+    public final ModulePath badPackets = fastbreak.add("packet-fix");
+
+    public final FlagRef silent = flagBuilder(badPackets.add("silent-break")).build();
+
+    public final FlagRef multiBreakFix =
+            flagBuilder(badPackets.add("fix-multi-break")).build();
+
+    public final FlagRef swingFix =
+            flagBuilder(badPackets.add("fix-swing-packet")).build();
+
+    public final ModulePath render = fastbreak.add("render");
+
+    {
+        portConfigs(fastbreak.add("render-current-break-pos"), render.add("render-current-break-pos"));
+    }
 
     public final FlagRef mineRender =
-            flagBuilder(fastbreak.add("render-current-break-pos")).build();
+            flagBuilder(render.add("render-current-break-pos")).build();
 
-    public final NBTRef<WrapColor> frameColor = builder(fastbreak.add("render-frame-color"), WrapColor.class)
+    public final NBTRef<WrapColor> frameColor = builder(render.add("render-frame-color"), WrapColor.class)
             .defaultValue(new WrapColor((Color.BLUE)))
             .build();
 
-    public final NBTRef<WrapColor> progressColor = builder(fastbreak.add("render-progress-color"), WrapColor.class)
+    public final NBTRef<WrapColor> progressColor = builder(render.add("render-progress-color"), WrapColor.class)
             .defaultValue(new WrapColor((Color.YELLOW)))
             .build();
 
-    public final NBTRef<WrapColor> doubleBreakColor = builder(fastbreak.add("double-break-color"), WrapColor.class)
+    public final NBTRef<WrapColor> doubleBreakColor = builder(render.add("double-break-color"), WrapColor.class)
             .defaultValue(new WrapColor((Color.MAGENTA)))
             .build();
 
     public final FlagRef renderOnlyWhenMine =
-            flagBuilder(fastbreak.add("render-only-when-mine")).build();
+            flagBuilder(render.add("render-only-when-mine")).build();
 
-    private IndexEntry<ItemStack> getBestMiningToFor(BlockState currentState) {
+    private IndexEntry<ItemStack> getBestMiningToFor(BlockState currentState, GhostHandMode mode) {
         IndexEntry<ItemStack> defaultEntry = InventoryUtils.getSelectedItem();
         BlockState calculatingState =
                 (currentState.isAir() || currentState.liquid()) ? Blocks.OBSIDIAN.defaultBlockState() : currentState;
@@ -182,6 +238,7 @@ public class MineExtra extends BaseModule {
                     }
                     return null;
                 },
+                mode.getSearchSize(false),
                 true,
                 true);
         return result != null ? result : defaultEntry;
@@ -192,7 +249,7 @@ public class MineExtra extends BaseModule {
         if (!ghostHandMine.get()) {
             return defaultEntry;
         }
-        return getBestMiningToFor(currentState);
+        return getBestMiningToFor(currentState, GhostHandMode.INV_SWAP);
     }
 
     @Override
@@ -200,28 +257,70 @@ public class MineExtra extends BaseModule {
         super.registerAll();
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onPresetLoad);
-        registerListener(Listener.getGameJoinPoint(), this::onGameJoin);
-        registerListener(Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onMine);
+        registerListener(Listener.getGameJoinPoint(), this::resetStatistics);
+        registerListener(
+                Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onMine, Integer.MAX_VALUE);
+        registerListener(
+                SequencedActionManager.getSequencedActionResponse().getChannel(BlockBreak.class), this::onFailBreakAck);
+        registerListener(Listener.getBlockUpdateListener(), this::onFailBreakBlockUpdate);
         registerListener(
                 Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class),
-                this::onGrimSBFastBreakExplode);
+                this::onGrimSBFastBreakExplode,
+                Integer.MAX_VALUE);
         registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onSilentBreak);
-        registerListener(Listener.getPacketPostSendPoint().getChannel(ServerboundSwingPacket.class), this::onLastSwing);
+                Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class),
+                this::onSilentBreak,
+                Integer.MAX_VALUE);
+        registerListener(
+                Listener.getPacketPostScheduleSendPoint().getChannel(ServerboundSwingPacket.class),
+                this::onLastSwing,
+                true);
         registerListener(Listener.getPreGameTick(), this::onGrimCooldownResetPackets);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class), this::onPlayerMove);
         registerListener(Listener.getPreGameTick(), this::onTickGhostHandFailBreak);
     }
 
-    public void onGameJoin(Event<LocalPlayer> gameJoin) {
-        resetStatistics();
+    private void onFailBreakBlockUpdate(Event<BlockUpdate> event) {
+        if (mc.gameMode == null) {
+            return;
+        }
+        BlockUpdate update = event.context();
+        PlayerInteractionAccess access = PlayerInteractionAccess.of(mc.gameMode);
+        if (update.newState().isAir() && Objects.equals(access.getCurrentFailBreakPos(), update.pos())) {
+            access.clearActiveFailBreak();
+        }
+    }
+
+    private void onFailBreakAck(Event<IndexEntry<BlockBreak>> event) {
+        if (checkNull()) return;
+        if (pendingFailBreak == null) return;
+        IndexEntry<BlockBreak> ackEntry = event.context();
+        BlockBreak ack = ackEntry.val();
+        PendingFailBreak pending = pendingFailBreak;
+        // has more ack
+        if (ackEntry.index() > pending.seqNum()) {
+            pendingFailBreak = null;
+            return;
+        }
+        if (ack.stage() != BlockBreak.Stage.POST || ackEntry.index() != pending.seqNum()) {
+            return;
+        }
+        pendingFailBreak = null;
+        PlayerInteractionAccess access = PlayerInteractionAccess.of(mc.gameMode);
+        if (!access.isFailBreakEmpty()) {
+            return;
+        }
+        if (mc.level.getBlockState(pending.pos()).isAir()) {
+            return;
+        }
+        access.commitFailBreak(pending.pos(), pending.startBreakTick());
     }
 
     int lastSwingPacket = 0;
     BlockPos lastGrimACWrongBreakCheck;
     BlockPos currentMiningBlock;
 
-    public void onLastSwing(Event<ServerboundSwingPacket> handSwingC2SPacketEvent) {
+    public void onLastSwing() {
         lastSwingPacket = Tasks.getTick();
     }
 
@@ -229,9 +328,24 @@ public class MineExtra extends BaseModule {
     BlockPos lastServerPos;
     Direction lastServerDirection;
     boolean thisTickHasBroken;
+    boolean lastMineProgressDeceive = false;
+
+    public void finishMineGhostHand(Runnable runnable) {
+        if (ServerFeature.INSTANCE.attributeSwap.get()) {
+            InvExtra.INSTANCE.pushNextTickGhostHandCallback(runnable);
+        } else {
+            runnable.run();
+        }
+    }
 
     public void onMine(Event<ServerboundPlayerActionPacket> packetEvent) {
+        if (packetEvent.isCancelled()) {
+            return;
+        }
         ServerboundPlayerActionPacket packet = packetEvent.context();
+        if (packet.getAction() == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK) {
+            updateGainedAdvantageCooldown(packetEvent);
+        }
         if (instaBreakGhostHand != null
                 && packet.getAction() == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK
                 && ghostHandMine.get()
@@ -239,7 +353,8 @@ public class MineExtra extends BaseModule {
                 && mc.gameMode != null
                 && Objects.equals(packet.getPos(), instaBreakGhostHand.getSecond())) {
             if (instaBreakGhostHand.getFirst() != null) {
-                PacketManager.schedulePostScheduleCallback(packet, instaBreakGhostHand.getFirst());
+                Runnable first = instaBreakGhostHand.getFirst();
+                PacketManager.schedulePostScheduleCallback(packet, () -> finishMineGhostHand(first));
             }
             instaBreakGhostHand = null;
         }
@@ -250,13 +365,10 @@ public class MineExtra extends BaseModule {
                 if (packet.getPos().getY() < 1145) {
                     lastGrimACWrongBreakCheck = packet.getPos();
                     currentMiningBlock = packet.getPos();
+                    lastMineProgressDeceive = false;
+                } else {
+                    lastMineProgressDeceive = true;
                 }
-                //                Listener.sendPacketNoEvents(new
-                // PlayerActionC2SPacket(PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, packet.getPos().up(),
-                // packet.getDirection(), NetworkUtils.generateNextSequence()));
-                //                Listener.sendPacketNoEvents(new
-                // PlayerActionC2SPacket(PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, packet.getPos().down(),
-                // packet.getDirection(), NetworkUtils.generateNextSequence()));
             }
             case STOP_DESTROY_BLOCK -> {
                 lastGrimACWrongBreakCheck = null;
@@ -278,6 +390,15 @@ public class MineExtra extends BaseModule {
         }
         // statistic update
         PlayerInteractionAccess access = PlayerInteractionAccess.of(mc.gameMode);
+
+        if (packet.getAction() == ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK
+                && mc.level != null
+                && access.isFailBreakEmpty()
+                && pendingFailBreak == null
+                && Objects.equals(access.getCurrentMiningPos(), packet.getPos())) {
+            pendingFailBreak = new PendingFailBreak(
+                    packet.getSequence(), packet.getPos().immutable(), lastStartMineBreakingProgressResetTick);
+        }
 
         if (packet.getAction() == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK) {
             // filter bad packets/ instant break
@@ -328,9 +449,9 @@ public class MineExtra extends BaseModule {
             var packet = event.context();
             if (packet.getAction() == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK
                     && packet.getPos().getY() < 1145
-                    && Objects.equals(PlayerInteractionAccess.of(mc.gameMode).getCurrentMiningPos(), packet.getPos())) {
+                    && Objects.equals(
+                            PlayerInteractionAccess.of(mc.gameMode).getCurrentMiningPos(), packet.getPos())) {
                 if (mc.player.getAbilities().instabuild) {
-                    gainedAdvantageCooldown = 150;
                     return;
                 }
                 BlockState state = mc.level.getBlockState(packet.getPos());
@@ -344,18 +465,8 @@ public class MineExtra extends BaseModule {
                 if (currentBreakSpeed > 1.01) {
                     return;
                 }
-                int duplicate = (doubleBreak.get()
-                                && isVanillaMineCooldownComplete(0)
-                                && gainedAdvantageCooldown > GRIM_BAD_PACKETS_DOUBLE_MINE_COOLDOWN_THRESHOLD)
-                        ? 6
-                        : 1;
                 PacketManager.schedulePostScheduleCallback(packet, () -> {
-                    for (var i = 0; i < duplicate; ++i) {
-                        //                    mc.getConnection().sendPacket(new PlayerActionC2SPacket(
-                        //                        PlayerActionC2SPacket.Action.START_DESTROY_BLOCK,
-                        //                        BlockPos.ofFloored(mc.player.getPos()).withY(9178),
-                        //                        Direction.DOWN,
-                        //                        packet.getSequence()));
+                    if (!lastMineProgressDeceive) {
                         mc.gameMode.startPrediction(mc.level, (seq) -> {
                             return new ServerboundPlayerActionPacket(
                                     ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
@@ -363,11 +474,6 @@ public class MineExtra extends BaseModule {
                                     Direction.DOWN,
                                     seq);
                         });
-                        if ((Tasks.getTick() - lastFinishBreakingTick) >= 6) {
-                            gainedAdvantageCooldown = (int) (gainedAdvantageCooldown * 0.9);
-                        } else {
-                            gainedAdvantageCooldown += (300 - (Tasks.getTick() - lastFinishBreakingTick) * 50);
-                        }
                     }
                 });
             }
@@ -390,19 +496,19 @@ public class MineExtra extends BaseModule {
         }
     }
 
-    public void onGrimCooldownResetPackets(Event<LocalPlayer> tickEvent) {
+    int thisTickStartBreakPackets = 0;
+
+    public void onGrimCooldownResetPackets() {
+        thisTickStartBreakPackets = 0;
         if (quickMine.get() && fastBreakBypassMode.get() == Mode.BYPASS_GRIM_BAD_PACKETS && mc.player != null) {
             // exact tick we send,
             if (currentMiningBlock != null && Tasks.getTick() - lastFinishBreakingTick >= 6) {
                 if (mc.player.getAbilities().instabuild) {
-                    gainedAdvantageCooldown = GRIM_BAD_PACKETS_DOUBLE_MINE_COOLDOWN_THRESHOLD;
                     return;
                 }
                 if (!cooldownFix.get().isPresent()) return;
                 int cnt = cooldownFix.get().getValue();
-                while (gainedAdvantageCooldown
-                                > (doubleBreak.get() ? 300 : GRIM_BAD_PACKETS_DOUBLE_MINE_COOLDOWN_THRESHOLD)
-                        && --cnt >= 0) {
+                while (gainedAdvantageCooldown > 150 && thisTickStartBreakPackets < cnt) {
                     mc.gameMode.startPrediction(
                             mc.level,
                             (seq) -> new ServerboundPlayerActionPacket(
@@ -410,30 +516,22 @@ public class MineExtra extends BaseModule {
                                     BlockPos.containing(mc.player.position()).atY(9178),
                                     Direction.DOWN,
                                     seq));
-                    gainedAdvantageCooldown = (int) (gainedAdvantageCooldown * 0.9);
                 }
                 ;
             }
         }
     }
 
-    public void onTickGhostHandFailBreak(Event<LocalPlayer> event) {
+    public void onTickGhostHandFailBreak() {
         if (checkNull()) return;
-        if (switchCallback != null) {
-            try {
-                switchCallback.run();
-            } finally {
-                switchCallback = null;
-            }
-        }
+        InvExtra.INSTANCE.tickNextTickCallbacks();
         if (PlayerInteractionAccess.of(mc.gameMode).getCurrentFailBreakPos() != null
                 && ghostHandFailBreak.get()) {
-            tickGhostHandDoubleBreak(null, false);
+            tickGhostHandDoubleBreak(null, ghostHandFailBreakMode.get(), false);
         }
     }
 
     public int lastTickGhostHandFailBreak = 0;
-    public Runnable switchCallback = null;
 
     public boolean canMineFailBreak(BlockState state, ItemStack tool, boolean groundDeceive) {
         // do not mine liquid, that's a disaster
@@ -450,41 +548,47 @@ public class MineExtra extends BaseModule {
         }
     }
 
-    public void tickGhostHandDoubleBreak(Runnable currentTickCallback, boolean groundDeceive) {
+    public void tickGhostHandDoubleBreak(Runnable currentTickCallback, GhostHandMode mode, boolean groundDeceive) {
         if (lastTickGhostHandFailBreak == Tasks.getTick()) {
             if (currentTickCallback != null) {
-                currentTickCallback.run();
+                finishMineGhostHand(currentTickCallback);
+            }
+            return;
+        }
+        if (mc.player.isUsingItem() && ghostHandFailBreakEatingAbort.get()) {
+            if (currentTickCallback != null) {
+                finishMineGhostHand(currentTickCallback);
+            }
+            return;
+        }
+        if (InvExtra.INSTANCE.hasNextTickGhostHandCallback()) {
+            if (currentTickCallback != null) {
+                finishMineGhostHand(currentTickCallback);
             }
             return;
         }
         lastTickGhostHandFailBreak = Tasks.getTick();
-        if (switchCallback != null) {
-            if (currentTickCallback != null) {
-                currentTickCallback.run();
-            }
-            return;
-        }
+
         BlockPos failPos = PlayerInteractionAccess.of(mc.gameMode).getCurrentFailBreakPos();
         if (failPos == null) {
             if (currentTickCallback != null) {
-                currentTickCallback.run();
+                finishMineGhostHand(currentTickCallback);
             }
             return;
         }
         BlockState blockState = mc.level.getBlockState(failPos);
-        IndexEntry<ItemStack> currentItemSlot = getBestMiningToFor(blockState);
+        IndexEntry<ItemStack> currentItemSlot = getBestMiningToFor(blockState, mode);
         ItemStack currentTool = currentItemSlot.val();
         if (canMineFailBreak(blockState, currentTool, groundDeceive)) {
-            Runnable callback =
-                    InvExtra.INSTANCE.swapItemToHand(currentItemSlot.index(), false, GhostHandMode.INV_SWAP);
-            Runnable currentCallback = currentTickCallback == null ? Runnables.doNothing() : currentTickCallback;
-            switchCallback = () -> {
-                callback.run();
-                currentCallback.run();
-            };
+            // force delay, because it might save some packets
+            if (currentTickCallback != null) {
+                InvExtra.INSTANCE.pushNextTickGhostHandCallback(currentTickCallback);
+            }
+            Runnable callback = InvExtra.INSTANCE.swapItemToHand(currentItemSlot.index(), false, mode);
+            InvExtra.INSTANCE.pushNextTickGhostHandCallback(callback);
         } else {
             if (currentTickCallback != null) {
-                currentTickCallback.run();
+                finishMineGhostHand(currentTickCallback);
             }
         }
     }
@@ -501,7 +605,6 @@ public class MineExtra extends BaseModule {
     public int gainedAdvantageMining;
 
     public int ignoreNextFastBreakStatus = 0;
-    public int lastStartDoubleMineTick = 0;
 
     public void resetStatistics() {
         lastFinishBreakingTick = 0;
@@ -510,10 +613,7 @@ public class MineExtra extends BaseModule {
         lastStartingMineIsInstantBreak = false;
         gainedAdvantageMining = 0;
         ignoreNextFastBreakStatus = 0;
-    }
-
-    public boolean isVanillaDoubleMineCooldownComplete(int extra) {
-        return Tasks.getTick() - lastStartDoubleMineTick >= 6 + extra;
+        pendingFailBreak = null;
     }
 
     public boolean isVanillaMineCooldownComplete(int extra) {
@@ -524,33 +624,37 @@ public class MineExtra extends BaseModule {
         return Math.max(0, lastFinishBreakingCooldownTill + extra - Tasks.getTick());
     }
 
-    public static final int GRIM_BAD_PACKETS_DOUBLE_MINE_COOLDOWN_THRESHOLD = 90;
+    public boolean isSafeCooldownThreshold() {
+        if (fastBreakBypassMode.get().hasAc()) {
+            if (fastBreakBypassMode.get() == Mode.BYPASS_GRIM_LEGIT) {
+                if (gainedAdvantageCooldown > grimAcCooldownThreshold.get()) {
+                    return false;
+                }
+            } else if (fastBreakBypassMode.get() == Mode.BYPASS_GRIM_BAD_PACKETS) {
+                // still magic numbers...
+                if (doubleBreak.get()) {
+                    if (gainedAdvantageCooldown > 150) {
+                        return false;
+                    }
+                } else {
+                    if (gainedAdvantageCooldown > 300) {
+                        return false;
+                    }
+                }
+            }
+        }
 
-    @Unique
-    public int cooldownManaging() {
+        return true;
+    }
+
+    private int cooldownManaging() {
         boolean fastBreak = cooldownOverride.get();
         int cooldownOverride = (fastBreak && breakCooldown.get() >= 0) ? breakCooldown.get() : 5;
 
         if (cooldownOverride < 5) {
-            if (fastBreakBypassMode.get().hasAc()) {
+            if (!isSafeCooldownThreshold()) {
                 // shit......
-                if (fastBreakBypassMode.get() == Mode.BYPASS_GRIM_LEGIT) {
-                    if (gainedAdvantageCooldown > grimAcCounterThreshold.get()) {
-                        return 5;
-                    }
-                } else if (fastBreakBypassMode.get() == Mode.BYPASS_GRIM_BAD_PACKETS) {
-                    // still magic numbers...
-                    if (doubleBreak.get()) {
-                        if (!isVanillaDoubleMineCooldownComplete(7)
-                                || gainedAdvantageCooldown > GRIM_BAD_PACKETS_DOUBLE_MINE_COOLDOWN_THRESHOLD) {
-                            return 5;
-                        }
-                    } else {
-                        if (gainedAdvantageCooldown > 300) {
-                            return 5;
-                        }
-                    }
-                }
+                return 5;
             }
         }
         return cooldownOverride;
@@ -559,49 +663,68 @@ public class MineExtra extends BaseModule {
     public void onStartingMine(BlockPos pos, float speed, boolean instaBreak) {
         MineExtra mineExtra = this;
         lastStartingMineIsInstantBreak = instaBreak || speed > Math.min(1.0F, mineExtra.breakThreshold.get());
+    }
 
-        if (!mineExtra.quickMine.get()) {
-            return;
-        }
+    private void updateGainedAdvantageCooldown(Event<ServerboundPlayerActionPacket> event) {
+        thisTickStartBreakPackets += 1;
+        MineExtra mineExtra = this;
         // escape init case
         if (lastFinishBreakingTick == 0) return;
-        if (instaBreak) return;
         int thisCurrentTick = Tasks.getTick();
         // this means it is ok to directly mine
         boolean canResetThisTime = false;
-        if (thisCurrentTick >= lastFinishBreakingTick + 6) {
-            canResetThisTime = true;
-            gainedAdvantageCooldown = (int) (gainedAdvantageCooldown * 0.9);
+        int threshold = mineExtra.grimAcCooldownThreshold.get();
+        if (!mc.player.getAbilities().instabuild) {
+            if (thisCurrentTick >= lastFinishBreakingTick + 6) {
+                canResetThisTime = true;
+                gainedAdvantageCooldown = (int) (gainedAdvantageCooldown * 0.9);
+            } else {
+                gainedAdvantageCooldown += 300 - (thisCurrentTick - lastFinishBreakingTick) * 50;
+            }
         } else {
-            gainedAdvantageCooldown += 300 - (thisCurrentTick - lastFinishBreakingTick) * 50;
+            gainedAdvantageCooldown = Math.min(threshold, gainedAdvantageCooldown);
         }
-        int threshold = mineExtra.grimAcCounterThreshold.get();
+        gainedAdvantageCooldown = Mth.clamp(gainedAdvantageCooldown, -1000, 1000);
+
         // we will deal the cooldown shit of bad packets mode in the duplication count of bad packets
         if (gainedAdvantageCooldown > threshold
                 && canResetThisTime
-                && mineExtra.fastBreakBypassMode.getValue() == Mode.BYPASS_GRIM_LEGIT
-                && mc.player != null) {
+                && isVanillaMineCooldownComplete(1)
+                && mineExtra.fastBreakBypassMode.get().isIn(Mode.BYPASS_GRIM_LEGIT, Mode.BYPASS_GRIM_BAD_PACKETS)
+                && (startCooldownFix.get().isPresent() || doubleBreak.get())
+                && mc.player != null
+                && !mc.player.getAbilities().instabuild) {
             // reset
-            gainedAdvantageCooldown = 150;
-            if (!mc.player.getAbilities().instabuild) {
-                LocalPlayer player = Minecraft.getInstance().player;
-                Direction dir = Direction.getApproximateNearest(
-                                Vec3.atCenterOf(pos).subtract(player.getEyePosition()))
-                        .getOpposite();
-                for (int i = 0; i < 20; ++i) {
+            BlockPos pos = event.context.getPos();
+            BlockState state = mc.level.getBlockState(pos);
+            // vanilla instant break
+            if (state.isAir()) {
+                return;
+            }
+            // hacking instant break
+            double currentBreakSpeed = WorldUtils.calcBlockBreakingDelta(state, mc.level, pos);
+            // instant break, no need to bypass fastbreak
+            if (currentBreakSpeed > 1.01) {
+                return;
+            }
+            int duplicatedMax = startCooldownFix.get().orElse(5);
+            PacketManager.schedulePostScheduleCallback(event.context, () -> {
+                if (thisTickStartBreakPackets < duplicatedMax) {
                     mc.gameMode.startPrediction(Minecraft.getInstance().level, (sequence -> {
                         return new ServerboundPlayerActionPacket(
-                                ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, pos, dir, sequence);
+                                ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+                                pos,
+                                event.context.getDirection(),
+                                sequence);
                     }));
                 }
-            }
+            });
         }
-        gainedAdvantageCooldown = Mth.clamp(gainedAdvantageCooldown, -1000, 1000);
     }
 
     public void onPostStopMiningLegally(BlockPos pos) {
         MineExtra mineExtra = MineExtra.INSTANCE;
-        int threshold = mineExtra.grimAcCounterThreshold.get();
+        int threshold = mineExtra.grimACProgressThreshold.get();
         ignoreNextFastBreakStatus = 0;
         if (mineExtra.fastBreakBypassMode.getValue() == Mode.BYPASS_GRIM_BAD_PACKETS) {
             // badpackets, no punishment, 桀桀桀
@@ -626,7 +749,7 @@ public class MineExtra extends BaseModule {
                 }
             }
         }
-        gainedAdvantageCooldown = Mth.clamp(gainedAdvantageCooldown, -1000, 1000);
+        gainedAdvantageMining = Mth.clamp(gainedAdvantageMining, -1000, 1000);
     }
 
     public void onPostStopMiningFastBreak(BlockPos pos, double speed, double currentProgress) {
@@ -639,7 +762,7 @@ public class MineExtra extends BaseModule {
         int tickUsed = (int) Math.ceil(currentProgress / speed);
         int diff = predictTick - tickUsed;
         gainedAdvantageMining += (diff + 1) * 50;
-        int threshold = mineExtra.grimAcCounterThreshold.get();
+        int threshold = mineExtra.grimACProgressThreshold.get();
         gainedAdvantageMining = Mth.clamp(gainedAdvantageMining, -1000, 1000);
         if (gainedAdvantageMining > threshold && mineExtra.fastBreakBypassMode.getValue() == Mode.BYPASS_GRIM_LEGIT) {
             // only when starting bypass will we do
@@ -736,11 +859,8 @@ public class MineExtra extends BaseModule {
                                 ColorUtils.withAlpha(frameColor.get().color(), 1.0F));
                         BlockState state = mc.level.getBlockState(blockPos);
                         var tool = getGhostHandMiningTool(state);
-                        float progress = PacketMine.INSTANCE.autoEnable.get()
-                                ? PlayerInteractionAccess.of(mc.gameMode)
-                                        .predictCurrentMiningProgressWithTool(tool.val(), 1)
-                                : PlayerInteractionAccess.of(mc.gameMode)
-                                        .getCurrentMiningProgress(tool.val());
+                        float progress = PlayerInteractionAccess.of(mc.gameMode)
+                                .predictCurrentMiningProgressWithTool(tool.val(), 1);
                         if (progress > 0.0F) {
                             AABB box;
                             if (state.isAir()) {
@@ -773,7 +893,9 @@ public class MineExtra extends BaseModule {
                             if (lastTickGhostHandFailBreak > Tasks.getTick() - 2) {
                                 progressFail = PlayerInteractionAccess.of(mc.gameMode)
                                         .predictFailMiningProgressWithTool(
-                                                getBestMiningToFor(mc.level.getBlockState(doubleMinePos))
+                                                getBestMiningToFor(
+                                                                mc.level.getBlockState(doubleMinePos),
+                                                                GhostHandMode.INV_SWAP)
                                                         .val(),
                                                 0);
                             } else {
@@ -825,6 +947,7 @@ public class MineExtra extends BaseModule {
     }
 
     public void onPresetLoad(Event<EventContainer<ModulePreset>> presetEvent) {
+        if (presetEvent.context().getValue().isOptionPreset()) return;
         var modulePreset = presetEvent.context().getValue();
         switch (modulePreset) {
             case AC_GRIM, AC_GRIM_LEGACY -> {

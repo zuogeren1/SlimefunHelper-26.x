@@ -6,8 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import me.matl114.SlimefunHelper;
 import me.matl114.managers.FileManager;
+import me.matl114.plugins.MainPlugin;
 import me.matl114.utils.Debug;
 import net.fabricmc.loader.api.FabricLoader;
 import org.yaml.snakeyaml.Yaml;
@@ -22,9 +22,7 @@ public class ConfigLoader {
                 if (!file.getParentFile().exists()) {
                     Files.createDirectories(file.toPath().getParent());
                 }
-                Files.copy(
-                        SlimefunHelper.getInstance().getClass().getResourceAsStream("/" + internalFileName),
-                        file.toPath());
+                Files.copy(MainPlugin.class.getResourceAsStream("/" + internalFileName), file.toPath());
             } catch (Throwable e) {
                 Debug.info("创建配置文件时找不到相关默认配置文件,即将生成空文件");
                 try {
@@ -39,29 +37,29 @@ public class ConfigLoader {
 
     public static Config loadInternalConfig(String internalFileName, String customName) {
         try {
-            return new Config(customName, null, loadYamlConfig((Reader) (new InputStreamReader(
-                    SlimefunHelper.getInstance().getClass().getResourceAsStream("/" + internalFileName),
-                    Charsets.UTF_8))));
+            return new ConfigImpl(customName, null, loadYamlConfig((Reader) (new InputStreamReader(
+                    MainPlugin.class.getResourceAsStream("/" + internalFileName), Charsets.UTF_8))));
         } catch (Throwable e) {
             Debug.info("failed to load internal config " + internalFileName + ".yml, Error: " + e.getMessage());
             return null;
         }
     }
 
+    // 我方配置仍放在 config/sfhelper-configs/*.yml（上游这一步迁到了 runtime 目录），保留此重载
     public static Config loadExternalConfig(String name, String customName) {
-        final File cfgFile =
-                FabricLoader.getInstance().getConfigDir().resolve(name).toFile();
+        final File cfgFile = FabricLoader.getInstance().getConfigDir().resolve(name).toFile();
         return loadExternalConfig(cfgFile, customName);
     }
 
     public static Config loadExternalConfig(File cfgFile, String customName) {
         String fileName = cfgFile.getName();
         copyFile(cfgFile, fileName);
-        return new Config(customName, cfgFile);
+        return new ConfigImpl(customName, cfgFile);
     }
 
     public static Config loadRuntimeConfig(String name, String customName) {
-        return loadExternalConfig(FileManager.getInstance().getRuntimeFile(name), customName);
+        return loadExternalConfig(FileManager.getInstance().getRuntimeFile(name), customName)
+                .registerAutoSave();
     }
 
     public static HashMap<String, Object> loadYamlConfig(File file) {

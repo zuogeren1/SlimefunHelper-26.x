@@ -7,6 +7,10 @@ import net.minecraft.client.multiplayer.chat.GuiMessage;
 public interface ChatHudAccess {
     public void setUniqueMessageId(String id);
 
+    public void addPendingUniqueMessageId(String id);
+
+    public void clearPendingUniqueMessageIds();
+
     public List<GuiMessage.Line> getVisibleLines();
 
     public void clearUniqueMessages(String id);

@@ -21,6 +21,7 @@ import me.matl114.hacks.utils.render.ItemStackDisplayUtils;
 import me.matl114.managers.config.EnumRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
+import me.matl114.renderer.TextRenderers;
 import me.matl114.utils.ChatUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -120,7 +121,6 @@ public abstract class INameTag extends BaseModule {
         EquipmentSlot.FEET,
         EquipmentSlot.OFFHAND
     };
-    protected static final float HEIGHT = 9.0F;
 
     @Override
     public void registerAll() {
@@ -150,7 +150,7 @@ public abstract class INameTag extends BaseModule {
         }
     }
 
-    public void onUpdate(Event<Void> eventGameUpdate) {
+    public void onUpdate() {
         if (!checkNull() && enable.get()) {
             nameTagInfos = new ArrayList<>();
             for (var player : mc.level.players()) {
@@ -183,8 +183,12 @@ public abstract class INameTag extends BaseModule {
                                         ? friendNameColor.get().asRGB()
                                         : nameColor.get().asRGB()));
                 if (showHealth.get()) {
-                    text.append(Component.literal(" %d♥".formatted((int) player.getHealth()))
-                            .withColor(healthColor.get().asRGB()));
+                    float absorption = player.getAbsorptionAmount();
+                    String healthText = absorption > 0.0F
+                            ? " %d(+%d)♥".formatted((int) player.getHealth(), (int) absorption)
+                            : " %d♥".formatted((int) player.getHealth());
+                    text.append(
+                            Component.literal(healthText).withColor(healthColor.get().asRGB()));
                 }
                 if (showPing.get()) {
                     int latency = 0;
@@ -297,14 +301,14 @@ public abstract class INameTag extends BaseModule {
                 Map<Holder<MobEffect>, Component> effects) {
             this.player = player;
             this.nameDisplay = display;
-            this.nameLength = display == null ? 0.0F : mc.font.getSplitter().stringWidth(display);
+            this.nameLength = display == null ? 0.0F : TextRenderers.get().getWidth(display);
             if (this.nameLength <= 0.0F) {
                 this.nameDisplay = null;
             }
             this.equipments = equipments;
             this.otherInfoDisplay = otherInfo;
             this.otherInfoLength =
-                    otherInfo == null ? 0.0F : mc.font.getSplitter().stringWidth(otherInfo);
+                    otherInfo == null ? 0.0F : TextRenderers.get().getWidth(otherInfo);
             if (this.otherInfoLength <= 0.0F) {
                 this.otherInfoDisplay = null;
             }

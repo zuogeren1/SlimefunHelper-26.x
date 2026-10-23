@@ -1,18 +1,22 @@
 package me.matl114.gui.elements;
 
+import me.matl114.gui.basic.AbstractElement;
 import me.matl114.gui.basic.DrawableWidget;
-import me.matl114.gui.basic.RenderHandler;
+import me.matl114.gui.basic.TextAlign;
 import me.matl114.gui.basic.TextProvider;
 import me.matl114.gui.complex.RawTextElement;
+import me.matl114.plugins.MainPlugin;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.CommonColors;
 import net.minecraft.util.FormattedCharSequence;
 
-public class LabelElement extends RawTextElement {
+public class LabelElement extends AbstractElement {
+    private final RawTextElement textElement;
+
     protected static final Identifier BACKGROUND_RESOURCE =
-            new Identifier("slimefunhelper", "textures/custom/recipecontainer.png");
+            MainPlugin.identifier("textures/custom/recipecontainer.png");
 
     public static LabelElement instance(Component text) {
         return new LabelElement(text, CommonColors.WHITE);
@@ -23,15 +27,23 @@ public class LabelElement extends RawTextElement {
     }
 
     public LabelElement(Component text, int color) {
-        this(text, color, 0);
+        this(text, color, TextAlign.MIDDLE);
     }
 
-    public LabelElement(Component text, int color, int alignment) {
-        this(TextProvider.of(text), color, alignment);
+    public LabelElement(Component text, int color, TextAlign alignment) {
+        this(TextProvider.of(text, alignment), color);
     }
 
-    public LabelElement(TextProvider text, int color, int alignment) {
-        super(text, color, alignment);
+    public LabelElement(TextProvider text, int color) {
+        this(new RawTextElement(text, color));
+    }
+
+    public LabelElement(TextProvider text, int color, TextAlign alignment) {
+        this(new RawTextElement(text, color, alignment));
+    }
+
+    public LabelElement(RawTextElement textElement) {
+        this.textElement = textElement;
     }
 
     protected static final float u0 = (110f / 256);
@@ -48,8 +60,8 @@ public class LabelElement extends RawTextElement {
             float delta,
             float alpha,
             boolean shouldHighlight) {
-        FormattedCharSequence text1 = text.getLabel(element);
-        if (text1 != null) {
+        Component text = textElement.getText(element);
+        if (text != null) {
             context.drawTexturedQuad(
                     BACKGROUND_RESOURCE,
                     0,
@@ -61,16 +73,7 @@ public class LabelElement extends RawTextElement {
                     u1,
                     v0,
                     v1);
-            RenderHandler.drawScaledText0(
-                    context,
-                    mc.font,
-                    text1,
-                    0,
-                    0,
-                    element.getTextureWidth(),
-                    element.getTextureHeight(),
-                    color.getColorInt(),
-                    alignment);
+            textElement.renderText(element, context, text);
         }
     }
 }

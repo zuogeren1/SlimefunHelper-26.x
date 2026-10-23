@@ -1,5 +1,6 @@
 package me.matl114.hacks.modules.render;
 
+import net.minecraft.client.player.LocalPlayer;
 import static me.matl114.utils.ColorUtils.*;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -22,7 +23,6 @@ import me.matl114.utils.CommonUtils;
 import me.matl114.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -81,17 +81,17 @@ public class ChestESP extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(RenderListener.getBlockEntityRenderListener(), this::onBlockEntityRender);
-        registerListener(Listener.getPreGameTick(), this::onSwapRenderContent);
+        registerListener(Listener.getPostGameTick(), this::onSwapRenderContent);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
     }
 
-    public void onBlockEntityRender(Event<BlockEntity> blockEntityEvent) {}
+    public void onBlockEntityRender() {}
 
     public final RenderCollector<AABB> boxSolidCollector = RenderCollectors.createBoxCollector(false, true, false);
     public final RenderCollector<AABB> boxOutlineCollector = RenderCollectors.createBoxCollector(true, false, false);
     public final RenderCollector<Vec3> boxTraceLineCollector = RenderCollectors.createTracerCollector();
 
-    public void onSwapRenderContent(Event<LocalPlayer> clientPlayerEntityEvent) {
+    public void onSwapRenderContent() {
         if (checkNull()) return;
         boxOutlineCollector.clear();
         boxTraceLineCollector.clear();
@@ -113,9 +113,9 @@ public class ChestESP extends BaseModule {
             PoseStack stack = render.context().stack();
             RenderUtils.startDrawVirtual(stack);
             try {
-                boxSolidCollector.render3D(stack);
-                boxOutlineCollector.render3D(stack);
-                boxTraceLineCollector.render3D(stack);
+                boxSolidCollector.render3D(stack, render.context().partialTicks());
+                boxOutlineCollector.render3D(stack, render.context().partialTicks());
+                boxTraceLineCollector.render3D(stack, render.context().partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(stack);
             }

@@ -53,10 +53,11 @@ public class SequencedActionManager extends BaseModule {
                 this::onBlockBreak,
                 Integer.MAX_VALUE);
         registerListener(
-                Listener.getPacketPreHandlePoint().getChannel(ClientboundBlockChangedAckPacket.class), this::onAck);
+                Listener.getPacketPostHandlePoint().getChannel(ClientboundBlockChangedAckPacket.class), this::onAck);
     }
 
     int maxSeq = 0;
+    private int maxAckSeq = 0;
     Deque<IndexEntry<UseItemOnBlock>> blockPlaceSequences = new ArrayDeque<>(8);
     Deque<IndexEntry<UseItem>> itemUsageSequences = new ArrayDeque<>(8);
     Deque<IndexEntry<BlockBreak>> blockBreakSequences = new ArrayDeque<>(8);
@@ -67,19 +68,20 @@ public class SequencedActionManager extends BaseModule {
 
     @Broadcast
     @Getter
-    public static EventChannelDispatcher<SequencedAction> sequencedActionResponse =
-            new EventChannelDispatcher<>(SequencedAction::getClass);
+    public static EventChannelDispatcher<IndexEntry<? extends SequencedAction>> sequencedActionResponse =
+            new EventChannelDispatcher<>(entry -> entry.val().getClass());
 
     // Mirrors the pre-break block states that vanilla keeps in the (private) BlockStatePredictionHandler map:
     // upstream reads them back through its own PendingUpdateManagerAccess, which we do not have, and the access
     // widener does not expose that map, so we record the states we predict ourselves.
     private final Map<BlockPos, BlockState> beforeBreakPredictionStates = new HashMap<>();
 
-    private void onPlayerRespawn(Event<LocalPlayer> playerEntityEvent) {
+    private void onPlayerRespawn() {
         maxSeq = 0;
-        blockPlaceSequences.forEach(s -> sequencedActionResponse.broadcast(s.val()));
-        itemUsageSequences.forEach(s -> sequencedActionResponse.broadcast(s.val()));
-        blockBreakSequences.forEach(s -> sequencedActionResponse.broadcast(s.val()));
+        maxAckSeq = 0;
+        blockPlaceSequences.forEach(sequencedActionResponse::broadcast);
+        itemUsageSequences.forEach(sequencedActionResponse::broadcast);
+        blockBreakSequences.forEach(sequencedActionResponse::broadcast);
         blockPlaceSequences.clear();
         itemUsageSequences.clear();
         blockBreakSequences.clear();
@@ -91,9 +93,6 @@ public class SequencedActionManager extends BaseModule {
     private void onInteractBlock(Event<ServerboundUseItemOnPacket> event) {
         if (event.isCancelled()) return;
         // ignore fake sequence
-        if (event.context.getSequence() > mc.level.getBlockStatePredictionHandler().currentSequenceNr + 20) {
-            return;
-        }
         maxSeq = Math.max(maxSeq, event.context.getSequence());
         var context = PlayerInteractBlockC2SPacketAccess.of(event.context).getUseContext();
         var stack = context != null && context.stack() != null
@@ -114,9 +113,6 @@ public class SequencedActionManager extends BaseModule {
     private void onInteractItem(Event<ServerboundUseItemPacket> event) {
         if (event.isCancelled()) return;
         // ignore fake sequence
-        if (event.context.getSequence() > mc.level.getBlockStatePredictionHandler().currentSequenceNr + 20) {
-            return;
-        }
         maxSeq = Math.max(maxSeq, event.context.getSequence());
         ItemStack stack = PlayerInteractItemC2SPacketAccess.of(event.context).getItemStack();
         itemUsageSequences.add(
@@ -128,9 +124,6 @@ public class SequencedActionManager extends BaseModule {
 
     private void onBlockBreak(Event<ServerboundPlayerActionPacket> event) {
         if (event.isCancelled()) return;
-        if (event.context.getSequence() > mc.level.getBlockStatePredictionHandler().currentSequenceNr + 20) {
-            return;
-        }
         // not sequenced packet
         if (event.context.getSequence() == 0) return;
         if (event.context.getAction() != ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK
@@ -155,7 +148,7 @@ public class SequencedActionManager extends BaseModule {
         while ((val = ackList.peek()) != null && val.index() <= ack) {
             var pollOut = ackList.pollFirst();
             if (pollOut != null) {
-                onActionAcked(pollOut.val());
+                onActionAcked(pollOut);
             }
         }
         if (!ackList.isEmpty()) {
@@ -164,18 +157,18 @@ public class SequencedActionManager extends BaseModule {
                 var s = iter.next();
                 if (s.index() <= ack) {
                     iter.remove();
-                    onActionAcked(s.val());
+                    onActionAcked(s);
                 }
             }
         }
     }
 
-    private void onActionAcked(SequencedAction action) {
+    private void onActionAcked(IndexEntry<? extends SequencedAction> entry) {
         // drop the mirrored pre-break state together with the action, like endPredictionsUpTo does for vanilla
-        if (action instanceof BlockBreak blockBreak) {
+        if (entry.val() instanceof BlockBreak blockBreak) {
             beforeBreakPredictionStates.remove(blockBreak.blockPos());
         }
-        sequencedActionResponse.broadcast(action);
+        sequencedActionResponse.broadcast(entry);
     }
 
     public boolean isWaitingBlockResponse(BlockPos bp) {
@@ -201,8 +194,32 @@ public class SequencedActionManager extends BaseModule {
         return itemUsageSequences.stream().anyMatch(s -> bp.test(s.val()));
     }
 
-    public boolean isWaitingBreakResponse(Predicate<BlockPos> bp) {
-        return blockBreakSequences.stream().anyMatch(s -> bp.test(s.val().blockPos()));
+    public boolean isWaitingItemUseResponse(int sequenceId) {
+        return itemUsageSequences.stream().anyMatch(s -> s.index() == sequenceId);
+    }
+
+    public int getMaxAckSeq() {
+        return maxAckSeq;
+    }
+
+    public boolean isWaitingStopBreakResponse(BlockPos pos) {
+        return isWaitingStopBreakResponse(pos::equals);
+    }
+
+    public boolean isWaitingStopBreakResponse(Predicate<BlockPos> bp) {
+        return blockBreakSequences.stream()
+                .anyMatch(s -> s.val().stage() == BlockBreak.Stage.POST
+                        && bp.test(s.val().blockPos()));
+    }
+
+    public boolean isWaitingStartBreakResponse(BlockPos pos) {
+        return isWaitingStartBreakResponse(pos::equals);
+    }
+
+    public boolean isWaitingStartBreakResponse(Predicate<BlockPos> bp) {
+        return blockBreakSequences.stream()
+                .anyMatch(s -> s.val().stage() == BlockBreak.Stage.PRE
+                        && bp.test(s.val().blockPos()));
     }
 
     public boolean isWaitingBlockBreakResponse(Predicate<BlockBreak> bp) {
@@ -229,6 +246,7 @@ public class SequencedActionManager extends BaseModule {
 
     public void onAck(Event<ClientboundBlockChangedAckPacket> event) {
         int response = event.context.sequence();
+        maxAckSeq = Math.max(maxAckSeq, response);
         updateACK(itemUsageSequences, response);
         updateACK(blockPlaceSequences, response);
         updateACK(blockBreakSequences, response);

@@ -11,6 +11,7 @@ import me.matl114.events.impl.EventContainer;
 import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -111,10 +112,15 @@ public class NoInteract extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
         acceptor.accept(WidgetUtils.withCondition(
-                createTitle("widget.block-rotate.yaw-deceive.use-argument", 0, dblank, dx, dy),
+                factory.createTitle("widget.block-rotate.yaw-deceive.use-argument", 0, dblank, dx, dy),
                 correctState::get));
     }
 
@@ -210,7 +216,7 @@ public class NoInteract extends BaseModule {
             }
             RenderUtils.startDrawVirtual(stackEvent.context.stack());
             try {
-                failInteractPlace.render3D(stackEvent.context.stack());
+                failInteractPlace.render3D(stackEvent.context.stack(), stackEvent.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(stackEvent.context.stack());
             }
@@ -225,7 +231,12 @@ public class NoInteract extends BaseModule {
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
-        correctMode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
-        correctAirPlace.set(!event.context.getValue().hasAC());
+        ModulePreset preset = event.context.getValue();
+        if (preset.isAirplacePreset()) correctAirPlace.set(preset.getAirplace(correctAirPlace.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (!preset.isOptionPreset()) {
+            correctMode.set(LegalInteractMode.getFromPreset(preset));
+            correctAirPlace.set(!preset.hasAC());
+        }
     }
 }
