@@ -1,0 +1,95 @@
+// SlimeFunHelper+ 各版本共用的构建逻辑（由 plugin/versions/<mc版本>/build.gradle 指到这里）。
+// 结构照抄宿主 common.gradle：Loom 应用方式、依赖声明、Java 25、processResources 展开。
+final int mcVersion = project.mcVersion
+final boolean unobfuscated = mcVersion >= 26_00_00
+
+apply plugin: unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-loom-remap'
+apply plugin: 'com.replaymod.preprocess'
+
+// 产物命名沿用宿主约定：<名称>-<MC版本>-<mod版本>.jar
+base {
+	archivesName = project.archives_base_name + '-' + project.minecraft_version
+}
+version = project.mod_version
+group = project.maven_group
+
+repositories {
+	mavenLocal()
+	mavenCentral()
+	maven {
+		url 'https://maven.aliyun.com/nexus/content/groups/public'
+	}
+	maven {
+		url 'https://repository.hanbings.io/proxy'
+	}
+	maven {
+		url 'https://jitpack.io'
+	}
+	maven {
+		url 'https://maven.fabricmc.net/'
+	}
+}
+
+// 宿主 jar：仓库根 build/release/SlimefunHelper-<mc版本>-<宿主 mod_version>.jar。
+// 宿主 mod_version 直接读仓库根 gradle.properties（本工程不重复维护）。
+def hostProps = new Properties()
+rootProject.file('../gradle.properties').withInputStream { hostProps.load(it) }
+final String hostModVersion = project.findProperty('host_mod_version') ?: hostProps.getProperty('mod_version')
+final File hostJar = project.hasProperty('host_jar')
+		? rootProject.file(project.property('host_jar'))
+		: rootProject.file("../build/release/SlimefunHelper-${project.minecraft_version}-${hostModVersion}.jar")
+
+if (!hostJar.isFile()) {
+	throw new GradleException("找不到宿主 jar: ${hostJar}\n" +
+			"请先在仓库根目录构建宿主（./gradlew buildAndGather），" +
+			"或核对仓库根 gradle.properties 里的 mod_version 与 build/release 下的文件名。")
+}
+
+dependencies {
+	minecraft("com.mojang:minecraft:${project.minecraft_version}") {
+		transitive = false
+	}
+	// 26.1 起 Minecraft 官方 jar 不再混淆，Loom 也不再 remap；
+	// 与宿主一样使用标准 configuration，而不是 modImplementation。
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// 宿主插件 API（me.matl114.plugins.SlimefunHelperPlugin、me.matl114.utils.Debug ...）
+	// 只挂编译期：绝不把宿主类打进插件 jar。
+	compileOnly files(hostJar)
+}
+
+processResources {
+	inputs.property "version", project.mod_version
+	inputs.property "minecraft_version", project.minecraft_version
+
+	filesMatching("fabric.mod.json") {
+		expand(
+				"version": project.mod_version,
+				"minecraft_version": project.minecraft_version
+		)
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	options.encoding = "UTF-8"
+	// javac 默认只报前 100 条错误，多版本时后面的差异会被挡住
+	options.compilerArgs << "-Xmaxerrs" << "10000"
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+// 不加 classifier：普通 jar 就是最终插件产物（空骨架阶段没有需要 shadow 的依赖）。
+jar {
+	// 与宿主一致地带上 LICENSE 的副本（没有该文件时 Gradle 会跳过）
+	def license = rootProject.file('../LICENSE')
+	if (license.isFile()) {
+		from(license) {
+			rename { "${it}_${project.base.archivesName.get()}" }
+		}
+	}
+}

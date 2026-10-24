@@ -1,0 +1,11 @@
+net.minecraft.world.entity.EntityType net.minecraft.world.entity.EntityTypes
+net.minecraft.world.level.block.entity.BlockEntityType net.minecraft.world.level.block.entity.BlockEntityTypes
+net.minecraft.world.entity.animal.Bucketable net.minecraft.world.entity.Bucketable
+net.minecraft.advancements.criterion.DamageSourcePredicate net.minecraft.advancements.predicates.DamageSourcePredicate
+net.minecraft.advancements.criterion.EntityPredicate net.minecraft.advancements.predicates.entity.EntityPredicate
+net.minecraft.advancements.criterion.EntityTypePredicate net.minecraft.advancements.predicates.entity.EntityTypePredicate
+net.minecraft.advancements.criterion.NbtPredicate net.minecraft.advancements.predicates.NbtPredicate
+net.minecraft.client.renderer.GameRenderer getMainCamera() mainCamera()
+net.minecraft.client.renderer.GameRenderer getLighting() lighting()
+net.minecraft.client.renderer.GameRenderer getNightVisionScale() nightVisionScale()
+net.minecraft.world.effect.MobEffect isInstantenous() isInstantaneous()

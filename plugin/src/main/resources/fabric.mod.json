@@ -1,0 +1,29 @@
+{
+	"schemaVersion": 1,
+	"id": "slimefunhelper-plus",
+	"version": "${version}",
+	"name": "SlimeFunHelper+",
+	"description": "SlimeFunHelper 的扩展插件（宿主插件，不是独立 mod）。",
+	"authors": [
+		"zuogeren"
+	],
+	"license": "CC0-1.0",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"me.zuogeren.slimefunhelperplus.PlusMod"
+		],
+		"slimefunhelper": [
+			"me.zuogeren.slimefunhelperplus.PlusPlugin"
+		]
+	},
+	"mixins": [
+		"slimefunhelperplus.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "${minecraft_version}",
+		"java": ">=25",
+		"slimefunhelper": ">=1.0.1.0-upstream.1.2.1.1"
+	}
+}
