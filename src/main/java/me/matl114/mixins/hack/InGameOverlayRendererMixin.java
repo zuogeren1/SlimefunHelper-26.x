@@ -8,7 +8,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ScreenEffectRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -16,6 +19,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Environment(EnvType.CLIENT)
 @Mixin(ScreenEffectRenderer.class)
 public abstract class InGameOverlayRendererMixin {
+    @Shadow
+    private ItemStack itemActivationItem;
+
     // 26.2 起渲染改为"提交节点"模式：
     // renderTex/renderWater/renderFire (MultiBufferSource) -> submitBlockSprite/submitWater/submitFire
     // (SubmitNodeCollector)。renderTex 在 26.1.2 还少一个 int color 参数 ——
@@ -76,6 +82,16 @@ public abstract class InGameOverlayRendererMixin {
             TextureAtlasSprite sprite,
             CallbackInfo ci) {
         if (NoRender.INSTANCE.noFireOverlay()) {
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "renderItemActivationAnimation", at = @At("HEAD"), cancellable = true)
+    private void onNoRender3(
+            PoseStack matrices, float tickProgress, SubmitNodeCollector submitNodeCollector, CallbackInfo ci) {
+        if (NoRender.INSTANCE.noTotemOverlay()
+                && itemActivationItem != null
+                && itemActivationItem.get(DataComponents.DEATH_PROTECTION) != null) {
             ci.cancel();
         }
     }
