@@ -55,6 +55,13 @@ public class DisablerManager extends BaseModule implements LegalMovementManager.
 
     public final ModulePath grimPlaceBreak = disablers.add("grim-place-break");
 
+    {
+        portConfigs(disablers.add("grim-self-check"), grimPlaceBreak.add("grim-self-check"));
+        portConfigs(disablers.add("grim-multi-place"), grimPlaceBreak.add("grim-multi-place"));
+        portConfigs(disablers.add("auto-flush-multi-place-queue"), grimPlaceBreak.add("auto-flush-multi-place-queue"));
+        portConfigs(disablers.add("auto-flush-place-break-queue"), grimPlaceBreak.add("auto-flush-place-break-queue"));
+    }
+
     public final FlagRef grimSelfCheck = flagBuilder(grimPlaceBreak.add("grim-self-check"))
             .show(() -> currentAC.get().isIn(SupportAC.GRIM))
             .build();

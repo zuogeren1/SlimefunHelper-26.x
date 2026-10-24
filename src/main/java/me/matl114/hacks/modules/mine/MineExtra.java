@@ -111,6 +111,12 @@ public class MineExtra extends BaseModule {
             .build();
 
     public final ModulePath cooldownGroup = fastbreak.add("cooldown-manage");
+    {
+        portConfigs(fastbreak.add("break-cooldown"), cooldownGroup.add("break-cooldown"));
+        portConfigs(fastbreak.add("cooldown-override"), cooldownGroup.add("cooldown-override"));
+        portConfigs(fastbreak.add("cooldown-punishment-fix"), cooldownGroup.add("cooldown-punishment-fix"));
+    }
+
     public final FlagRef cooldownOverride = builder(cooldownGroup.add("cooldown-override"), Boolean.class)
             .defaultValue(true)
             .build();
@@ -183,6 +189,12 @@ public class MineExtra extends BaseModule {
 
     public final ModulePath badPackets = fastbreak.add("packet-fix");
 
+    {
+        portConfigs(fastbreak.add("fix-multi-break"), badPackets.add("fix-multi-break"));
+        portConfigs(fastbreak.add("fix-swing-packet"), badPackets.add("fix-swing-packet"));
+        portConfigs(fastbreak.add("silent-break"), badPackets.add("silent-break"));
+    }
+
     public final FlagRef silent = flagBuilder(badPackets.add("silent-break")).build();
 
     public final FlagRef multiBreakFix =
@@ -195,6 +207,8 @@ public class MineExtra extends BaseModule {
 
     {
         portConfigs(fastbreak.add("render-current-break-pos"), render.add("render-current-break-pos"));
+        portConfigs(fastbreak.add("render-frame-color"), render.add("render-frame-color"));
+        portConfigs(fastbreak.add("render-progress-color"), render.add("render-progress-color"));
     }
 
     public final FlagRef mineRender =
