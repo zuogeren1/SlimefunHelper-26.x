@@ -10,7 +10,7 @@
 	"license": "CC0-1.0",
 	"environment": "client",
 	"entrypoints": {
-		"main": [
+		"client": [
 			"me.zuogeren.slimefunhelperplus.PlusMod"
 		],
 		"slimefunhelper": [
