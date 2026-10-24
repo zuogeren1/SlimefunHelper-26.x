@@ -4,7 +4,7 @@ import me.matl114.gui.basic.AbstractElement;
 import me.matl114.gui.basic.ColorSampler;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.gui.basic.ExecutableWidget;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.resources.Identifier;
 

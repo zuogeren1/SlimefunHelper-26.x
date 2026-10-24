@@ -7,7 +7,7 @@ import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import me.matl114.managers.FileManager;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.Debug;
 import net.fabricmc.loader.api.FabricLoader;
 import org.yaml.snakeyaml.Yaml;

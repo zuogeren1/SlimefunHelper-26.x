@@ -4,7 +4,7 @@ import com.google.common.collect.ImmutableMap;
 import java.awt.*;
 import java.util.List;
 import java.util.Map;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.ChatUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;

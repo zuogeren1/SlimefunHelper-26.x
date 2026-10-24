@@ -14,7 +14,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.awt.*;
 import java.util.List;
 import java.util.function.Function;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.renderer.TextRenderers;
 import me.matl114.utils.render.ColorQuad;
 import me.matl114.utils.render.Quad;

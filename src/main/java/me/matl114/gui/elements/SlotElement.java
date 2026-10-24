@@ -3,7 +3,7 @@ package me.matl114.gui.elements;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import me.matl114.gui.basic.*;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.resources.Identifier;

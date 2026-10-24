@@ -5,8 +5,8 @@ import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import lombok.Getter;
-import me.matl114.plugins.MainPlugin;
-import me.matl114.plugins.SlimefunHelperPlugin;
+import me.matl114.plugins.internal.MainPlugin;
+import me.matl114.plugins.api.SlimefunHelperPlugin;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 

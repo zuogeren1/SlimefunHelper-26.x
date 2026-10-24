@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigLoader;
-import me.matl114.plugins.SlimefunHelperPlugin;
+import me.matl114.plugins.api.SlimefunHelperPlugin;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.resources.Identifier;
 

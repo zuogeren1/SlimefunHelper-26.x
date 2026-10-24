@@ -1,4 +1,4 @@
-package me.matl114.plugins;
+package me.matl114.plugins.api;
 
 import me.matl114.hacks.api.ModuleGroup;
 import me.matl114.managers.config.Config;
@@ -31,7 +31,7 @@ public interface SlimefunHelperPlugin {
 
     /** Registers a plugin module group in the global module registry. */
     default void registerModuleGroup(ModuleGroup group) {
-        PluginManager.getInstance().registerModuleGroup(this, group);
+        PluginHosts.context().modules().registerGroup(getPluginId(), group);
     }
 
     default <T extends Config> T loadRuntimeConfig(String fileName, String customName) {
@@ -40,7 +40,7 @@ public interface SlimefunHelperPlugin {
 
     /** Makes a plugin config visible to the global config screen and reload lifecycle. */
     default <T extends Config> T registerConfig(T config) {
-        return PluginManager.getInstance().registerConfig(this, config);
+        return PluginHosts.context().config().register(config);
     }
 
     default void onDiscovered(ModContainer container) {}

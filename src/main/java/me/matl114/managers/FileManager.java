@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import me.matl114.managers.file.FileStorage;
 import me.matl114.managers.file.JsonFileStorageImpl;
 import me.matl114.managers.file.NBTFileStorageImpl;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.Debug;
 import me.matl114.utils.FileUtils;
 import net.fabricmc.loader.api.FabricLoader;

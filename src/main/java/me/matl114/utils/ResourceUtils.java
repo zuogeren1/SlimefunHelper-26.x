@@ -3,7 +3,7 @@ package me.matl114.utils;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.Predicate;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManager;

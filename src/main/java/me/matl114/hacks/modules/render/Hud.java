@@ -10,7 +10,7 @@ import me.matl114.hacks.utils.config.BoundedPrimitiveFlagMap;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
-import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.*;
 import me.matl114.versioned.SupportVersion;
 import me.matl114.versioned.api.VDrawContext;
