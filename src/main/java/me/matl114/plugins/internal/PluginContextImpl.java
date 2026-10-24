@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModuleGroup;
+import me.matl114.hacks.api.ViewModuleGroup;
 import me.matl114.hacks.modules.HackModules;
 import me.matl114.hacks.modules.move.TravellingControl;
 import me.matl114.managers.config.Config;
@@ -53,7 +54,9 @@ final class PluginContextImpl implements PluginContext {
 
         @Override
         public void registerViewGroup(String pluginId, String name, Supplier<List<BaseModule>> supplier) {
-            viewGroups.put(pluginId + ':' + name, new ViewGroupSpec(pluginId, name, supplier));
+            ViewGroupSpec spec = new ViewGroupSpec(pluginId, name, supplier);
+            viewGroups.put(pluginId + ':' + name, spec);
+            HackModules.registerViewGroup(new ViewModuleGroup(name, supplier));
         }
 
         @Override

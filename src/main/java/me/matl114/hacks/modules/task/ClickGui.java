@@ -50,6 +50,7 @@ import me.matl114.managers.FileManager;
 import me.matl114.managers.config.*;
 import me.matl114.managers.file.FileStorage;
 import me.matl114.managers.input.*;
+import me.matl114.plugins.internal.PluginManager;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.ClientUtils;
 import me.matl114.utils.ScreenUtils;
@@ -1145,7 +1146,11 @@ public class ClickGui extends BaseModule implements GuiColorSamplier {
     }
 
     public List<String> getModules() {
-        return new ArrayList<>(HackModules.main.getModuleGroups().keySet());
+        List<String> names = new ArrayList<>(HackModules.main.getModuleGroups().keySet());
+        // View groups are rendered like real groups but never registered; keep them last,
+        // right before Search, so plugin modules stay grouped together.
+        HackModules.getViewGroups().forEach(group -> names.add(group.getName()));
+        return names;
     }
 
     private static final String SEARCH_MODULE = "Search";
@@ -1225,6 +1230,12 @@ public class ClickGui extends BaseModule implements GuiColorSamplier {
             texts.addAll(TOOLTIP_HAS_BIND);
         } else {
             texts.addAll(TOOLTIPS_NO_BIND);
+        }
+        String pluginId = PluginManager.getInstance().ownerOf(baseModule);
+        if (pluginId != null) {
+            texts.add(Component.empty());
+            texts.add(Component.translatableWithFallback(
+                    "widget.click-gui.module-plugin-origin", "来自插件 %s", pluginId));
         }
         return texts;
     }
