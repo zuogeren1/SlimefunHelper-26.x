@@ -344,7 +344,12 @@ public class AutoEat extends BaseModule {
             }
         }
         if (eating) {
-            if (canContinueEat()) {
+            if (manualEating && forceEatLeftClickHold.get() && !mc.options.keyUse.isDown()) {
+                if (log.get()) {
+                    logI18N("message.module.auto-eat.stop");
+                }
+                stopEating();
+            } else if (canContinueEat()) {
                 mc.options.keyUse.setDown(true);
             } else {
                 if (log.get()) {
@@ -465,7 +470,11 @@ public class AutoEat extends BaseModule {
 
     public void onRightClick(Event<UseItem> event) {
         InteractionHand hand = event.context.hand();
-        if (enable.get() && forceEatLeftClick.get() && mc.options.keyUse.isDown() && !eating) {
+        if (enable.get()
+                && forceEatLeftClick.get()
+                && mc.options.keyUse.isDown()
+                && !eating
+                && (hand == InteractionHand.MAIN_HAND || forceEatOffhand.get())) {
             ItemStack stack = mc.player.getItemInHand(hand);
             InteractionHand offhand =
                     hand == InteractionHand.MAIN_HAND ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
