@@ -117,6 +117,7 @@ public final class VanillaGoldenAppleLootPredictor {
     private static final List<Pool> LEGACY_ANCIENT_CITY_POOLS = ancientCityPools(LootVersion.V1_21_1);
     private static final List<Pool> V1_21_11_ANCIENT_CITY_POOLS = ancientCityPools(LootVersion.V1_21_11);
     private static final List<Pool> V26_1_ANCIENT_CITY_POOLS = ancientCityPools(LootVersion.V26_1);
+    private static final List<Pool> V26_2_ANCIENT_CITY_POOLS = ancientCityPools(LootVersion.V26_2);
 
     private static List<Pool> createLegacyDesertPyramidPools() {
         List<Entry> entries = new ArrayList<>(DESERT_PYRAMID_POOLS.getFirst().entries());
@@ -427,6 +428,7 @@ public final class VanillaGoldenAppleLootPredictor {
                 case V1_21_1, V1_21_4 -> LEGACY_ANCIENT_CITY_POOLS;
                 case V1_21_11 -> V1_21_11_ANCIENT_CITY_POOLS;
                 case V26_1 -> V26_1_ANCIENT_CITY_POOLS;
+                case V26_2 -> V26_2_ANCIENT_CITY_POOLS;
             };
         }
         if (ANCIENT_CITY_ICE_BOX.equals(lootTable)) {
