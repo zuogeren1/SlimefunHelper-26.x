@@ -24,6 +24,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.jetbrains.annotations.Nullable;
@@ -283,6 +284,16 @@ public abstract class MinecraftClientEvents {
             original.call(instance);
         }
         Listener.getPostHandleInputEvents().handleValue(new Event<>(null, false, false));
+    }
+
+    @WrapOperation(
+            method = "handleKeybinds",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Inventory;setSelectedSlot(I)V"))
+    private void onSetSelectedSlotNumberButton(Inventory instance, int slot, Operation<Void> original) {
+        Event<Integer> hotBar = new Event<>(slot, true, true);
+        Listener.getPlayerScrollHotBar().handleValue(hotBar);
+        if (hotBar.isCancelled()) return;
+        original.call(instance, (int) hotBar.context());
     }
 
     @Inject(

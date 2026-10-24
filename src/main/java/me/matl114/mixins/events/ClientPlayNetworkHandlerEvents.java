@@ -7,6 +7,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -17,6 +18,7 @@ import me.matl114.accessors.access.PlayerMoveC2SPacketAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.ChatRecv;
+import me.matl114.events.impl.PosUpdate;
 import me.matl114.events.impl.Teleportation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -393,5 +395,72 @@ public abstract class ClientPlayNetworkHandlerEvents {
             return;
         }
         original.call(instance, chatRecvEvent.context.text(), remote);
+    }
+
+    @Unique
+    private final Map<Integer, Vec3> sfh$trackedPosBefore = new HashMap<>();
+
+    @Inject(method = "handleMoveEntity", at = @At("HEAD"))
+    private void sfh$captureMovedEntity(ClientboundMoveEntityPacket packet, CallbackInfo ci) {
+        if (!packet.hasPosition()) return;
+        Entity entity = packet.getEntity(Minecraft.getInstance().level);
+        if (entity != null) {
+            sfh$trackedPosBefore.put(entity.getId(), entity.position());
+        }
+    }
+
+    @Inject(method = "handleMoveEntity", at = @At("RETURN"))
+    private void sfh$broadcastMovedEntity(ClientboundMoveEntityPacket packet, CallbackInfo ci) {
+        if (!packet.hasPosition()) return;
+        Entity entity = packet.getEntity(Minecraft.getInstance().level);
+        if (entity != null) {
+            sfh$publishTrackedPosition(entity);
+        }
+    }
+
+    @Inject(method = "handleEntityPositionSync", at = @At("HEAD"))
+    private void sfh$captureSyncedEntity(ClientboundEntityPositionSyncPacket packet, CallbackInfo ci) {
+        Entity entity = sfh$entityById(packet.id());
+        if (entity != null) {
+            sfh$trackedPosBefore.put(entity.getId(), entity.position());
+        }
+    }
+
+    @Inject(method = "handleEntityPositionSync", at = @At("RETURN"))
+    private void sfh$broadcastSyncedEntity(ClientboundEntityPositionSyncPacket packet, CallbackInfo ci) {
+        Entity entity = sfh$entityById(packet.id());
+        if (entity != null) {
+            sfh$publishTrackedPosition(entity);
+        }
+    }
+
+    @Inject(method = "handleTeleportEntity", at = @At("HEAD"))
+    private void sfh$captureTeleportedEntity(ClientboundTeleportEntityPacket packet, CallbackInfo ci) {
+        Entity entity = sfh$entityById(packet.id());
+        if (entity != null) {
+            sfh$trackedPosBefore.put(entity.getId(), entity.position());
+        }
+    }
+
+    @Inject(method = "handleTeleportEntity", at = @At("RETURN"))
+    private void sfh$broadcastTeleportedEntity(ClientboundTeleportEntityPacket packet, CallbackInfo ci) {
+        Entity entity = sfh$entityById(packet.id());
+        if (entity != null) {
+            sfh$publishTrackedPosition(entity);
+        }
+    }
+
+    @Unique
+    private Entity sfh$entityById(int entityId) {
+        ClientLevel level = Minecraft.getInstance().level;
+        return level == null ? null : level.getEntity(entityId);
+    }
+
+    @Unique
+    private void sfh$publishTrackedPosition(Entity entity) {
+        Vec3 before = sfh$trackedPosBefore.remove(entity.getId());
+        if (before != null && !before.equals(entity.position())) {
+            Listener.getEntityTrackedPositionUpdate().broadcast(new PosUpdate(before, entity.position(), entity));
+        }
     }
 }
