@@ -375,8 +375,11 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                                     WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
                                             minecraft.player, instance, bestTool.val()))
                             > 1.01) {
+                GhostHandMode preferred = MineExtra.INSTANCE.ghostHandPreferredMode.get();
+                GhostHandMode modeSelect =
+                        preferred.isAcceptable(bestTool.index()) ? preferred : GhostHandMode.INV_SWAP;
                 MineExtra.INSTANCE.instaBreakGhostHand =
-                        Pair.of(InvExtra.INSTANCE.swapItemToHand(bestTool.index(), false, GhostHandMode.INV_SWAP), pos);
+                        Pair.of(InvExtra.INSTANCE.swapItemToHand(bestTool.index(), false, modeSelect), pos);
                 return true;
             }
         }
@@ -451,7 +454,9 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
             this.destroyProgress = progress;
             DisablerManager.INSTANCE.flushACPlaceBreakQueue();
             clearBreakingState();
-            Runnable fastBreakGhostHand = InvExtra.INSTANCE.swapItemToHand(tool.index(), false, GhostHandMode.INV_SWAP);
+            GhostHandMode preferred = MineExtra.INSTANCE.ghostHandPreferredMode.get();
+            GhostHandMode modeSelect = preferred.isAcceptable(tool.index()) ? preferred : GhostHandMode.INV_SWAP;
+            Runnable fastBreakGhostHand = InvExtra.INSTANCE.swapItemToHand(tool.index(), false, modeSelect);
             AttributeUtils.updateAttribute(this.minecraft.player);
             float speed = blockState.getDestroyProgress(Minecraft.getInstance().player, this.minecraft.level, pos);
             this.startPrediction(Minecraft.getInstance().level, (sequence) -> {
@@ -519,7 +524,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                 cir.setReturnValue(true);
             } else {
                 float predictedProgress = getCurrentMiningProgress(null);
-                if (mineExtra.shouldTryDoubleBreak(predictedProgress)) {
+                if (mineExtra.shouldTryDoubleBreak(predictedProgress) && mineExtra.doubleBreakVanilla.get()) {
                     sendFailBreakCurrentPos(direction);
                 }
             }
@@ -535,7 +540,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                                     "Lnet/minecraft/client/multiplayer/ClientPacketListener;send(Lnet/minecraft/network/protocol/Packet;)V"))
     private void onDoubleBreak(ClientPacketListener instance, Packet packet, Operation<Void> original) {
 
-        if (!MineExtra.INSTANCE.optimizeOneBlock.get()) {
+        if (!MineExtra.INSTANCE.optimizeOneBlock.get() && MineExtra.INSTANCE.doubleBreakVanilla.get()) {
             // we make optimizeOneBlockMine delay its destroy packet to changing the currentPosition in method
             // sameBlockOptimize
             if (sendFailBreakCurrentPos(null)) {
@@ -580,7 +585,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
             @Local(argsOnly = true) Direction direction) {
         // conflict with optimizeOneBlock
 
-        if (!MineExtra.INSTANCE.optimizeOneBlock.get()) {
+        if (!MineExtra.INSTANCE.optimizeOneBlock.get() && MineExtra.INSTANCE.doubleBreakVanilla.get()) {
             // we make optimizeOneBlockMine delay its destroy packet to check onDoubleBreakAbort() and  changing the
             // currentPosition in method sameBlockOptimize
             if (sendFailBreakCurrentPos(direction)) {
@@ -688,8 +693,9 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
         }
         if (mineExtra.shouldTriggerEarlyStop(speed)) {
             DisablerManager.INSTANCE.flushACPlaceBreakQueue();
-            Runnable fastbreakCallback =
-                    InvExtra.INSTANCE.swapItemToHand(usingTool.index(), false, GhostHandMode.INV_SWAP);
+            GhostHandMode preferred = MineExtra.INSTANCE.ghostHandPreferredMode.get();
+            GhostHandMode modeSelect = preferred.isAcceptable(usingTool.index()) ? preferred : GhostHandMode.INV_SWAP;
+            Runnable fastbreakCallback = InvExtra.INSTANCE.swapItemToHand(usingTool.index(), false, modeSelect);
             AttributeUtils.updateAttribute(this.minecraft.player);
             clearBreakingState();
             this.startPrediction(Minecraft.getInstance().level, (sequence) -> {
