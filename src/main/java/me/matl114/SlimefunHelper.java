@@ -1,32 +1,16 @@
 package me.matl114;
 
 import com.google.common.base.Preconditions;
-import java.util.Collection;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import lombok.Getter;
-import me.matl114.registry.RegistryBootstrap;
-import me.matl114.managers.command.MainCommand;
-import me.matl114.events.Listener;
-import me.matl114.events.RenderListener;
-import me.matl114.gui.GuiMain;
-import me.matl114.hacks.MainTasks;
-import me.matl114.jsApi.SlimefunHelperApi;
 import me.matl114.managers.Configs;
-import me.matl114.managers.TaskManagers;
-import me.matl114.managers.Tasks;
-import me.matl114.utils.CommonUtils;
+import me.matl114.plugins.MainPlugin;
+import me.matl114.plugins.PluginManager;
+import me.matl114.plugins.PluginManager.BootstrapPhase;
 import me.matl114.utils.Debug;
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.client.model.loading.v1.PreparableModelLoadingPlugin;
-import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
-import net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener;
-import net.fabricmc.fabric.impl.client.model.loading.ModelLoadingPluginManager;
 import net.fabricmc.loader.api.ModContainer;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
-import net.minecraft.resources.Identifier;
-import net.minecraft.server.packs.PackType;
-import net.minecraft.server.packs.resources.ResourceManager;
 
 public class SlimefunHelper implements ModInitializer {
     // This logger is used to write text to the console and the log file.
@@ -74,44 +58,14 @@ public class SlimefunHelper implements ModInitializer {
         initializeEnvironment();
         Debug.info("SlimefunHelper, start!");
         Debug.info("SlimefunHelper start loading!");
-        reloadModConfig();
-        ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)
-                .registerReloadListener(new SimpleSynchronousResourceReloadListener() {
-                    @Override
-                    public Identifier getFabricId() {
-                        return CommonUtils.getNamespaceKey("reload_listener");
-                    }
-
-                    @Override
-                    public void onResourceManagerReload(ResourceManager manager) {
-                        Debug.info("Resource reload called for SlimefunHelper");
-                        reloadModConfig();
-                        RenderListener.onResourceReload(manager);
-                    }
-                });
-        ModelLoadingPluginManager.<Collection<Identifier>>registerPlugin(
-                (resourceManager, executor) -> CompletableFuture.supplyAsync(() -> {
-                    Debug.info("check model plugin work");
-                    reloadModConfig();
-                    // we removed the itemModel auto register to ItemAssetsLoader
-                    return Set.of(); // RenderListener.getReloadingResources(resourceManager.getResourceManager());
-                }),
-                (PreparableModelLoadingPlugin<Collection<Identifier>>) (data, pluginContext) -> {
-                    // here we should auto register these to BasicItemModel s or SpecialItemModels
-                    //				pluginContext.addModels(data);
-                });
-        // tasks and listeners
-        TaskManagers.init();
-        Tasks.init();
-        Listener.init();
-        RenderListener.init();
-        MainCommand.init();
-        // gui system
-        GuiMain.init();
-        // hacks main
-        MainTasks.init();
-        RegistryBootstrap.init();
-        SlimefunHelperApi.init();
+        PluginManager pluginManager = PluginManager.getInstance();
+        pluginManager.begin(new MainPlugin(getModContainer()));
+        pluginManager.discover();
+        pluginManager.advance(BootstrapPhase.CONFIG_READ);
+        pluginManager.advance(BootstrapPhase.LISTENERS);
+        pluginManager.advance(BootstrapPhase.MODULES);
+        pluginManager.advance(BootstrapPhase.OTHER);
+        pluginManager.complete();
         Debug.info("SlimefunHelper loading finish");
     }
 
