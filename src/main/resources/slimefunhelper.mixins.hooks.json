@@ -14,8 +14,6 @@
 		"baritone.ElytraCommandMixin",
 		"baritone.ElytraProcessMixin",
 		"baritone.InventoryBehaviourMixin",
-		"confluxmap.ConfluxMapScreenMixin",
-		"confluxmap.ConfluxMinimapHudMixin",
 		"meteor.BaritoneSettingsMixin",
 		"viaversion.PacketWrapperSendEvents",
 		"xaero.XaeroGuiMapMixin",

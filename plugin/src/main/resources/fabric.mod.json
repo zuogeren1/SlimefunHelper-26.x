@@ -18,7 +18,8 @@
 		]
 	},
 	"mixins": [
-		"slimefunhelperplus.mixins.json"
+		"slimefunhelperplus.mixins.json",
+		"slimefunhelperplus.conflux.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.19.5",

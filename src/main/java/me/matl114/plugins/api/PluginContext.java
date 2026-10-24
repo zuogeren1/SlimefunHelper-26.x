@@ -50,6 +50,9 @@ public interface PluginContext {
         /** Registers a real module group owned by {@code pluginId}. */
         void registerGroup(String pluginId, ModuleGroup group);
 
+        /** Registers a single module into an existing host group (e.g. {@code "Survival"}). */
+        void register(String pluginId, String groupName, BaseModule module);
+
         /** Registers a read-only view group listing modules owned by {@code pluginId}. */
         void registerViewGroup(String pluginId, String name, Supplier<List<BaseModule>> modules);
 

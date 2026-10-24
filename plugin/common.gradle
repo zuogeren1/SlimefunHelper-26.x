@@ -54,10 +54,28 @@ dependencies {
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
-	// 宿主插件 API（me.matl114.plugins.SlimefunHelperPlugin、me.matl114.utils.Debug ...）
+	// 宿主插件 API（me.matl114.plugins.api.*、渲染/事件等宿主 ABI）
 	// 只挂编译期：绝不把宿主类打进插件 jar。
 	compileOnly files(hostJar)
+
+	// Conflux 适配里的 @Getter/@RequiredArgsConstructor 等与宿主保持同一版本
+	compileOnly 'org.projectlombok:lombok:1.18.48'
+	annotationProcessor 'org.projectlombok:lombok:1.18.48'
 }
+
+// src/stubs/java：第三方 mod（conflux-map 等）的空桩，只参与编译、不进产物。
+// 与宿主一样用独立 JavaCompile 任务而不是源集，避免预处理器去解析另一个版本的编译类路径。
+def compileStubs = tasks.register('compileStubs', JavaCompile) {
+	source = rootProject.fileTree('src/stubs/java')
+	classpath = files({ configurations.compileClasspath })
+	destinationDirectory = layout.buildDirectory.dir('classes/java/stubs')
+	options.release = 25
+	options.encoding = 'UTF-8'
+}
+
+def stubsClasses = compileStubs.map { it.destinationDirectory }
+sourceSets.main.compileClasspath += files(stubsClasses)
+tasks.named('compileJava') { dependsOn compileStubs }
 
 processResources {
 	inputs.property "version", project.mod_version

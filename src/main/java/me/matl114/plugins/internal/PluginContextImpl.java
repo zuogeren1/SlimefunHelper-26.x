@@ -53,6 +53,17 @@ final class PluginContextImpl implements PluginContext {
         }
 
         @Override
+        public void register(String pluginId, String groupName, BaseModule module) {
+            ModuleGroup group = HackModules.getModuleGroup(groupName);
+            if (group == null) {
+                throw new IllegalStateException("Unknown module group: " + groupName);
+            }
+            module.register(group);
+            moduleOwners.put(module, pluginId);
+            pluginModules.computeIfAbsent(pluginId, key -> new ArrayList<>()).add(module);
+        }
+
+        @Override
         public void registerViewGroup(String pluginId, String name, Supplier<List<BaseModule>> supplier) {
             ViewGroupSpec spec = new ViewGroupSpec(pluginId, name, supplier);
             viewGroups.put(pluginId + ':' + name, spec);
