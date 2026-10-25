@@ -3,7 +3,6 @@ package me.matl114;
 import com.google.common.base.Preconditions;
 import java.util.Set;
 import lombok.Getter;
-import me.matl114.managers.Configs;
 import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.plugins.internal.PluginManager;
 import me.matl114.plugins.internal.PluginManager.BootstrapPhase;
@@ -67,11 +66,6 @@ public class SlimefunHelper implements ModInitializer {
         pluginManager.advance(BootstrapPhase.OTHER);
         pluginManager.complete();
         Debug.info("SlimefunHelper loading finish");
-    }
-
-    public static void reloadModConfig() {
-        Debug.info("Reloading Mod Config");
-        Configs.loadConfigs();
     }
 
     // 大饼: 实现指令系统，接入聊天框 !!开头

@@ -30,7 +30,7 @@ public abstract class AbstractConfig implements Config {
 
     public void registerGlobal(SlimefunHelperPlugin plugin) {
         if (registryKey == null) {
-            // 旧入口 Configs.loadConfigs() 没有插件实例，回落到主插件 id
+            // 插件自有配置经 PluginContext#config().load(...) 注册，拿不到宿主插件实例，命名空间回落到宿主 id
             String namespace = plugin == null ? MainPlugin.ID : plugin.getId();
             this.registryKey = ResourceKey.create(
                     REGISTRY.key(),

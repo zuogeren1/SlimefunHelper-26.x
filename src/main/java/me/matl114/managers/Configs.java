@@ -16,37 +16,19 @@ import net.minecraft.resources.Identifier;
 public class Configs {
 
     public static void loadConfigs(SlimefunHelperPlugin plugin) {
-        register(plugin, MINE_CONFIG);
-        register(plugin, CHAT_CONFIG);
-        register(plugin, RENDER_CONFIG);
-        register(plugin, EXTRA_CONFIG);
-        register(plugin, COMBAT_CONFIG);
-        register(plugin, INV_CONFIG);
-        register(plugin, MOV_CONFIG);
-        register(plugin, INTERACT_CONFIG);
-        register(plugin, SURVIVAL_CONFIG);
-        register(plugin, SLIMEFUN_CONFIG);
-        register(plugin, MODEL_CONFIG);
-        register(plugin, MISC_CONFIG);
-        register(plugin, TOGGLE_CONFIG);
-        if (init) {
-            Config.reloadAll();
-        } else {
-            init = true;
-        }
-    }
-
-    // 旧入口：SlimefunHelper.reloadModConfig() 仍以无参形式调用；接入 PluginManager 后可删
-    public static void loadConfigs() {
-        loadConfigs(null);
-    }
-
-    private static void register(SlimefunHelperPlugin plugin, Config config) {
-        if (plugin == null) {
-            config.registerGlobal(null);
-        } else {
-            plugin.registerConfig(config);
-        }
+        plugin.registerConfig(MINE_CONFIG);
+        plugin.registerConfig(CHAT_CONFIG);
+        plugin.registerConfig(RENDER_CONFIG);
+        plugin.registerConfig(EXTRA_CONFIG);
+        plugin.registerConfig(COMBAT_CONFIG);
+        plugin.registerConfig(INV_CONFIG);
+        plugin.registerConfig(MOV_CONFIG);
+        plugin.registerConfig(INTERACT_CONFIG);
+        plugin.registerConfig(SURVIVAL_CONFIG);
+        plugin.registerConfig(SLIMEFUN_CONFIG);
+        plugin.registerConfig(MODEL_CONFIG);
+        plugin.registerConfig(MISC_CONFIG);
+        plugin.registerConfig(TOGGLE_CONFIG);
     }
 
     public static final Predicate<String> REGEX_VALIDATOR = x -> {
@@ -94,8 +76,6 @@ public class Configs {
 
     public static final Predicate<Integer> INT_NONNEGATIVE = intHigher(0);
     public static final Predicate<Integer> INT_POSITIVE = intHigher(1);
-
-    private static boolean init = false;
 
     public static final Config MINE_CONFIG = ConfigLoader.loadExternalConfig(
                     "sfhelper-configs/mine.yml", "mine settings")

@@ -45,7 +45,8 @@ public class ConfigLoader {
         }
     }
 
-    // 我方配置仍放在 config/sfhelper-configs/*.yml（上游这一步迁到了 runtime 目录），保留此重载
+    // 我方配置仍放在 config/sfhelper-configs/*.yml（上游这一步迁到了 runtime 目录），
+    // 插件也用它按相对路径加载 config/slimefunhelper-plus/*.yml —— 这条重载是长期入口，不是过渡兼容
     public static Config loadExternalConfig(String name, String customName) {
         final File cfgFile = FabricLoader.getInstance().getConfigDir().resolve(name).toFile();
         return loadExternalConfig(cfgFile, customName);

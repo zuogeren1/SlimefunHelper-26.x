@@ -23,7 +23,6 @@ public interface Config extends RefMap {
     }
 
     default void registerGlobal(SlimefunHelperPlugin plugin) {
-        configs.add(this);
         ResourceKey<Config> reKey = this.getRegistryKey();
         // 上游是 SimpleRegistry#add；26.2 只有 MappedRegistry#register(key, value, RegistrationInfo)，
         // 且 loadConfigs 可被重复调用（重载资源），重复注册要先拦住
@@ -32,15 +31,6 @@ public interface Config extends RefMap {
         }
     }
 
-    /**
-     * 我方 MainTasks / ClickGui 仍用 Config.getConfigs() 取全局配置表，上游已改成遍历 Config.REGISTRY。
-     * 这些调用点不在本批白名单内，先保留兼容集合，等它们迁移后再删。
-     */
-    Set<Config> configs = new LinkedHashSet<>();
-
-    public static Set<Config> getConfigs() {
-        return configs;
-    }
     // names and keys
     @Nullable
     public ResourceKey<Config> getRegistryKey();
