@@ -199,7 +199,42 @@ jar {
 	}
 }
 
+// ── 启动客户端前自动构建插件 ────────────────────────────────────────────────
+// 插件的产物是独立 jar，Fabric 从 run/<版本>/mods 里加载它。改造前每次改完插件都要
+//   ./gradlew -p plugin :<版本>:build  然后手动把 jar 拷进 mods；
+// 现在把「构建 + 拷贝」挂到 runClient 上，改完插件直接启动即可。
+// 插件是复合构建（见 settings.gradle 的 includeBuild），任务引用走 gradle.includedBuild。
+def pluginJarDir = rootProject.file("plugin/versions/${project.minecraft_version}/build/libs")
+def pluginModsDir = rootProject.file("run/${project.minecraft_version}/mods")
+def includedPlugin = gradle.includedBuilds.find { it.name == 'plugin' }
+
+def syncPluginJar = tasks.register('syncPluginJar', Copy) {
+	group = 'slimefunhelper'
+	description = "构建 SlimeFunHelper+ 并把它的 jar 放进 run/${project.minecraft_version}/mods"
+
+	from(pluginJarDir) {
+		include '*.jar'
+		exclude '*-sources.jar', '*-thin.jar', '*-dev.jar'
+	}
+	into pluginModsDir
+
+	doFirst {
+		// 插件升版本号后旧包会和新包一起留在 mods 里，Fabric 会直接报 duplicate mod id
+		delete fileTree(pluginModsDir) { include 'SlimeFunHelper+*.jar' }
+	}
+
+	if (includedPlugin != null) {
+		dependsOn includedPlugin.task(":${project.minecraft_version}:build")
+	}
+}
+
+if (includedPlugin == null) {
+	logger.warn("[slimefunhelper] settings.gradle 没有 includeBuild('plugin')，syncPluginJar 只会拷贝已存在的 jar")
+}
+
 tasks.named("runClient", JavaExec) {
+	dependsOn syncPluginJar
+
 	// -XX:+AllowEnhancedClassRedefinition 只有 JetBrains Runtime 支持；
 	// 换成 Zulu 等 JDK 时 JVM 会直接 "Unrecognized VM option" 起不来，所以按厂商条件添加。
 	def isJbr = (System.getProperty("java.vendor", "") + System.getProperty("java.vm.name", ""))

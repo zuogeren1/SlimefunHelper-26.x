@@ -32,3 +32,11 @@ for (String version : settings.versions) {
 	proj.projectDir = file("versions/$version")
 	proj.buildFileName = '../../common.gradle'
 }
+
+// SlimeFunHelper+ 插件工程仍是独立构建（自己的 settings.json / common.gradle），
+// 这里只把它作为**复合构建**接入，好让宿主的 runClient 能先触发插件的 :<版本>:build
+// 再把 jar 放进 run/<版本>/mods（见 common.gradle 的 syncPluginJar）。
+// 用文件存在性兜住：只构建宿主、不要插件的人不会因此配置失败。
+if (file('plugin/settings.gradle').isFile()) {
+	includeBuild('plugin')
+}
