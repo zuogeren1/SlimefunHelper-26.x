@@ -10,7 +10,6 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.function.ToIntFunction;
 import java.util.stream.Stream;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -1184,9 +1183,16 @@ public class ClickGui extends BaseModule implements GuiColorSamplier {
         }
         List<String> modules = getModules();
         modules.add(SEARCH_MODULE);
+        Map<String, Integer> groupHeights = new LinkedHashMap<>();
+        for (String name : modules) {
+            groupHeights.put(name, moduleGroupHeight(meta, name));
+        }
+        Set<String> relocatable = new HashSet<>();
+        HackModules.getViewGroups().forEach(group -> relocatable.add(group.getName()));
         meta.checkDefault(
                 modules,
-                name -> moduleGroupHeight(meta, name),
+                groupHeights,
+                relocatable,
                 (int) widgetSize.get().x(),
                 (int) widgetSize.get().y());
         meta.checkSliderGroupDefault(modules, (int) sliderWidgetSize.get().x(), (int)
@@ -1631,36 +1637,85 @@ public class ClickGui extends BaseModule implements GuiColorSamplier {
         }
 
         /**
-         * 给还没有坐标的模块组排默认位置。
+         * 给需要默认位置的模块组排版：从上往下、从左往右找第一个放得下的格子，
+         * 排出来的结果互不重叠。
          *
-         * <p>SUB_SCREEN 下每个模块组是<b>一整列</b>（表头 + 展开后的模块列表），高度不再固定，
-         * 所以换行必须按「本行最高的一列」推进：旧实现固定走 {@code wY * 2}，只要上一行有一列是展开的，
-         * 下一行就会排进那一列的内部（插件视图组就被压进 Extra 列里）。
+         * <p>SUB_SCREEN 下每个模块组是<b>一整列</b>（表头 + 展开后的模块列表），高度不固定，
+         * 所以不能像旧实现那样固定按 {@code wY * 2} 换行 —— 上一行只要有一列是展开的，
+         * 下一行就会排进那一列的内部，插件视图组就是这么被压住的。
          *
-         * <p>旧实现留下的坐标（x 落在列步长上、y 落在旧行距上）视为自动排版的产物，一并重排；
-         * 用户拖过的坐标不是这个形状，一律不动。
+         * <p>会重排的三类：① 还没有坐标的（新模块组 / 插件视图组）；② 旧算法的格子坐标
+         * （x 落在列步长上、y 落在旧行距上 —— 用户手拖拖不出这么整的数）；③ 视图组里已经
+         * 和别的列重叠的（旧算法给它的位置本身就是压着的）。其余坐标原样保留。
          */
-        public void checkDefault(List<String> moduleNames, ToIntFunction<String> heightOf, int wX, int wY) {
+        public void checkDefault(
+                List<String> moduleNames, Map<String, Integer> heightOf, Set<String> relocatable, int wX, int wY) {
+            int step = wX + DEFAULT_GAP;
             int screenWidth = mc.getWindow().getGuiScaledWidth();
-            int x = 0;
-            int y = DEFAULT_Y;
-            int rowHeight = 0;
+            int screenHeight = mc.getWindow().getGuiScaledHeight();
+            int columns = Math.max(1, (screenWidth + DEFAULT_GAP) / step);
+            List<int[]> taken = new ArrayList<>();
+            List<String> pending = new ArrayList<>();
+            List<String> anchored = new ArrayList<>();
             for (String name : moduleNames) {
-                if (x > 0 && x + wX > screenWidth) {
-                    y += rowHeight + DEFAULT_GAP;
-                    x = 0;
-                    rowHeight = 0;
+                ModuleSlideMeta saved = moduleMetaMap.get(name);
+                int height = heightOf.getOrDefault(name, wY);
+                if (saved == null || isLegacyAutoPlacement(saved, wX, wY)) {
+                    pending.add(name);
+                } else if (relocatable.contains(name)) {
+                    // 视图组先记下来：等自动排版落完再看它是不是被别的列压住了
+                    anchored.add(name);
+                } else {
+                    taken.add(new int[] {saved.getX(), saved.getY(), wX, height});
                 }
+            }
+            for (String name : pending) {
+                int height = heightOf.getOrDefault(name, wY);
+                int[] spot = findFreeSpot(taken, wX, height, columns, step, screenHeight);
                 ModuleSlideMeta saved = moduleMetaMap.get(name);
                 if (saved == null) {
-                    moduleMetaMap.put(name, new ModuleSlideMeta(x, y, false));
-                } else if (isLegacyAutoPlacement(saved, wX, wY)) {
-                    saved.setX(x);
-                    saved.setY(y);
+                    moduleMetaMap.put(name, new ModuleSlideMeta(spot[0], spot[1], false));
+                } else {
+                    saved.setX(spot[0]);
+                    saved.setY(spot[1]);
                 }
-                rowHeight = Math.max(rowHeight, heightOf.applyAsInt(name));
-                x += wX + DEFAULT_GAP;
+                taken.add(new int[] {spot[0], spot[1], wX, height});
             }
+            for (String name : anchored) {
+                ModuleSlideMeta saved = moduleMetaMap.get(name);
+                int height = heightOf.getOrDefault(name, wY);
+                if (!overlapsAny(taken, saved.getX() - 2, saved.getY() - 2, wX + 4, height + 4)) {
+                    continue;
+                }
+                int[] spot = findFreeSpot(taken, wX, height, columns, step, screenHeight);
+                saved.setX(spot[0]);
+                saved.setY(spot[1]);
+                taken.add(new int[] {spot[0], spot[1], wX, height});
+            }
+        }
+
+        /** 找第一个放得下、且与已有列留出空隙的格子；整屏都放不下时退回左上角，由用户自己拖。 */
+        private static int[] findFreeSpot(
+                List<int[]> taken, int wX, int height, int columns, int step, int screenHeight) {
+            int maxY = Math.max(DEFAULT_Y, screenHeight - height);
+            for (int y = DEFAULT_Y; y <= maxY; y += 2) {
+                for (int c = 0; c < columns; ++c) {
+                    int x = c * step;
+                    if (!overlapsAny(taken, x - 2, y - 2, wX + 4, height + 4)) {
+                        return new int[] {x, y};
+                    }
+                }
+            }
+            return new int[] {0, DEFAULT_Y};
+        }
+
+        private static boolean overlapsAny(List<int[]> taken, int x, int y, int w, int h) {
+            for (int[] rect : taken) {
+                if (x < rect[0] + rect[2] && x + w > rect[0] && y < rect[1] + rect[3] && y + h > rect[1]) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /** 坐标正好落在旧算法的格子点上 = 当初自动排的，可以重排。 */
