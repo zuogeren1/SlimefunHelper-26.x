@@ -11,4 +11,5 @@
   - ✨ 观测点最小二乘求解、σ 保守上界、换世界作废、旧值标注 `+Ns`、调试日志
   - 🛠️ 配置迁到 `config/slimefunhelper-plus/locator.yml`，旧 `render.yml` 的值首次加载时自动迁移
 - 🛠️ 模块并入宿主模块树：Conflux 进 Survival 组、定位栏进 Render 组；另有只读视图组 `SlimeFunHelper+`
-- 🛠️ 配置项进宿主「全配置」页，分别显示为 `SlimeFunHelper+` 与 `SlimeFunHelper+ 定位栏`
+- 🛠️ 配置合并在 `config/slimefunhelper-plus/config.yml` 一份文件里，「全配置」页只显示一个 `SlimeFunHelper+`，
+  下面分「Conflux 地图扩展」「定位栏反推」两段

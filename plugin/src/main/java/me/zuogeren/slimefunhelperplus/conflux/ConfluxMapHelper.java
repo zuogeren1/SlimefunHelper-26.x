@@ -1,7 +1,6 @@
 package me.zuogeren.slimefunhelperplus.conflux;
 
 import com.google.common.collect.ImmutableMap;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +24,7 @@ import me.matl114.plugins.api.PluginHosts;
 import me.matl114.utils.ChatUtils;
 import me.zuogeren.slimefunhelperplus.conflux.LoadedChunkEdgeCache;
 import me.matl114.utils.ScreenUtils;
-import net.fabricmc.loader.api.FabricLoader;
+import me.zuogeren.slimefunhelperplus.config.PluginConfig;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -60,20 +59,8 @@ public class ConfluxMapHelper extends BaseModule {
         INSTANCE = this;
     }
 
-    /**
-     * 插件自有配置：{@code config/slimefunhelper-plus/conflux.yml}，不再写宿主的 survival.yml。
-     *
-     * <p>配置名用 {@code sfhelperplus}（ASCII，中文会让 {@code Identifier} 抛异常）：
-     * 「全配置」页把它显示成 {@code config.index.sfhelperplus}，也就是 {@code SlimeFunHelper+}。
-     * 第一次加载前先把宿主 {@code survival.yml} 里的旧 conflux 段搬过来，见 {@link ConfluxConfigMigration}。
-     */
-    private static final Config CONFLUX_CONFIG = loadConfluxConfig();
-
-    private static Config loadConfluxConfig() {
-        Path configDir = FabricLoader.getInstance().getConfigDir();
-        ConfluxConfigMigration.run(configDir);
-        return PluginHosts.context().config().load("slimefunhelper-plus/conflux.yml", "sfhelperplus");
-    }
+    /** 插件自有配置（与定位栏共用一份，见 {@link PluginConfig}）：{@code config/slimefunhelper-plus/config.yml}。 */
+    private static final Config CONFLUX_CONFIG = PluginConfig.get();
 
     public final ModulePath root = makePath(CONFLUX_CONFIG, "conflux-map-extra.conflux-map-helper");
 

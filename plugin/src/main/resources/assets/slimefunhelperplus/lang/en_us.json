@@ -1,7 +1,6 @@
 {
 	"config.index.locator-bar": "Locator Bar",
 	"config.index.sfhelperplus": "SlimeFunHelper+",
-	"config.index.sfhelperplus-locator": "SlimeFunHelper+ Locator",
 	"locator-bar.enable": "Locator Bar Position Estimate",
 	"locator-bar.locator-track": "Enable Estimate",
 	"locator-bar.locator-track-debug": "Debug Log",

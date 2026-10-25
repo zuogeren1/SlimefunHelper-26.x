@@ -16,6 +16,7 @@ import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
 import me.matl114.utils.Debug;
+import me.zuogeren.slimefunhelperplus.config.PluginConfig;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -31,13 +32,12 @@ import net.minecraft.world.level.Level;
  * 宿主 {@link INameTag.RowProvider} 需要的行；列表怎么排版、行高多少、颜色取哪几个，
  * 全部仍由宿主决定 —— 插件不碰渲染，也不碰宿主的玩家数据。
  *
- * <p>配置在插件自己的 {@code config/slimefunhelper-plus/locator.yml}：
- * 首次加载会把宿主 {@code sfhelper-configs/render.yml} 里的旧值搬过来
- * （见 {@link LocatorConfigMigration}）。
+ * <p>配置与 Conflux 共用插件自己的 {@code config/slimefunhelper-plus/config.yml}
+ * （顶层段 {@code locator-bar}），旧值由 {@link PluginConfig} 的迁移一次性带过来。
  */
 public class LocatorTrackModule extends BaseModule {
 
-    private static final Config CONFIG = LocatorConfigMigration.loadConfig();
+    private static final Config CONFIG = PluginConfig.get();
 
     public final ModulePath root = makePath(CONFIG, "locator-bar");
 

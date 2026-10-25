@@ -1,7 +1,6 @@
 {
 	"config.index.locator-bar": "定位栏反推",
 	"config.index.sfhelperplus": "SlimeFunHelper+",
-	"config.index.sfhelperplus-locator": "SlimeFunHelper+ 定位栏",
 	"locator-bar.enable": "定位栏坐标反推",
 	"locator-bar.locator-track": "启用反推",
 	"locator-bar.locator-track-debug": "定位栏反推调试日志",
