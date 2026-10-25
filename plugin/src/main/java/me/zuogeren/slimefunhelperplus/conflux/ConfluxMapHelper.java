@@ -60,7 +60,7 @@ public class ConfluxMapHelper extends BaseModule {
 
     /** 插件自有配置：{@code config/slimefunhelper-plus/conflux.yml}，不再写宿主的 survival.yml。 */
     private static final Config CONFLUX_CONFIG =
-            PluginHosts.context().config().load("slimefunhelper-plus/conflux.yml", "Conflux 地图联动");
+            PluginHosts.context().config().load("slimefunhelper-plus/conflux.yml", "conflux");
 
     public final ModulePath root = makePath(CONFLUX_CONFIG, "conflux-map-extra.conflux-map-helper");
 

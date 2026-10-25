@@ -79,7 +79,10 @@ final class PluginContextImpl implements PluginContext {
     private final Configs configs = new Configs() {
         @Override
         public Config load(String relativePath, String displayName) {
-            return ConfigLoader.loadExternalConfig(relativePath, displayName).markForSave();
+            Config config = ConfigLoader.loadExternalConfig(relativePath, displayName).markForSave();
+            // 注册进全局配置表，「全配置」页才会出现该插件的分类
+            config.registerGlobal(null);
+            return config;
         }
 
         @Override
