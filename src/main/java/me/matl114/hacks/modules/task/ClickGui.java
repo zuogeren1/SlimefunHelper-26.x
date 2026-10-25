@@ -10,6 +10,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 import java.util.stream.Stream;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -1155,6 +1156,23 @@ public class ClickGui extends BaseModule implements GuiColorSamplier {
 
     private static final String SEARCH_MODULE = "Search";
 
+    /**
+     * 自动排版时一个模块组占的高度：表头 + （展开时）模块列表。
+     * 搜索框那列的结果是动态的，按经验值给个上界即可，只影响换行位置。
+     */
+    private int moduleGroupHeight(ClickGuiMetaData meta, String name) {
+        int unit = (int) widgetSize.get().y();
+        ModuleSlideMeta slide = meta.getModuleMetaMap().get(name);
+        if (slide == null || !slide.isSlidingDown()) {
+            return unit;
+        }
+        if (SEARCH_MODULE.equals(name)) {
+            return unit * 4;
+        }
+        ModuleGroup group = HackModules.getModuleGroup(name);
+        return unit + (group == null ? 0 : (int) getShowModuleList(group).count() * unit);
+    }
+
     public ClickGuiMetaData getClickGuiMetadata() {
         CompoundTag data = internalGuiData.asReadOnly(NbtOps.INSTANCE);
         var result = ClickGuiMetaData.CODEC.decode(NbtOps.INSTANCE, data);
@@ -1167,7 +1185,10 @@ public class ClickGui extends BaseModule implements GuiColorSamplier {
         List<String> modules = getModules();
         modules.add(SEARCH_MODULE);
         meta.checkDefault(
-                modules, (int) widgetSize.get().x(), (int) widgetSize.get().y());
+                modules,
+                name -> moduleGroupHeight(meta, name),
+                (int) widgetSize.get().x(),
+                (int) widgetSize.get().y());
         meta.checkSliderGroupDefault(modules, (int) sliderWidgetSize.get().x(), (int)
                 sliderWidgetSize.get().y());
 
@@ -1609,19 +1630,48 @@ public class ClickGui extends BaseModule implements GuiColorSamplier {
             sliderMetaMap.put(key, expanded);
         }
 
-        public void checkDefault(List<String> moduleNames, int wX, int wY) {
-            int sze = moduleNames.size();
-            int cntY = 0;
-            int yLevel = 0;
-            for (int i = 0; i < sze; ++i, ++cntY) {
-                int idx = cntY * (wX + DEFAULT_GAP);
-                if (idx + wX > mc.getWindow().getGuiScaledWidth()) {
-                    cntY = 0;
-                    idx = 0;
-                    yLevel += 1;
+        /**
+         * 给还没有坐标的模块组排默认位置。
+         *
+         * <p>SUB_SCREEN 下每个模块组是<b>一整列</b>（表头 + 展开后的模块列表），高度不再固定，
+         * 所以换行必须按「本行最高的一列」推进：旧实现固定走 {@code wY * 2}，只要上一行有一列是展开的，
+         * 下一行就会排进那一列的内部（插件视图组就被压进 Extra 列里）。
+         *
+         * <p>旧实现留下的坐标（x 落在列步长上、y 落在旧行距上）视为自动排版的产物，一并重排；
+         * 用户拖过的坐标不是这个形状，一律不动。
+         */
+        public void checkDefault(List<String> moduleNames, ToIntFunction<String> heightOf, int wX, int wY) {
+            int screenWidth = mc.getWindow().getGuiScaledWidth();
+            int x = 0;
+            int y = DEFAULT_Y;
+            int rowHeight = 0;
+            for (String name : moduleNames) {
+                if (x > 0 && x + wX > screenWidth) {
+                    y += rowHeight + DEFAULT_GAP;
+                    x = 0;
+                    rowHeight = 0;
                 }
-                checkDefault(moduleNames.get(i), idx, DEFAULT_Y + yLevel * (wY * 2));
+                ModuleSlideMeta saved = moduleMetaMap.get(name);
+                if (saved == null) {
+                    moduleMetaMap.put(name, new ModuleSlideMeta(x, y, false));
+                } else if (isLegacyAutoPlacement(saved, wX, wY)) {
+                    saved.setX(x);
+                    saved.setY(y);
+                }
+                rowHeight = Math.max(rowHeight, heightOf.applyAsInt(name));
+                x += wX + DEFAULT_GAP;
             }
+        }
+
+        /** 坐标正好落在旧算法的格子点上 = 当初自动排的，可以重排。 */
+        private static boolean isLegacyAutoPlacement(ModuleSlideMeta meta, int wX, int wY) {
+            int columnStep = wX + DEFAULT_GAP;
+            int rowStep = Math.max(1, wY * 2);
+            if (meta.getX() < 0 || meta.getX() % columnStep != 0) {
+                return false;
+            }
+            int offset = meta.getY() - DEFAULT_Y;
+            return offset >= 0 && offset % rowStep == 0;
         }
 
         public ModuleSlideMeta getModuleMeta(String moduleName) {
