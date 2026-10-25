@@ -1,37 +1,26 @@
 package me.matl114.hacks.modules.render;
 
-import com.mojang.datafixers.util.Either;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import me.matl114.events.Event;
-import me.matl114.events.Listener;
 import me.matl114.events.impl.Render2D;
 import me.matl114.gui.Constants;
 import me.matl114.hacks.api.ModulePath;
-import me.matl114.hacks.utils.LocatorTracker;
 import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.hacks.utils.render.ItemStackDisplayUtils;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
-import me.matl114.managers.Tasks;
 import me.matl114.managers.config.NBTRef;
-import me.matl114.utils.Debug;
 import me.matl114.versioned.api.VDrawContext;
-import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
-import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
 
 public class NameList extends INameTag {
     public NameList() {
@@ -53,22 +42,6 @@ public class NameList extends INameTag {
         pos = builder(nameTag.add("list-pos"), WidgetPos.class)
                 .defaultValue(new WidgetPos(0, 0.02D, 0.02D, 5, 5))
                 .build();
-        locatorTrack = builder(nameTag.add("locator-track"), Boolean.class)
-                .defaultValue(true)
-                .build();
-        locatorMinSpan = doubleBuilder(nameTag.add("locator-track-min-span"))
-                .defaultValue(1.0D)
-                .validator(Configs.doubleRange(0.2D, 30.0D))
-                .build();
-        locatorMinBaseline = doubleBuilder(nameTag.add("locator-track-min-baseline"))
-                .defaultValue(16.0D)
-                .validator(Configs.doubleRange(1.0D, 1000.0D))
-                .build();
-        locatorMaxAge = builder(nameTag.add("locator-track-max-age"), IntRef.TYPE)
-                .defaultValue(1200)
-                .validator(Configs.intRange(40, 12000))
-                .build();
-        locatorDebug = flagBuilder(nameTag.add("locator-track-debug")).build();
     }
 
     public IntRef playerListMaxLength;
@@ -76,23 +49,6 @@ public class NameList extends INameTag {
     public FlagRef right;
     public DoubleRef scale;
     public NBTRef<WidgetPos> pos;
-
-    /** 用定位栏方位角反推看不见的玩家坐标，并显示成额外列表行。 */
-    public FlagRef locatorTrack;
-
-    /** 参与解算所需的最小方位跨度（度）。 */
-    public DoubleRef locatorMinSpan;
-
-    /** 参与解算所需的最小基线（格）。 */
-    public DoubleRef locatorMinBaseline;
-
-    /** 观测与反推结果的保留时长（刻）。 */
-    public IntRef locatorMaxAge;
-
-    /** 调试：HUD 加一行状态、聊天按 2 秒节流打印每个点的样本/跨度/基线。 */
-    public FlagRef locatorDebug;
-
-    private int lastLocatorDebugTick = -1000;
 
     @Override
     public void onRender(Event<Render2D> event) {
@@ -134,156 +90,24 @@ public class NameList extends INameTag {
     }
 
     @Override
-    public void registerAll() {
-        super.registerAll();
-        registerListener(Listener.getWorldSwitchPoint(), this::onWorldSwitch);
-    }
-
-    /** 换世界（含换维度）时坐标系整体改变，旧观测必须作废。 */
-    public void onWorldSwitch(Event<Level> event) {
-        LocatorTracker.INSTANCE.clear();
-    }
-
-    @Override
     public void onUpdate() {
         super.onUpdate();
-        if (checkNull() || !enable.get() || !locatorTrack.get()) {
-            LocatorTracker.INSTANCE.clear();
-            return;
-        }
-        LocatorTracker.INSTANCE.tick(mc, locatorMinSpan.get(), locatorMinBaseline.get(), locatorMaxAge.get());
-        appendLocatorEntries();
-        if (locatorDebug.get()) {
-            debugLocator();
-        }
+        appendExtraRows();
     }
 
     /**
-     * 把“只有定位栏、本地没有实体”的玩家反推结果追加到列表末尾。
+     * 把插件追加的行（定位栏反推等）拼到真实玩家之后。
      *
-     * <p>坐标是估计值：定位栏只有水平信息，所以显示的是 XZ 与水平距离，且用 ~ 前缀标注。
+     * <p>行由 {@link INameTag#collectRows} 统一收集：插件只提供名字/详情两个 {@link Component}，
+     * 行高与排版仍由本模块负责，插件不必知道列表是怎么画的。
      */
-    public void appendLocatorEntries() {
-        if (nameTagInfos == null || mc.level == null || mc.player == null) {
+    public void appendExtraRows() {
+        if (nameTagInfos == null) {
             return;
         }
-        List<PlayerNameTagInfo> extra = new ArrayList<>();
-        for (var entry : LocatorTracker.INSTANCE.snapshot()) {
-            var id = entry.getKey();
-            var estimate = entry.getValue();
-            UUID uuid = id.left().orElse(null);
-            // 本地已有实体的玩家不重复显示（他们有真实坐标）
-            if (uuid != null && isPlayerLoaded(uuid)) {
-                continue;
-            }
-            double distance = estimate.distanceTo(mc.player.getX(), mc.player.getZ());
-            MutableComponent line = Component.literal(
-                            "~[%d, %d] ".formatted(Mth.floor(estimate.x), Mth.floor(estimate.z)))
-                    .withColor(infoColor.get().asRGB());
-            line.append(Component.literal("d:%dm".formatted((int) Math.round(distance)))
-                    .withColor(distColor.get().asRGB()));
-            if (!Double.isNaN(estimate.sigma)) {
-                line.append(Component.literal(" ±%dm".formatted((int) Math.round(estimate.sigma)))
-                        .withColor(distColor.get().asRGB()));
-            }
-            line.append(Component.literal(" n=%d".formatted(estimate.samples))
-                    .withColor(infoColor.get().asRGB()));
-            int ageTicks = Tasks.getTick() - estimate.tick;
-            if (ageTicks > 60) {
-                // 超过 3 秒没刷新（对方潜行/下线/解算被门槛挡住）→ 标出这是旧值
-                line.append(Component.literal(" +%ds".formatted(ageTicks / 20))
-                        .withColor(infoColor.get().asRGB()));
-            }
-            extra.add(new PlayerNameTagInfo(
-                    null,
-                    Component.literal(displayName(id)).withColor(nameColor.get().asRGB()),
-                    null,
-                    line,
-                    null));
+        for (INameTag.ExtraRow row : INameTag.collectRows(this)) {
+            nameTagInfos.add(new PlayerNameTagInfo(null, row.name(), null, row.detail(), null));
         }
-        if (!extra.isEmpty()) {
-            nameTagInfos.addAll(extra);
-        }
-        if (locatorDebug.get()) {
-            nameTagInfos.add(debugLine());
-        }
-    }
-
-    /** 名字解析兜底：tab 列表 → 命名 waypoint → 短 UUID，保证“有数据就一定有行”。 */
-    public String displayName(Either<UUID, String> id) {
-        UUID uuid = id.left().orElse(null);
-        if (uuid == null) {
-            return id.right().orElse("waypoint");
-        }
-        String name = resolvePlayerName(uuid);
-        return name == null ? "?" + uuid.toString().substring(0, 8) : name;
-    }
-
-    /** 调试行：一眼看出“有没有 waypoint / 攒了几条观测 / 跨度与基线够不够”。 */
-    public PlayerNameTagInfo debugLine() {
-        var statuses = LocatorTracker.INSTANCE.statuses();
-        String text;
-        if (statuses.isEmpty()) {
-            text = "定位栏调试: waypoint=" + LocatorTracker.INSTANCE.getWaypointCount() + " 追踪=0";
-        } else {
-            var best = statuses.get(0);
-            text = String.format(
-                    "定位栏调试: wp=%d 追踪=%d 最佳 %s n=%d 跨=%.2f° 基=%.0f",
-                    LocatorTracker.INSTANCE.getWaypointCount(),
-                    statuses.size(),
-                    displayName(best.id),
-                    best.samples,
-                    best.span,
-                    best.baseline);
-        }
-        return new PlayerNameTagInfo(
-                null, Component.literal(text).withColor(infoColor.get().asRGB()), null, null, null);
-    }
-
-    /** 聊天日志（2 秒节流）：逐点给出样本数/跨度/基线/距离/解，便于把日志贴回来定位。 */
-    public void debugLocator() {
-        int now = Tasks.getTick();
-        if (now - this.lastLocatorDebugTick < 40) {
-            return;
-        }
-        this.lastLocatorDebugTick = now;
-        var statuses = LocatorTracker.INSTANCE.statuses();
-        Debug.chat("[Locator] waypoint=" + LocatorTracker.INSTANCE.getWaypointCount() + " tracked=" + statuses.size());
-        for (var status : statuses) {
-            Debug.chat(String.format(
-                    "[Locator] %s %s n=%d span=%.2f base=%.1f dist=%s est=%s",
-                    displayName(status.id),
-                    status.finiteDistance ? "coord" : "azimuth",
-                    status.samples,
-                    status.span,
-                    status.baseline,
-                    Double.isNaN(status.distance) ? "-" : String.format("%.0f", status.distance),
-                    status.estimate == null
-                            ? "none"
-                            : String.format(
-                                    "%.0f,%.0f sigma=%.0f",
-                                    status.estimate.x,
-                                    status.estimate.z,
-                                    status.estimate.sigma)));
-        }
-    }
-
-    public boolean isPlayerLoaded(UUID uuid) {
-        for (Player player : mc.level.players()) {
-            if (player.getUUID().equals(uuid)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** 反推结果的可读名字：取自 tab 列表；拿不到就放弃显示（避免刷出一堆短 UUID）。 */
-    public String resolvePlayerName(UUID uuid) {
-        if (mc.getConnection() == null) {
-            return null;
-        }
-        PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
-        return info == null ? null : info.getProfile().name();
     }
 
     public void onRenderList(PlayerNameTagInfo player, VDrawContext vdraw, float tick) {

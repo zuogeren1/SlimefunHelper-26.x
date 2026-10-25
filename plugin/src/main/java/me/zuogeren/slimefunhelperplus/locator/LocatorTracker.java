@@ -1,4 +1,4 @@
-package me.matl114.hacks.utils;
+package me.zuogeren.slimefunhelperplus.locator;
 
 import com.mojang.datafixers.util.Either;
 import java.util.ArrayDeque;

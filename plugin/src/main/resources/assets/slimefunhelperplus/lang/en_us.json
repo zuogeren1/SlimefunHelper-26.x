@@ -1,4 +1,14 @@
 {
+	"config.index.locator-bar": "Locator Bar",
 	"config.index.sfhelperplus": "SlimeFunHelper+",
-	"widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+"
+	"config.index.sfhelperplus-locator": "SlimeFunHelper+ Locator",
+	"locator-bar.enable": "Locator Bar Position Estimate",
+	"locator-bar.locator-track": "Enable Estimate",
+	"locator-bar.locator-track-debug": "Debug Log",
+	"locator-bar.locator-track-max-age": "Observation Lifetime",
+	"locator-bar.locator-track-min-baseline": "Min Baseline",
+	"locator-bar.locator-track-min-span": "Min Azimuth Span",
+	"widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
+	"widget.click-gui.module-name.Render.LocatorTrack": "Locator Track",
+	"widget.click-gui.module-name.Render.LocatorTrack.tooltips": "Estimate hidden player positions from the locator bar"
 }

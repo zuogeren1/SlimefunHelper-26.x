@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import me.matl114.SlimefunHelper;
 import me.matl114.events.Event;
 import me.matl114.events.impl.Render2D;
@@ -23,6 +24,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.renderer.TextRenderers;
 import me.matl114.utils.ChatUtils;
+import me.matl114.utils.Debug;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.LocalPlayer;
@@ -283,6 +285,54 @@ public abstract class INameTag extends BaseModule {
 
     protected static final IIcon<MobEffect> statusEffectRenderer =
             RegistryDisplays.getIcon(MobEffect.class);
+
+    /**
+     * 插件往玩家列表里追加行的扩展点。
+     *
+     * <p>NameList 每次重建列表后调用一次 —— 列表本身只在模块启用时重建，所以实现方
+     * 可以放心在这里做「每 tick 一次」的采集，天然跟着开关走。返回的行追加在真实玩家之后。
+     */
+    public interface RowProvider {
+        /**
+         * @param owner 当前渲染的列表模块，可用来取 nameColor / infoColor / distColor 这类配色
+         * @return 要追加的行；返回 null 或空表表示这一 tick 没有内容
+         */
+        List<ExtraRow> provideRows(INameTag owner);
+    }
+
+    /** 一行额外信息：左侧名字 + 右侧详情，两者都可以为 null。 */
+    public record ExtraRow(Component name, Component detail) {}
+
+    private static final List<RowProvider> ROW_PROVIDERS = new CopyOnWriteArrayList<>();
+
+    public static void registerRowProvider(RowProvider provider) {
+        if (provider != null && !ROW_PROVIDERS.contains(provider)) {
+            ROW_PROVIDERS.add(provider);
+        }
+    }
+
+    public static void unregisterRowProvider(RowProvider provider) {
+        ROW_PROVIDERS.remove(provider);
+    }
+
+    /** 收集所有插件追加的行；某个 provider 抛异常只丢它自己那一批，不影响整个列表。 */
+    public static List<ExtraRow> collectRows(INameTag owner) {
+        if (ROW_PROVIDERS.isEmpty()) {
+            return List.of();
+        }
+        List<ExtraRow> rows = new ArrayList<>();
+        for (RowProvider provider : ROW_PROVIDERS) {
+            try {
+                List<ExtraRow> extra = provider.provideRows(owner);
+                if (extra != null && !extra.isEmpty()) {
+                    rows.addAll(extra);
+                }
+            } catch (Throwable e) {
+                Debug.info("[NameList] 行提供者 " + provider.getClass().getName() + " 出错: " + e);
+            }
+        }
+        return rows;
+    }
 
     public static class PlayerNameTagInfo {
         Player player;

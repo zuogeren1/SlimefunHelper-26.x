@@ -1,4 +1,14 @@
 {
+	"config.index.locator-bar": "定位栏反推",
 	"config.index.sfhelperplus": "SlimeFunHelper+",
-	"widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+"
+	"config.index.sfhelperplus-locator": "SlimeFunHelper+ 定位栏",
+	"locator-bar.enable": "定位栏坐标反推",
+	"locator-bar.locator-track": "启用反推",
+	"locator-bar.locator-track-debug": "定位栏反推调试日志",
+	"locator-bar.locator-track-max-age": "反推观测保留时长",
+	"locator-bar.locator-track-min-baseline": "反推最小基线",
+	"locator-bar.locator-track-min-span": "反推最小方位跨度",
+	"widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
+	"widget.click-gui.module-name.Render.LocatorTrack": "定位栏坐标反推",
+	"widget.click-gui.module-name.Render.LocatorTrack.tooltips": "用定位栏方位角反推看不见的玩家坐标"
 }
