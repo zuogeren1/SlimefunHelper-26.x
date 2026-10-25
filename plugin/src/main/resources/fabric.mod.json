@@ -25,6 +25,6 @@
 		"fabricloader": ">=0.19.5",
 		"minecraft": "${minecraft_version}",
 		"java": ">=25",
-		"slimefunhelper": ">=1.0.1.0-upstream.1.2.1.1"
+		"slimefunhelper": ">=1.2.1.1"
 	}
 }
