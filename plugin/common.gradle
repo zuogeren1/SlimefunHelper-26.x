@@ -30,19 +30,29 @@ repositories {
 	}
 }
 
-// 宿主 jar：仓库根 build/release/SlimefunHelper-<mc版本>-<宿主 mod_version>.jar。
+// 宿主 jar：仓库根 build/release/SlimefunHelper-<mc版本>-<宿主 mod_version>.jar；
+// 刚 buildAndGather 完、还没同步到 build/release 时，build/libs 里那份同样新，退而取它。
 // 宿主 mod_version 直接读仓库根 gradle.properties（本工程不重复维护）。
 def hostProps = new Properties()
 rootProject.file('../gradle.properties').withInputStream { hostProps.load(it) }
 final String hostModVersion = project.findProperty('host_mod_version') ?: hostProps.getProperty('mod_version')
+final String hostJarName = "SlimefunHelper-${project.minecraft_version}-${hostModVersion}.jar"
 final File hostJar = project.hasProperty('host_jar')
 		? rootProject.file(project.property('host_jar'))
-		: rootProject.file("../build/release/SlimefunHelper-${project.minecraft_version}-${hostModVersion}.jar")
+		: {
+			File release = rootProject.file("../build/release/${hostJarName}")
+			return release.isFile() ? release : rootProject.file("../build/libs/${hostJarName}")
+		}()
 
-if (!hostJar.isFile()) {
-	throw new GradleException("找不到宿主 jar: ${hostJar}\n" +
-			"请先在仓库根目录构建宿主（./gradlew buildAndGather），" +
-			"或核对仓库根 gradle.properties 里的 mod_version 与 build/release 下的文件名。")
+// 注意：**不要在这里 throw**。plugin/ 是根工程的复合构建（settings.gradle 的 includeBuild），
+// 根上的任何一次 Gradle 调用都会配置到这里；配置期抛异常会让「先 buildAndGather 出宿主 jar」
+// 这件事本身也跑不起来（版本号刚改时就是死锁）。改为编译期再检查。
+def ensureHostJar = {
+	if (!hostJar.isFile()) {
+		throw new GradleException("找不到宿主 jar: ${hostJar}\n" +
+				"请先在仓库根目录构建宿主（./gradlew buildAndGather），" +
+				"或核对仓库根 gradle.properties 里的 mod_version 与 build/release、build/libs 下的文件名。")
+	}
 }
 
 dependencies {
@@ -75,7 +85,10 @@ def compileStubs = tasks.register('compileStubs', JavaCompile) {
 
 def stubsClasses = compileStubs.map { it.destinationDirectory }
 sourceSets.main.compileClasspath += files(stubsClasses)
-tasks.named('compileJava') { dependsOn compileStubs }
+tasks.named('compileJava') {
+	dependsOn compileStubs
+	doFirst { ensureHostJar() }
+}
 
 processResources {
 	inputs.property "version", project.mod_version
