@@ -25,8 +25,6 @@ final class PluginContextImpl implements PluginContext {
 
     private final Map<String, List<BaseModule>> pluginModules = new LinkedHashMap<>();
 
-    private final Map<String, ViewGroupSpec> viewGroups = new LinkedHashMap<>();
-
     private final Chat chat = (text, addToHistory) -> ChatTasks.sayMessage(text, addToHistory);
 
     private final Travel travel = () -> {
@@ -65,8 +63,6 @@ final class PluginContextImpl implements PluginContext {
 
         @Override
         public void registerViewGroup(String pluginId, String name, Supplier<List<BaseModule>> supplier) {
-            ViewGroupSpec spec = new ViewGroupSpec(pluginId, name, supplier);
-            viewGroups.put(pluginId + ':' + name, spec);
             HackModules.registerViewGroup(new ViewModuleGroup(name, supplier));
         }
 
@@ -122,9 +118,4 @@ final class PluginContextImpl implements PluginContext {
         return moduleOwners.get(module);
     }
 
-    List<ViewGroupSpec> viewGroups() {
-        return List.copyOf(viewGroups.values());
-    }
-
-    record ViewGroupSpec(String pluginId, String name, Supplier<List<BaseModule>> modules) {}
 }

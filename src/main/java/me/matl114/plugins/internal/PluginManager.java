@@ -53,11 +53,6 @@ public final class PluginManager {
         return context.ownerOf(module);
     }
 
-    /** @return every registered view group, in registration order. */
-    public List<PluginContextImpl.ViewGroupSpec> viewGroups() {
-        return context.viewGroups();
-    }
-
     public static PluginManager getInstance() {
         return INSTANCE;
     }
