@@ -74,14 +74,6 @@ import me.matl114.hacks.utils.EntityUtils;
 public class InteractManager extends BaseModule {
     public static InteractManager INSTANCE;
 
-    /**
-     * 指令路径（{@code !!useitem} / {@code !!holduse}）正在用物品。
-     *
-     * <p>期间 {@link TpInteract} 的 useItem 钩子必须跳过：那条路的目标是指令给的坐标，不是准星，
-     * 按准星去传送会跑到完全不相干的地方。
-     */
-    public static boolean commandUsingItem = false;
-
     private static final List<String> HAND_TABS = List.of("mainhand", "offhand");
     private static final List<String> SCHEDULE_TABS = List.of("once", "inf", "1", "4", "10", "20");
     private static final List<String> USE_TARGET_HEAD_TABS = List.of("look", "pos", "entity");
@@ -993,19 +985,6 @@ public class InteractManager extends BaseModule {
         }
     }
 
-    /**
-     * 指令路径用物品的统一入口：期间置 {@link #commandUsingItem}，
-     * 让 {@link TpInteract} 的 useItem 钩子跳过（那条路的目标是坐标、不是准星，按准星传送会跑偏）。
-     */
-    private static InteractionResult useItemGuarded(boolean useOnBlock, InteractionHand hand, BlockHitResult hit) {
-        commandUsingItem = true;
-        try {
-            return useOnBlock ? mc.gameMode.useItemOn(mc.player, hand, hit) : mc.gameMode.useItem(mc.player, hand);
-        } finally {
-            commandUsingItem = false;
-        }
-    }
-
     public record UseItemContext(UseContextSelector hand, LookSupplier target) implements InteractContext {
         @Override
         public String type() {
@@ -1018,26 +997,6 @@ public class InteractManager extends BaseModule {
             if (supply != null) {
                 var entry = hand.getUseContext();
                 if (entry != null) {
-                    // 桶类（水桶 / 空桶 / 岩浆桶 / 鱼桶 / 细雪桶…）在 pos 模式下要做目标感知：
-                    // 只给朝向是不够的 —— 服务端按包里的 pitch/yaw 自己重算射线，「朝方块几何中心」会让
-                    // 水桶的射线穿过流体、落点跑到别的格子上，空桶在流动水上也会 MISS。
-                    // 这里先把「真能命中目标格」的命中解出来；解不出来就退回原来的「转头 + useItem」，保证不回归。
-                    BlockHitResult bucketHit = null;
-                    BlockPos bucketTarget = target.getTargetBlockPos();
-                    if (bucketTarget != null && BucketInteract.shouldHandle(entry.val())) {
-                        bucketHit = BucketInteract.resolve(
-                                player, entry.val(), bucketTarget, InteractExtra.INSTANCE.getBlockReachDistance());
-                        if (bucketHit != null) {
-                            Vec2 bucketLook = BucketInteract.lookAt(player, bucketHit.getLocation());
-                            if (bucketLook != null) {
-                                supply = bucketLook;
-                            } else {
-                                bucketHit = null;
-                            }
-                        }
-                    }
-                    // 细雪桶是 BlockItem，放置走 useOn，只有它必须发 useItemOn（BucketItem 家族的 useOn 永远是 PASS）
-                    boolean useOnBlock = bucketHit != null && BucketInteract.isSolidBucket(entry.val());
                     boolean shouldUseOffHand = InteractManager.shouldUseOffhandByDefault() || entry.index() == 40;
                     var runnable =
                             InvExtra.INSTANCE.swapItemToHand(entry.index(), shouldUseOffHand, manager.ghostHand.get());
@@ -1046,7 +1005,7 @@ public class InteractManager extends BaseModule {
                         player.setXRot(supply.x);
                         player.setYRot(supply.y);
                         InteractionHand hand = shouldUseOffHand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
-                        var result = useItemGuarded(useOnBlock, hand, bucketHit);
+                        var result = mc.gameMode.useItem(mc.player, hand);
                         if (InteractManager.INSTANCE.logA.get()) {
                             Component text = VItem.getInstance().getFormattedName(entry.val());
                             manager.logI18NSub("Interact", "message.module.interact-manager.interact.use", text);
@@ -1091,7 +1050,7 @@ public class InteractManager extends BaseModule {
                 var runnable = InvExtra.INSTANCE.swapItemToHand(entry.index(), offhand, manager.ghostHand.get());
                 if (runnable != null) {
                     InteractionHand hand = offhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
-                    var result = useItemGuarded(false, hand, null);
+                    var result = mc.gameMode.useItem(mc.player, hand);
                     if (InteractManager.INSTANCE.logA.get()) {
                         Component text = VItem.getInstance().getFormattedName(entry.val());
                         manager.logI18NSub("Interact", "message.module.interact-manager.interact.use", text);
@@ -1197,16 +1156,6 @@ public class InteractManager extends BaseModule {
     public interface LookSupplier {
         Vec2 getLook(Player pl);
 
-        /**
-         * pos 模式下的<b>目标方块</b>（look / entity 模式返回 null）。
-         *
-         * <p>桶类需要它做目标感知：光有朝向不够 —— 原版 {@code BucketItem} 靠服务端按包里的朝向<b>自己重算射线</b>，
-         * 「朝方块几何中心」会让射线穿透流体或落到别的面，放水 / 舀水都会失败。详见 {@link BucketInteract}。
-         */
-        default BlockPos getTargetBlockPos() {
-            return null;
-        }
-
         static LookSupplier of(InputArgument<?> inputArgument) {
             if (inputArgument instanceof PosArgumentResult pos) {
                 ExecutePos pos2 = pos.nonnullResult();
@@ -1219,11 +1168,6 @@ public class InteractManager extends BaseModule {
                         return EntityUtils.rotationToPitchYaw(new Vec3(vector3d.x(), vector3d.y(), vector3d.z()));
                     }
 
-                    @Override
-                    public BlockPos getTargetBlockPos() {
-                        Vector3d vector3d = pos2.getPosition(PlayerStateManager.createServer());
-                        return BlockPos.containing(new Vec3(vector3d.x(), vector3d.y(), vector3d.z()));
-                    }
                 };
             } else if (inputArgument instanceof RotationArgumentResult rot) {
                 ExecuteRotation executeRotation = rot.nonnullResult();

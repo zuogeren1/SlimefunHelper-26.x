@@ -4454,7 +4454,6 @@
 	"att-bot.render-target-color":"渲染颜色",
 	"travelling-control.pitch-40-end-safety":"Pitch40低高度自动断连",
 	"travelling-control.pitch-40-auto-pull-up":"Pitch40自动拉升",
-	"tp-interact.debug-log":"桶类远程交互调试日志",
 	"itemstack-display.storage-display.enable-storage-display":"启用存储物品展示",
 	"itemstack-display.storage-display.enable-info-display":"启用物品信息展示",
 	"itemstack-display.storage-display.enable-shulker-display":"启用潜影盒展示",
