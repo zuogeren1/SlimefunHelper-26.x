@@ -26,6 +26,9 @@ import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
+import me.matl114.hacks.utils.interact.InteractRequest;
+import me.matl114.hacks.utils.interact.InteractRequestImpl;
+import me.matl114.hacks.utils.interact.InteractionQueue;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.hacks.utils.tasks.TimerExecutor;
 import me.matl114.managers.Configs;
@@ -247,7 +250,9 @@ public class CrystalAura extends BaseModule {
     TimerExecutor tickAttackExecutor = new TimerExecutor();
     List<Player> currentTarget = List.of();
     List<CrystalPlan> pendingBases = new ArrayList<>();
-    Queue<CrystalPlan> delayQueue = new ArrayDeque<>();
+    private InteractionQueue blockingQueue;
+    private CrystalPlan blockingPlan;
+    private boolean placeCrystalAfterBlocking;
     Map<BlockPos, Integer> trackedGlasses = new ConcurrentHashMap<>();
     int timer = 0;
     RenderCollector<AABB> debugRender = RenderCollectors.createBoxCollector(true, false, false);
@@ -259,7 +264,7 @@ public class CrystalAura extends BaseModule {
         trackedGlasses.clear();
         timer = 0;
         pendingBases.clear();
-        delayQueue.clear();
+        clearBlockingQueue();
     }
 
     boolean fillWorkingTick = false;
@@ -290,21 +295,22 @@ public class CrystalAura extends BaseModule {
             if (eatingAbort.get() && mc.player.isUsingItem()) {
                 return;
             }
+            boolean blockingWasPending = blockingQueue != null;
             boolean alreadyHasPlace = tickTrackedGlasses();
             if (alreadyHasPlace) {
                 timer = 0;
             }
             // constantly attack, only delay when place
             boolean attack = tickAttack();
-            boolean queuedPlaces = false;
-
-            queuedPlaces |= tickDelayQueue();
-            queuedPlaces |= tickPendingBase();
+            boolean queuedPlaces =
+                    blockingWasPending ? tickBlockingQueue() : blockingQueue == null && tickPendingBase();
             if (queuedPlaces) {
                 timer = 0;
             }
             ++timer;
-            if ((timer >= delay.get() || (placeAfterAttack.get() && attack) || fillWorkingTick)
+            if (!blockingWasPending
+                    && blockingQueue == null
+                    && (timer >= delay.get() || (placeAfterAttack.get() && attack) || fillWorkingTick)
                     && !currentTarget.isEmpty()) {
                 if (checkSupplies()) {
                     if (tickPlace()) {
@@ -320,7 +326,7 @@ public class CrystalAura extends BaseModule {
             trackedGlasses.clear();
             timer = 0;
             pendingBases.clear();
-            delayQueue.clear();
+            clearBlockingQueue();
         }
     }
 
@@ -471,31 +477,6 @@ public class CrystalAura extends BaseModule {
                     && canPlaceCrystalAtBase(basePos)) {
                 placeBlockingAndCrystal(plan);
                 return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean tickDelayQueue() {
-        int queueSize = delayQueue.size();
-        for (int index = 0; index < queueSize; ++index) {
-            CrystalPlan plan = delayQueue.poll();
-            if (plan == null) {
-                continue;
-            }
-            BlockPos basePos = plan.option().basePos();
-            if (!InteractExtra.INSTANCE.isWithinInteractRange(mc.player.position(), basePos)
-                    || !isBasePlacedCrystalInAttackRange(basePos)) {
-                continue;
-            }
-            if (plan.blockingPos().isPresent()) {
-                if (placeBlockingAndCrystal(plan)) {
-                    return true;
-                }
-            } else {
-                if (tryPlaceCrystal(basePos)) {
-                    return true;
-                }
             }
         }
         return false;
@@ -804,6 +785,10 @@ public class CrystalAura extends BaseModule {
             if (!CombatManager.INSTANCE.canCubePlace(mc.player, blockingPos)) {
                 continue;
             }
+            CrystalPlan option = new CrystalPlan(new DirectPlace(pos.below()), Optional.of(blockingPos));
+            if (!InteractUtils.canInteractAndPlace(mc.player, getBlockingPlaceResult(option))) {
+                continue;
+            }
             var newDamageMap = calculateCrystalDamage(
                     getCrystalExplosionPos(pos.below()),
                     Map.of(blockingPos, Blocks.OBSIDIAN.defaultBlockState(), pos, Blocks.AIR.defaultBlockState()));
@@ -813,7 +798,7 @@ public class CrystalAura extends BaseModule {
 
             double optionValue = getBestEnemyDamage(newDamageMap);
             if (optionValue > bestOptionValue) {
-                bestOption = new CrystalPlan(new DirectPlace(pos.below()), Optional.of(blockingPos));
+                bestOption = option;
                 bestOptionValue = optionValue;
             }
         }
@@ -1049,15 +1034,13 @@ public class CrystalAura extends BaseModule {
     }
 
     private IndexEntry<ItemStack> supplyBlockingBlock() {
-        EntrySet<Item> allowedBlocks = blockingBlock.get();
-        if (allowedBlocks == null) {
-            return null;
-        }
         return InventoryUtils.findPlayerItem(
-                stack -> stack.getItem() instanceof BlockItem && allowedBlocks.test(stack.getItem()),
-                ghostHand.get().getSearchSize(false),
-                true,
-                false);
+                this::isBlockingBlock, ghostHand.get().getSearchSize(false), true, false);
+    }
+
+    private boolean isBlockingBlock(ItemStack stack) {
+        EntrySet<Item> allowedBlocks = blockingBlock.get();
+        return allowedBlocks != null && stack.getItem() instanceof BlockItem && allowedBlocks.test(stack.getItem());
     }
 
     private boolean isTrackedGlassState(BlockState state) {
@@ -1096,7 +1079,7 @@ public class CrystalAura extends BaseModule {
                     if (!isSuitableExplodePos(damageMap) && autoBlock.get()) {
                         var blocking = findGlassBlockingPlan(pos);
                         if (blocking != null) {
-                            placeBlockingBlock(blocking);
+                            placeGlassBlocking(blocking);
                         }
                     }
                     continue;
@@ -1184,30 +1167,6 @@ public class CrystalAura extends BaseModule {
                 blockingPos.get(), airplaceBase.get(), !mode.get().isLegal());
     }
 
-    private boolean placeBlockingBlock(CrystalPlan plan, IndexEntry<ItemStack> entry) {
-        FlagEntry<BlockHitResult> hitResultEntry = getBlockingPlaceResult(plan);
-        if (!InteractUtils.canInteractAndPlace(mc.player, hitResultEntry)) {
-            return false;
-        }
-        return placeBlockingBlock(plan, entry, hitResultEntry.val());
-    }
-
-    private boolean placeBlockingBlock(CrystalPlan plan, IndexEntry<ItemStack> entry, BlockHitResult hitResult) {
-        if (hitResult == null || !canPlaceBlockingBlockAtHit(plan, entry.val(), hitResult)) {
-            return false;
-        }
-        if (!InteractionTasks.canHandleInteract(mode.get(), hitResult)) {
-            return false;
-        }
-        Runnable callback = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, ghostHand.get());
-        if (callback == null) {
-            return false;
-        }
-        boolean completed = InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
-        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
-        return completed;
-    }
-
     private boolean canPlaceBlockingBlockAtHit(CrystalPlan plan, ItemStack stack, BlockHitResult hitResult) {
         BlockPos blockingPos = plan.blockingPos().orElse(null);
         if (blockingPos == null
@@ -1228,25 +1187,120 @@ public class CrystalAura extends BaseModule {
         if (plan.blockingPos().isEmpty()) {
             return tryPlaceCrystal(plan.option().basePos());
         }
-        return switch (placeBlockingBlock(plan)) {
-            case 2 -> {
-                if (zeroTickBlock.get()
-                        && DisablerManager.INSTANCE.isMultiRotPlaceCheckDisabled(
-                                mode.get().canMultiRotPlace())) {
-                    yield tryPlaceCrystal(plan.option().basePos());
-                } else {
-                    delayQueue.add(new CrystalPlan(plan.option(), Optional.empty()));
-                    yield true;
+        if (blockingQueue != null || supplyBlockingBlock() == null || !canContinuePlaceBlockingBlock(plan)) {
+            return false;
+        }
+
+        BlockPos basePos = plan.option().basePos();
+        BlockPos targetPos = plan.blockingPos().orElseThrow();
+        boolean scaffold = !InteractUtils.canInteractAndPlace(mc.player, getBlockingPlaceResult(plan));
+        BlockPos scaffoldPos = targetPos.below();
+        if (scaffold
+                && (!scaffoldBlock.get()
+                        || scaffoldPos.getY() != basePos.getY()
+                        || basePos.distSqr(scaffoldPos) != 1
+                        || !CombatManager.INSTANCE.canCubePlace(mc.player, scaffoldPos)
+                        || !InteractionTasks.canHandleInteract(mode.get(), getScaffoldPlaceResult(plan)))) {
+            return false;
+        }
+
+        var placeMode = mode.get();
+        List<InteractRequest> requests = new ArrayList<>(scaffold ? 2 : 1);
+        if (scaffold) {
+            requests.add(new InteractRequestImpl(this::isBlockingBlock, (interactionQueue, itemMatched) -> {
+                if (!itemMatched
+                        || !canContinuePlaceBlockingBlock(plan)
+                        || !CombatManager.INSTANCE.canCubePlace(mc.player, scaffoldPos)) {
+                    return interactionQueue.abort();
                 }
-            }
-            case 1 -> {
-                delayQueue.add(plan);
-                yield true;
-            }
-            default -> {
-                yield false;
-            }
-        };
+                if (InteractUtils.canInteractAndPlace(mc.player, getBlockingPlaceResult(plan))) {
+                    return interactionQueue.success();
+                }
+                BlockHitResult hitResult = getScaffoldPlaceResult(plan);
+                return InteractionTasks.canHandleInteract(placeMode, hitResult)
+                        ? interactionQueue.success(hitResult)
+                        : interactionQueue.abort();
+            }));
+        }
+        requests.add(blockingPlaceRequest(plan));
+        return enqueueBlockingRequests(plan, requests, true);
+    }
+
+    private boolean placeGlassBlocking(CrystalPlan plan) {
+        if (blockingQueue != null
+                || supplyBlockingBlock() == null
+                || !canContinuePlaceBlockingBlock(plan)
+                || !InteractUtils.canInteractAndPlace(mc.player, getBlockingPlaceResult(plan))) {
+            return false;
+        }
+        return enqueueBlockingRequests(plan, List.of(blockingPlaceRequest(plan)), false);
+    }
+
+    private InteractRequest blockingPlaceRequest(CrystalPlan plan) {
+        return new InteractRequestImpl(
+                stack -> {
+                    if (!isBlockingBlock(stack)) return false;
+                    FlagEntry<BlockHitResult> hitResult = getBlockingPlaceResult(plan);
+                    return InteractUtils.canInteractAndPlace(mc.player, hitResult)
+                            && canPlaceBlockingBlockAtHit(plan, stack, hitResult.val());
+                },
+                (interactionQueue, itemMatched) -> {
+                    if (!itemMatched || !canContinuePlaceBlockingBlock(plan)) {
+                        return interactionQueue.abort();
+                    }
+                    FlagEntry<BlockHitResult> hitResult = getBlockingPlaceResult(plan);
+                    return InteractUtils.canInteractAndPlace(mc.player, hitResult)
+                            ? interactionQueue.success(hitResult.val())
+                            : interactionQueue.abort();
+                });
+    }
+
+    private boolean enqueueBlockingRequests(CrystalPlan plan, List<InteractRequest> requests, boolean placeCrystal) {
+        var placeMode = mode.get();
+        boolean zeroTick = zeroTickBlock.get()
+                && DisablerManager.INSTANCE.isMultiRotPlaceCheckDisabled(placeMode.canMultiRotPlace());
+        InteractionQueue queue = new InteractionQueue(
+                zeroTick ? 64 : 1,
+                InteractionHand.MAIN_HAND,
+                ghostHand.get(),
+                airplaceBase.get(),
+                placeMode,
+                swingHand.get());
+        queue.enqueueAll(requests);
+        blockingQueue = queue;
+        blockingPlan = plan;
+        placeCrystalAfterBlocking = placeCrystal;
+        if (zeroTick) {
+            queue.tick();
+            return queue.isEmpty() ? finishBlockingQueue() : !queue.isTerminate();
+        }
+        return true;
+    }
+
+    private boolean tickBlockingQueue() {
+        blockingQueue.tick();
+        return blockingQueue.isEmpty() && finishBlockingQueue();
+    }
+
+    private boolean finishBlockingQueue() {
+        if (!blockingQueue.isEmpty()) return false;
+        CrystalPlan plan = blockingPlan;
+        boolean placeCrystal = placeCrystalAfterBlocking;
+        boolean success = blockingQueue.isSuccess();
+        blockingQueue = null;
+        blockingPlan = null;
+        placeCrystalAfterBlocking = false;
+        return success && (!placeCrystal || tryPlaceCrystal(plan.option().basePos()));
+    }
+
+    private void clearBlockingQueue() {
+        if (blockingQueue == null) return;
+        blockingQueue.clear();
+        if (blockingQueue.isEmpty()) {
+            blockingQueue = null;
+            blockingPlan = null;
+            placeCrystalAfterBlocking = false;
+        }
     }
 
     private boolean canContinuePlaceBlockingBlock(CrystalPlan plan) {
@@ -1262,62 +1316,6 @@ public class CrystalAura extends BaseModule {
         if (!targetState.isAir() && !targetState.liquid() && !targetState.canBeReplaced()) {
             return false;
         }
-        return true;
-    }
-
-    private int placeBlockingBlock(CrystalPlan plan) {
-        IndexEntry<ItemStack> entry = supplyBlockingBlock();
-        if (entry == null) {
-            return 0;
-        }
-        if (!canContinuePlaceBlockingBlock(plan)) {
-            return 0;
-        }
-
-        BlockPos basePos = plan.option().basePos();
-        BlockPos targetPos = plan.blockingPos().orElseThrow();
-        boolean zeroTick = zeroTickBlock.get()
-                && DisablerManager.INSTANCE.isMultiRotPlaceCheckDisabled(
-                        mode.get().canMultiRotPlace());
-        var currentBlockingPlace = getBlockingPlaceResult(plan);
-        if (!InteractUtils.canInteractAndPlace(mc.player, currentBlockingPlace)) {
-            if (!scaffoldBlock.get()) {
-                return 0;
-            }
-            BlockPos downPos = targetPos.below();
-            if (downPos.getY() == basePos.getY() && basePos.distSqr(downPos) == 1) {
-                if (CombatManager.INSTANCE.canCubePlace(mc.player, downPos)) {
-                    if (!placeScaffoldBlock(plan, entry)) {
-                        return 0;
-                    }
-                    currentBlockingPlace = getBlockingPlaceResult(plan);
-                    if (!InteractUtils.canInteractAndPlace(mc.player, currentBlockingPlace)) {
-                        return 0;
-                    }
-                    if (!zeroTick) {
-                        return 1;
-                    }
-                } else {
-                    return 0;
-                }
-            } else {
-                return 0;
-            }
-        }
-        if (placeBlockingBlock(plan, entry)) {
-            return 2;
-        }
-        return 0;
-    }
-
-    private boolean finishBlockingPlace(CrystalPlan plan) {
-        CrystalPlan crystalPlan = new CrystalPlan(plan.option(), Optional.empty());
-        if (zeroTickBlock.get()
-                && DisablerManager.INSTANCE.isMultiRotPlaceCheckDisabled(
-                        mode.get().canMultiRotPlace())) {
-            return tryPlaceCrystal(crystalPlan.option().basePos());
-        }
-        delayQueue.add(crystalPlan);
         return true;
     }
 
@@ -1346,33 +1344,6 @@ public class CrystalAura extends BaseModule {
             return null;
         }
         return new BlockHitResult(Vec3.atCenterOf(basePos).relative(direction, 0.5D), direction, basePos, false);
-    }
-
-    private BlockHitResult getScaffoldBlockingHitResult(CrystalPlan plan) {
-        BlockHitResult scaffoldHitResult = getScaffoldPlaceResult(plan);
-        if (scaffoldHitResult == null) {
-            return null;
-        }
-        BlockPos blockingPos = plan.blockingPos().orElse(null);
-        if (blockingPos == null) {
-            return null;
-        }
-        return new BlockHitResult(
-                Vec3.atCenterOf(blockingPos.below()).relative(Direction.UP, 0.5D), Direction.UP, blockingPos.below(), false);
-    }
-
-    private boolean placeScaffoldBlock(CrystalPlan plan, IndexEntry<ItemStack> entry) {
-        BlockHitResult hitResult = getScaffoldPlaceResult(plan);
-        if (!InteractionTasks.canHandleInteract(mode.get(), hitResult)) {
-            return false;
-        }
-        Runnable callback = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, ghostHand.get());
-        if (callback == null) {
-            return false;
-        }
-        boolean completed = InteractionTasks.handlePlaceMode(mode.get(), hitResult, InteractionHand.MAIN_HAND, swingHand.get());
-        InteractionTasks.finishInteractGhostHand(mode.get(), callback);
-        return completed;
     }
 
     private boolean placeFill(BlockPos pos, BlockHitResult hitResult) {
@@ -1469,18 +1440,17 @@ public class CrystalAura extends BaseModule {
             eventPreMine.cancel();
             return;
         }
+        if (blockingQueue != null) {
+            eventPreMine.cancel();
+            return;
+        }
         if (!isSuitableExplodePos(damageMap = calculateCrystalDamage(Vec3.atBottomCenterOf(pos), overrides))) {
             if (isSuitableAttackExplodePos(damageMap) && autoBlock.get()) {
                 // try figure out the blocking now
                 var blocking = findGlassBlockingPlan(pos);
-                if (blocking != null) {
-                    switch (placeBlockingBlock(blocking)) {
-                        case 2 -> {}
-                        default -> {
-                            eventPreMine.cancel();
-                            return;
-                        }
-                    }
+                if (blocking == null || !placeGlassBlocking(blocking) || blockingQueue != null) {
+                    eventPreMine.cancel();
+                    return;
                 }
             } else {
                 eventPreMine.cancel();

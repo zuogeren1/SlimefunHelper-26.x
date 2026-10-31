@@ -23,6 +23,7 @@ import me.matl114.events.impl.Teleportation;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -95,6 +96,40 @@ public abstract class ClientPlayNetworkHandlerEvents {
                 commandRef.set(valueChange.substring(1));
             } else {
                 // change a command to a chat message
+                ci.cancel();
+                escapeSendEvent = true;
+                sendChat(valueChange);
+            }
+        }
+    }
+
+    @Inject(method = "sendUnattendedCommand", at = @At("HEAD"), cancellable = true)
+    private void onClickRunCommand(
+            String command,
+            Screen afterActionScreen,
+            CallbackInfo ci,
+            @Local(argsOnly = true) LocalRef<String> commandRef) {
+        if (escapeSendEvent) {
+            escapeSendEvent = false;
+            return;
+        }
+        String chatContent = "/" + command;
+        Event<String> value = new Event<>(chatContent, true, true);
+        Listener.getChatSend().handleValue(value);
+        if (value.isCancelled()) {
+            ci.cancel();
+            return;
+        }
+        String valueChange = value.context();
+        if (valueChange == null || valueChange.isEmpty()) {
+            ci.cancel();
+            return;
+        }
+        if (!Objects.equals(chatContent, valueChange)) {
+            if (valueChange.startsWith("/")) {
+                commandRef.set(valueChange.substring(1));
+            } else {
+                // Change the clicked command to a chat message.
                 ci.cancel();
                 escapeSendEvent = true;
                 sendChat(valueChange);

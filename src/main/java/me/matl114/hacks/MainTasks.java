@@ -249,15 +249,6 @@ public class MainTasks {
 
     public static void fillFakeSubChunkWithStone() {}
 
-    /**
-     * 兼容旧调用点（ChatTasks / ConfigManager 尚未同步到 ClickGui.INSTANCE.openConfigScreen()）；
-     * 上游已删除该方法，等这两处同步落地后应一并删掉。
-     */
-    @ApiMethod
-    public static void openConfigNewStyleScreen() {
-        ClickGui.INSTANCE.openConfigScreen();
-    }
-
     @ApiMethod
     public static void openConfigScreen() {
         ClickGui.INSTANCE.openConfigScreen();

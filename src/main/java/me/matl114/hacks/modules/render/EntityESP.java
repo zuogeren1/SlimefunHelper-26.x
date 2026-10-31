@@ -30,6 +30,8 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.phys.AABB;
 
 public class EntityESP extends BaseModule {
+    private static final String KEY_RENDER_TRACKED_LEVEL = "render-tracked-level";
+
     public final ModulePath entityRoot = makePath(Configs.RENDER_CONFIG, "detect-entity");
     public final ModulePath entityEsp = entityRoot.add("entity-esp");
 
@@ -142,10 +144,13 @@ public class EntityESP extends BaseModule {
                 continue;
             } else {
                 EntityInternalAccess<?> access = EntityInternalAccess.of(entity);
-                int renderLevel = access.renderTrackedLevel();
+                Byte trackedLevel =
+                        access.isMetaEmpty() ? null : access.getMetadata().get(this, KEY_RENDER_TRACKED_LEVEL);
+                int renderLevel = trackedLevel == null ? EntityInternalAccess.RENDER_LEVEL_DISABLE : trackedLevel;
                 if (renderLevel == EntityInternalAccess.RENDER_LEVEL_WHITELIST) {
                     if (!whitelist.contains(entity.getType())) {
-                        access.markRenderTracked(EntityInternalAccess.RENDER_LEVEL_DISABLE);
+                        access.getMetadata()
+                                .put(this, KEY_RENDER_TRACKED_LEVEL, EntityInternalAccess.RENDER_LEVEL_DISABLE);
                         continue;
                     }
                 }
@@ -155,7 +160,8 @@ public class EntityESP extends BaseModule {
                 }
                 if (renderLevel == EntityInternalAccess.RENDER_LEVEL_DISABLE) {
                     if (whitelist.contains(entity.getType())) {
-                        access.markRenderTracked(EntityInternalAccess.RENDER_LEVEL_WHITELIST);
+                        access.getMetadata()
+                                .put(this, KEY_RENDER_TRACKED_LEVEL, EntityInternalAccess.RENDER_LEVEL_WHITELIST);
                     }
                 }
             }
@@ -184,15 +190,16 @@ public class EntityESP extends BaseModule {
             float tickDelta = event.context.partialTicks();
             render(event.context.drawContext(), tickDelta);
         }
+        if (enable.get()) {
+            renderFace.render2D(event.context.drawContext(), event.context.partialTicks());
+        }
     }
 
     public void render(Object object, float tickDelta) {
         if (object instanceof PoseStack stack) {
-            renderFace.render3D(stack, tickDelta);
             renderOutline.render3D(stack, tickDelta);
             entityTracer.render3D(stack, tickDelta);
         } else if (object instanceof VDrawContext vdraw) {
-            renderFace.render2D(vdraw, tickDelta);
             renderOutline.render2D(vdraw, tickDelta);
             entityTracer.render2D(vdraw, tickDelta);
         }

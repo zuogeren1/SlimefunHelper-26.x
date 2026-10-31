@@ -10,6 +10,7 @@ import me.matl114.events.impl.Render2D;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
+import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.*;
@@ -616,11 +617,11 @@ public class EntityLog extends BaseModule {
     }
 
     private Component createTracking(String name) {
-        return ChatUtils.stringToText("&a&l[&aTrack&a&l]")
-                .withStyle(s -> s.withClickEvent(
-                                ChatUtils.getSuggestCommand(MainCommand.getMainCommandPrefix() + "pqueue add " + name))
-                        .withHoverEvent(ChatUtils.getHoverShowText(
-                                List.of(Component.literal("Click to track player in queue")))));
+        return ChatTasks.createCallbackText(
+                        ChatUtils.stringToText("&a&l[&aTrack&a&l]"),
+                        () -> MainCommand.dispatchClientCommand("pqueue add " + name))
+                .withStyle(s -> s.withHoverEvent(
+                        ChatUtils.getHoverShowText(List.of(Component.literal("Click to track player in queue")))));
     }
 
     public void handleReLogin(UUID uuid) {

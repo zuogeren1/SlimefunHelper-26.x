@@ -139,8 +139,7 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
         if (checkClientPlayer()) {
             if (isFallFlying()
                     && ((ElytraExtra.INSTANCE.canFireworkControlMotion()))
-                    && (ElytraExtra.INSTANCE.fireworksLiquidFly.get()
-                            || ElytraExtra.INSTANCE.hasFireworkVelocityOverrides())) {
+                    && (ElytraExtra.INSTANCE.hasFireworkVelocityOverrides())) {
                 ci.cancel();
                 Vec3 overriding = ElytraExtra.INSTANCE.requestNextOverrideVelocity();
                 Vec3 vec3d = this.getDeltaMovement();

@@ -1,8 +1,8 @@
 package me.matl114.hacks.modules.survival;
 
 import java.util.*;
+import java.util.function.Predicate;
 import me.matl114.accessors.access.ChunkAccess;
-import me.matl114.accessors.interfaces.MetadataHolder;
 import me.matl114.events.Event;
 import me.matl114.events.impl.BlockUpdate;
 import me.matl114.events.impl.Render2D;
@@ -11,12 +11,18 @@ import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.config.TracingOption;
 import me.matl114.hacks.utils.config.WrapColor;
+import me.matl114.hacks.utils.move.goal.GoalBlockPos;
+import me.matl114.hacks.utils.move.goal.GoalList;
+import me.matl114.hacks.utils.move.goal.GoalNearBlockPos;
+import me.matl114.hacks.utils.move.goal.IPathGoal;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.hacks.utils.render.RenderElements;
 import me.matl114.hacks.utils.render.RenderMode;
 import me.matl114.hacks.utils.tasks.TimerExecutor;
+import me.matl114.hooks.BaritoneHooks;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.config.DoubleRef;
@@ -34,7 +40,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -67,6 +72,16 @@ public class TrialInfoESP extends BaseModule {
     public final KeyBindRef hotkey =
             toggleHotkey(root.addHotkey(), new MultiKeyBind(), root.addEnable()).build();
 
+    public final KeyBindRef pathToNearestSpawner = hotkey(root.add("path-to-nearest-spawner"))
+            .defaultValue(new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.wrapAsHandler(this::pathToNearestSpawner))
+            .build();
+
+    public final KeyBindRef pathToNearestOminousVault = hotkey(root.add("path-to-nearest-ominous-vault"))
+            .defaultValue(new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.wrapAsHandler(this::pathToNearestOminousVault))
+            .build();
+
     public final DoubleRef textScale = doubleBuilder(root.add("text-scale"))
             .defaultValue(0.75D)
             .validator(Configs.doubleRange(0.1D, 4.0D))
@@ -80,7 +95,15 @@ public class TrialInfoESP extends BaseModule {
             .build();
 
     public final FlagRef renderEnterPosition =
-            flagBuilder(root.add("render-enter-position")).build();
+            flagBuilder(root.add("render-enter-position"), true).build();
+
+    public final FlagRef renderVaults =
+            flagBuilder(root.add("render-vaults"), true).build();
+
+    public final FlagRef renderSpawners =
+            flagBuilder(root.add("render-spawners"), true).build();
+
+    public final FlagRef renderKeys = flagBuilder(root.add("render-keys"), true).build();
 
     public final EnumRef<RenderMode> textMode = builder(root.add("text-mode"), RenderMode.class)
             .defaultValue(RenderMode.RENDER_2D)
@@ -122,10 +145,59 @@ public class TrialInfoESP extends BaseModule {
     public final RenderCollector<AABB> boxCollector = RenderCollectors.createBoxCollector(true, false, false);
     public final RenderCollector<AABB> boxCollector2 = RenderCollectors.createBoxCollector(false, true, false);
     public final RenderCollector<Vec3> traceCollector = RenderCollectors.createTracerCollector();
-    private static final String TRIAL_MOB_METADATA_KEY = "slimefunhelper:trial_esp/trial_mob";
     private Map<ChunkPos, Set<BlockPos>> cachedVaultsAndTrials = new HashMap<>();
-    private BlockPos enterTrialPosition;
+    private Vec3 enterTrialPosition;
     TimerExecutor cacheClearTimer = new TimerExecutor();
+
+    private void pathToNearestSpawner() {
+        if (checkNull() || !BaritoneHooks.getInstance().isBaritoneAPISupported()) {
+            return;
+        }
+        boolean found = pathToCachedPositions(pos -> mc.level.getBlockEntity(pos) instanceof TrialSpawnerBlockEntity
+                && mc.level.getBlockState(pos).getValue(TrialSpawnerBlock.STATE)
+                        == TrialSpawnerState.WAITING_FOR_PLAYERS);
+        if (!found && enterTrialPosition != null) {
+            BaritoneHooks.getInstance()
+                    .setBaritoneCurrentGoal(new GoalBlockPos(BlockPos.containing(enterTrialPosition)));
+        }
+    }
+
+    private void pathToNearestOminousVault() {
+        pathToCachedPositions(pos -> mc.level.getBlockEntity(pos) instanceof VaultBlockEntity vault
+                && mc.level.getBlockState(pos).getValue(VaultBlock.OMINOUS)
+                && canOpenVault(vault));
+    }
+
+    private boolean canOpenVault(VaultBlockEntity vault) {
+        Set<UUID> openedPlayers = WorldManager.INSTANCE.getVaultOpenPlayers(vault);
+        Set<UUID> remainingPlayers = new HashSet<>(openedPlayers);
+        remainingPlayers.removeAll(vault.getSharedData().getConnectedPlayers());
+        if (remainingPlayers.size() != openedPlayers.size()) {
+            WorldManager.INSTANCE.recordVaultOpenedBy(vault, remainingPlayers);
+            openedPlayers = remainingPlayers;
+        }
+        return !openedPlayers.contains(mc.player.getUUID());
+    }
+
+    private boolean pathToCachedPositions(Predicate<BlockPos> filter) {
+        if (checkNull() || !BaritoneHooks.getInstance().isBaritoneAPISupported()) {
+            return false;
+        }
+        List<IPathGoal> goals = new ArrayList<>();
+        for (var positions : cachedVaultsAndTrials.values()) {
+            for (BlockPos pos : positions) {
+                if (!filter.test(pos)) {
+                    continue;
+                }
+                goals.add(new GoalNearBlockPos(pos));
+            }
+        }
+        if (!goals.isEmpty()) {
+            BaritoneHooks.getInstance().setBaritoneCurrentGoal(new GoalList(goals));
+            return true;
+        }
+        return false;
+    }
 
     public void onTick() {
         if (cacheClearTimer.run(1000)) {
@@ -140,14 +212,14 @@ public class TrialInfoESP extends BaseModule {
         int miscRgb = colorMisc.get().withAlpha(255);
         if (enterTrialPosition != null
                 && mc.player != null
-                && mc.player.distanceToSqr(Vec3.atCenterOf(enterTrialPosition)) > 256.0D * 256.0D) {
+                && mc.player.distanceToSqr(enterTrialPosition) > 256.0D * 256.0D) {
             enterTrialPosition = null;
         }
-        if (renderEnterPosition.get() && enterTrialPosition != null) {
-            Vec3 start = Vec3.atCenterOf(enterTrialPosition);
-            lineRenderCollector.submit(List.of(start, start.add(256.0D, 0.0D, 0.0D)), miscRgb);
+        if (enable.get() && renderEnterPosition.get() && enterTrialPosition != null) {
+            Vec3 start = enterTrialPosition;
+            lineRenderCollector.submit(List.of(start, start.add(0.0D, 256.0D, 0.0D)), miscRgb);
         }
-        if (enable.get()) {
+        if (!checkNull()) {
             for (var chunk : CommonUtils.chunks(false)) {
                 ChunkPos pos = chunk.getPos();
                 if (!cachedVaultsAndTrials.containsKey(pos)) {
@@ -168,14 +240,15 @@ public class TrialInfoESP extends BaseModule {
                     BlockEntity be = mc.level.getBlockEntity(bp);
                     List<Component> textLines = new ArrayList<>();
                     WrapColor color;
+                    boolean renderBlock;
                     if (be instanceof TrialSpawnerBlockEntity be1) {
+                        renderBlock = renderSpawners.get();
                         BlockState currentState = mc.level.getBlockState(bp);
                         TrialSpawnerState state = currentState.getValue(TrialSpawnerBlock.STATE);
                         if (state == TrialSpawnerState.COOLDOWN) {
                             highlightTrialKey(bp, miscRgb, tracingOption);
                         }
                         if (state == TrialSpawnerState.ACTIVE) {
-                            markTrialMobs(be1, bp);
                             color = colorSpawner.get();
                         }
                         if (state == TrialSpawnerState.WAITING_FOR_PLAYERS) {
@@ -223,21 +296,14 @@ public class TrialInfoESP extends BaseModule {
                                     entity.getType().getDescription()));
                         }
                     } else if (be instanceof VaultBlockEntity be2) {
+                        renderBlock = renderVaults.get();
                         BlockState currentState = mc.level.getBlockState(bp);
                         boolean omin = currentState.getValue(VaultBlock.OMINOUS);
                         textLines.add(
                                 omin
                                         ? Component.translatable("message.module.trial-info.esp.display.vault-type.ominous")
                                         : Component.translatable("message.module.trial-info.esp.display.vault-type.common"));
-                        var set = be2.getSharedData().getConnectedPlayers();
-                        Set<UUID> openedPlayers = WorldManager.INSTANCE.getVaultOpenPlayers(be2);
-                        Set<UUID> uid2 = new HashSet<>(openedPlayers);
-                        uid2.removeAll(set);
-                        if (uid2.size() != openedPlayers.size()) {
-                            WorldManager.INSTANCE.recordVaultOpenedBy(be2, uid2);
-                            openedPlayers = uid2;
-                        }
-                        if (!openedPlayers.contains(mc.player.getUUID())) {
+                        if (canOpenVault(be2)) {
                             textLines.add(Component.translatable("message.module.trial-info-esp.display.vault-can-open"));
                             color = omin ? colorVaultOminous.get() : colorVaultSimple.get();
                         } else {
@@ -254,23 +320,18 @@ public class TrialInfoESP extends BaseModule {
                             result = result.append(Component.literal("\n")).append(textLines.get(i));
                         }
                         Vec3 textPos = Vec3.atCenterOf(bp).add(0.0D, textOffset.get(), 0.0D);
-                        textCollector.submit(
-                                new RenderElements.Text(result, textPos, (float) textScale.get()),
-                                color.withAlpha(255));
+                        if (enable.get() && renderBlock) {
+                            textCollector.submit(
+                                    new RenderElements.Text(result, textPos, (float) textScale.get()),
+                                    color.withAlpha(255));
+                        }
                     }
-                    if (tracingOption.box()) {
+                    if (enable.get() && renderBlock && tracingOption.box()) {
                         boxCollector.submit(new AABB(bp), color.withAlpha(255));
                         boxCollector2.submit(new AABB(bp), color.withAlpha(64));
                     }
-                    if (tracingOption.line()) {
+                    if (enable.get() && renderBlock && tracingOption.line()) {
                         traceCollector.submit(Vec3.atCenterOf(bp), color.withAlpha(255));
-                    }
-                }
-            }
-            if (anyTrialNearby) {
-                for (Entity entity : mc.level.entitiesForRendering()) {
-                    if (hasTrialMobMetadata(entity)) {
-                        submitHighlight(entity, miscRgb, tracingOption);
                     }
                 }
             }
@@ -323,33 +384,17 @@ public class TrialInfoESP extends BaseModule {
         }
     }
 
-    private void markTrialMobs(TrialSpawnerBlockEntity spawner, BlockPos spawnerPos) {
-        int radius = spawner.getTrialSpawner().getRequiredPlayerRange();
-        AABB range = new AABB(spawnerPos).inflate(radius);
-        for (Entity entity : mc.level.getEntitiesOfClass(Mob.class, range, candidate -> true)) {
-            if (entity instanceof MetadataHolder holder) {
-                holder.getMetadata().put(this, TRIAL_MOB_METADATA_KEY, Boolean.TRUE);
-            }
-        }
-    }
-
-    private boolean hasTrialMobMetadata(Entity entity) {
-        return entity instanceof MetadataHolder holder
-                && !holder.isMetaEmpty()
-                && Boolean.TRUE.equals(holder.getMetadata().get(this, TRIAL_MOB_METADATA_KEY));
-    }
-
     private void submitHighlight(Entity entity, int color, TracingOption tracingOption) {
-        if (tracingOption.box()) {
+        if (enable.get() && renderKeys.get() && tracingOption.box()) {
             boxCollector.submit(entity.getBoundingBox(), color);
         }
-        if (tracingOption.line()) {
+        if (enable.get() && renderKeys.get() && tracingOption.line()) {
             traceCollector.submit(entity.getBoundingBox().getCenter(), color);
         }
     }
 
     private void onTrialSpawnerActivated(Event<BlockUpdate> event) {
-        if (!enable.get() || enterTrialPosition != null) {
+        if (enterTrialPosition != null || mc.player == null) {
             return;
         }
         BlockState oldState = event.context.oldState();
@@ -358,7 +403,7 @@ public class TrialInfoESP extends BaseModule {
                 && newState.getBlock() == Blocks.TRIAL_SPAWNER
                 && oldState.getValue(TrialSpawnerBlock.STATE) != TrialSpawnerState.ACTIVE
                 && newState.getValue(TrialSpawnerBlock.STATE) == TrialSpawnerState.ACTIVE) {
-            enterTrialPosition = event.context.pos().immutable();
+            enterTrialPosition = mc.player.position();
         }
     }
 

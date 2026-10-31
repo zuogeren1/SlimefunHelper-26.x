@@ -27,17 +27,20 @@ import net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
+import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.phys.Vec3;
 
 public class Flight extends BaseModule implements LegalMovementManager.MovementModifier {
-    private static LegalMovementManager.DelegateMovementModifier instance;
+    private Vec3 pendingFlightVelocity;
     public final ModulePath moveSafety = makePath(Configs.MOV_CONFIG, "move-safety");
     public final ModulePath flight = moveSafety.add("flight");
     public final ModulePath moveSpeed = makePath(Configs.MOV_CONFIG, "move-speed");
+    public static Flight INSTANCE;
 
     public Flight() {
         super("Flight");
+        INSTANCE = this;
         bindFlag(canFly);
         MovementManager.registerMovementPipeline(this);
     }
@@ -71,6 +74,12 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
             .defaultValue(60)
             .validator(Configs.INT_POSITIVE)
             .build();
+
+    public final DoubleRef motionSpeed = doubleBuilder(flight.add("motion-speed"))
+            .defaultValue(4.0D)
+            .validator(Configs.doubleRange(0.0D, 50.0D))
+            .build();
+
     public final FlagRef overrideFlySpeed = builder(moveSpeed.add("fly-speed"), Boolean.class)
             .defaultValue(false)
             .build();
@@ -197,6 +206,7 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     @Override
     public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {
         LocalPlayer player = movementManagerEvent.context.playerStatus.entity;
+        pendingFlightVelocity = null;
         if (isActive()) {
             if (!player.getAbilities().mayfly) {
                 player.getAbilities().mayfly = true;
@@ -207,27 +217,39 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
         boolean handled =
                 switch (flightMode.get()) {
                     case CREATIVE -> {
-                        if (antiKickMode.get() != AntiKickMode.PACKET) {
+                        if (isActive() && player.getAbilities().flying && !player.isPassenger()) {
+                            PlayerInputUtils.Input input = PlayerInputUtils.of(mc.options);
+                            double flySpeed = player.getAbilities().getFlyingSpeed();
+                            double horizontalSpeed = flySpeed * (player.isSprinting() ? 2.0D : 1.0D);
+                            double verticalSpeed = flySpeed * 3.0D;
+                            Vec3 horizontalVelocity = EntityUtils.movementInputToVelocity(
+                                    new Vec3(input.sidewaysSpeed(), 0.0D, input.forwardSpeed()),
+                                    (float) horizontalSpeed,
+                                    player.getYRot());
+                            Vec3 velocity = new Vec3(
+                                    horizontalVelocity.x, input.upwardSpeed() * verticalSpeed, horizontalVelocity.z);
+                            player.setDeltaMovement(velocity);
+                            if (antiKickMode.get() != AntiKickMode.PACKET) {
+                                dispatchAntiKick(player);
+                                velocity = player.getDeltaMovement();
+                            }
+                            setFlightVelocity(player, velocity, Math.hypot(horizontalSpeed, verticalSpeed));
+                        } else if (antiKickMode.get() != AntiKickMode.PACKET) {
                             dispatchAntiKick(player);
                         }
                         yield true;
                     }
                     case MOTION -> {
-                        if (isActive() && mc.player.getAbilities().flying) {
+                        if (isActive() && player.getAbilities().flying && !player.isPassenger()) {
                             PlayerInputUtils.Input input = PlayerInputUtils.of(mc.options);
                             Vec3 movementInput =
                                     new Vec3(input.sidewaysSpeed(), input.upwardSpeed(), input.forwardSpeed());
-                            Vec3 velocity = EntityUtils.movementInputToVelocity(
-                                    movementInput, (float) (5 * getOverridingFlySpeed()), player.getYRot());
+                            double speed = motionSpeed.get();
+                            Vec3 velocity =
+                                    EntityUtils.movementInputToVelocity(movementInput, (float) speed, player.getYRot());
                             player.setDeltaMovement(velocity);
                             velocity = dispatchAntiKickMotion(velocity);
-                            // set FlightVelocity Event
-                            FlightVelocity flightVelocity = new FlightVelocity(
-                                    velocity, 5 * getOverridingFlySpeed(), FlightVelocity.Mode.MOTION_FLIGHT);
-                            Listener.getCustomListener()
-                                    .broadcast(new EventContainer<>(FlightVelocity.class, flightVelocity));
-                            velocity = flightVelocity.toVelocity();
-                            player.setDeltaMovement(velocity);
+                            setFlightVelocity(player, velocity, speed);
                             yield true;
                         }
                         yield false;
@@ -255,6 +277,31 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
                 dispatchAntiKick(player);
             }
         }
+    }
+
+    private void setFlightVelocity(LocalPlayer player, Vec3 velocity, double maxVelocity) {
+        FlightVelocity flightVelocity = new FlightVelocity(velocity, maxVelocity, FlightVelocity.Mode.MOTION_FLIGHT);
+        Listener.getCustomListener().broadcast(new EventContainer<>(FlightVelocity.class, flightVelocity));
+        pendingFlightVelocity = flightVelocity.toVelocity();
+        player.setDeltaMovement(pendingFlightVelocity);
+    }
+
+    @Override
+    public void applyBeforeTravelTick(
+            Event<LegalMovementManager> movementManagerEvent, Event<Vec3> movementInputEvent) {
+        Vec3 velocity = pendingFlightVelocity;
+        LocalPlayer player = movementManagerEvent.context().playerStatus.entity;
+        if (velocity == null
+                || !isActive()
+                || flightMode.get() == Mode.JETPACK
+                || !player.getAbilities().flying
+                || player.isPassenger()) {
+            return;
+        }
+
+        movementInputEvent.cancel();
+        player.move(MoverType.SELF, velocity);
+        player.setDeltaMovement(velocity);
     }
 
     @Override
