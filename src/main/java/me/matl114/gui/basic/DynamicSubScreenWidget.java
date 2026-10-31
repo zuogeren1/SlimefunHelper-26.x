@@ -30,20 +30,20 @@ public class DynamicSubScreenWidget extends SubScreenWidget {
     }
 
     @Override
-    public int getX() {
+    public int x() {
         return xCoord.getValue();
     }
 
-    public int getY() {
+    public int y() {
         return yCoord.getValue();
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        if (super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+    public boolean onMouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (super.onMouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
             return true;
         }
-        if (isMouseOver(mouseX, mouseY)) {
+        if (isOver(mouseX, mouseY)) {
             // scroll up so other can see down below
             yCoord.setValue(yCoord.getValue() + (int) (verticalAmount * 10.0D));
             return true;

@@ -59,9 +59,9 @@ public class AdvancedScrollElement extends AbstractElement {
     }
 
     private boolean isMouseOverBar(DrawableWidget element, double mouseY) {
-        mouseY = mouseY - element.getY();
-        double barStartY = getCurrentStartY(element.getHeight());
-        double barHeight = getBarHeight(element.getHeight());
+        mouseY = mouseY - element.y();
+        double barStartY = getCurrentStartY(element.height());
+        double barHeight = getBarHeight(element.height());
         return mouseY >= barStartY && mouseY <= barStartY + barHeight;
     }
 
@@ -70,21 +70,21 @@ public class AdvancedScrollElement extends AbstractElement {
     @Override
     public boolean onAction(ExecutableWidget element, double mouseX, double mouseY, int button, Type type) {
         if (shouldActive()) {
-            if (type == Type.MOUSE_CLICK && element.isMouseOver(mouseX, mouseY) && !isMouseOverBar(element, mouseY)) {
+            if (type == Type.MOUSE_CLICK && element.isOver(mouseX, mouseY) && !isMouseOverBar(element, mouseY)) {
                 // snap to location
 
             }
             if (type == Type.MOUSE_START_DRAG) {
-                if (element.isMouseOver(mouseX, mouseY)) {
+                if (element.isOver(mouseX, mouseY)) {
                     if (isMouseOverBar(element, mouseY)) {
-                        double barStartY = getCurrentStartY(element.getHeight());
-                        startDragDeltaY = (mouseY - barStartY - element.getY());
+                        double barStartY = getCurrentStartY(element.height());
+                        startDragDeltaY = (mouseY - barStartY - element.y());
                     } else {
-                        double pointHeight = mouseY - element.getY();
+                        double pointHeight = mouseY - element.y();
                         double percentage = pointHeight / screenY.getValue();
-                        double barHeight = getBarHeight(element.getHeight());
+                        double barHeight = getBarHeight(element.height());
                         startDragDeltaY = barHeight * percentage;
-                        locateBarAt(pointHeight - startDragDeltaY, element.getHeight());
+                        locateBarAt(pointHeight - startDragDeltaY, element.height());
                     }
                     return true;
                 } else {
@@ -92,8 +92,8 @@ public class AdvancedScrollElement extends AbstractElement {
                 }
             }
             if ((type == Type.MOUSE_DRAG)) {
-                double locate = mouseY - startDragDeltaY - element.getY();
-                locateBarAt(locate, element.getHeight());
+                double locate = mouseY - startDragDeltaY - element.y();
+                locateBarAt(locate, element.height());
             }
             return true;
         }
@@ -103,8 +103,8 @@ public class AdvancedScrollElement extends AbstractElement {
     public boolean onScroll(
             ExecutableWidget widget, double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (shouldActive()) {
-            double barBlankHeight = getCurrentStartY(widget.getHeight());
-            locateBarAt(barBlankHeight - verticalAmount * 5.0D, widget.getHeight());
+            double barBlankHeight = getCurrentStartY(widget.height());
+            locateBarAt(barBlankHeight - verticalAmount * 5.0D, widget.height());
             return true;
         }
         return false;
@@ -140,7 +140,7 @@ public class AdvancedScrollElement extends AbstractElement {
             }
 
             context.fill(1, y1 + 1, element.getTextureWidth() - 1, y2 - 1, CommonColors.GRAY);
-            if (element.isDragging() || (element.isMouseOver(mouseX, mouseY) && isMouseOverBar(element, mouseY))) {
+            if (element.isDragging() || (element.isOver(mouseX, mouseY) && isMouseOverBar(element, mouseY))) {
                 RenderHandler.drawHighlightFrame(
                         context, 0, y1, element.getTextureWidth(), y2 - y1, CommonColors.WHITE);
             }

@@ -56,8 +56,8 @@ public abstract class DrawableWidget
     private float alpha = 1.0f;
     private boolean subWidget = false;
     private RenderHandler renderHandler;
-    protected boolean selected;
-    protected boolean focused;
+    protected boolean currentMouseHighlighting;
+    protected boolean interacting;
 
     public RenderHandler getRenderHandler() {
         return this.renderHandler;
@@ -87,8 +87,8 @@ public abstract class DrawableWidget
         return subWidget;
     }
 
-    public boolean isSelected() {
-        return selected;
+    public boolean shouldHighlight() {
+        return currentMouseHighlighting;
     }
     // this should be set before they join any delegates or something, as they often causes problem
     public final <T extends DrawableWidget> T setPriority(int depth) {
@@ -109,10 +109,6 @@ public abstract class DrawableWidget
 
     public void setSubWidget(boolean s) {
         this.subWidget = s;
-    }
-
-    public void setSelected(boolean s) {
-        this.selected = s;
     }
 
     public <T extends DrawableWidget> T setRenderHandler(RenderHandler renderHandler) {
@@ -143,22 +139,18 @@ public abstract class DrawableWidget
         vd.tryDraw();
     }
 
-    protected void checkSelect(boolean disableSelect, int mouseX, int mouseY) {
-        this.selected = !disableSelect && isMouseOver(mouseX, mouseY);
-    }
-
     public boolean canSelect() {
         return renderHandler != null && renderHandler.canBeSelected(this);
     }
 
     public void render0(VDrawContext context, int mouseX, int mouseY, float delta, boolean disableSelect) {
-        this.selected = !disableSelect && isMouseOver(mouseX, mouseY);
+        this.currentMouseHighlighting = !disableSelect && isOver(mouseX, mouseY);
         float textureScale = getTextureScale();
 
-        boolean shouldRescale = getX() != 0 || getY() != 0 || textureScale != 1.0F;
+        boolean shouldRescale = x() != 0 || y() != 0 || textureScale != 1.0F;
         if (shouldRescale) {
             context.getMatrices().pushMatrix();
-            context.getMatrices().translate(getX(), getY());
+            context.getMatrices().translate(x(), y());
         }
 
         // compat low version
@@ -181,68 +173,119 @@ public abstract class DrawableWidget
     public void renderInDefaultMatrix(
             VDrawContext context, int mouseX, int mouseY, float delta, boolean disableSelect) {
         if (this.renderHandler != null) {
-            this.renderHandler.renderAtCentered(this, context, mouseX, mouseY, delta, this.alpha, this.selected);
+            this.renderHandler.renderAtCentered(
+                    this, context, mouseX, mouseY, delta, this.alpha, this.currentMouseHighlighting);
         }
     }
 
     public void renderAbsolute(VDrawContext context, int mouseX, int mouseY, float delta, boolean disableSelect) {
         if (this.renderHandler != null) {
             this.renderHandler.renderExtraAbsoluteCoord(
-                    this, context, mouseX, mouseY, delta, this.alpha, this.selected);
+                    this, context, mouseX, mouseY, delta, this.alpha, this.currentMouseHighlighting);
         }
     }
 
-    public abstract boolean mouseClicked(double mouseX, double mouseY, int button);
+    // focusing api,
 
-    public abstract boolean mouseReleased(double mouseX, double mouseY, int button);
-
-    public boolean isMouseOver(double mouseX, double mouseY) {
-        return mouseX >= this.getX()
-                && mouseY >= this.getY()
-                && mouseX < this.getX() + this.textureWidth
-                && mouseY < this.getY() + this.textureHeight;
+    public boolean isOver(double mouseX, double mouseY) {
+        return mouseX >= this.x()
+                && mouseY >= this.y()
+                && mouseX < this.x() + this.textureWidth
+                && mouseY < this.y() + this.textureHeight;
     }
 
-    public void setFocused(boolean focused) {
-        this.focused = focused;
-        // Debug.info("This method should not be called!");
+    public void setSelected(boolean focused) {
+        this.interacting = focused;
+    }
+
+    public boolean isSelected() {
+        return interacting;
+    }
+    // compat element
+
+    public final boolean isMouseOver(double mouseX, double mouseY) {
+        return isOver(mouseX, mouseY);
     }
 
     public boolean isFocused() {
-        return focused;
+        return isSelected();
     }
 
-    public void setX(int x) {
+    public void setFocused(boolean bl) {
+        setSelected(bl);
+    }
+
+    // coord api
+
+    public void x(int x) {
         this.x = x;
     }
 
-    public void setY(int y) {
+    public void y(int y) {
         this.y = y;
     }
 
-    public int getX() {
+    public int x() {
         return this.x;
     }
 
-    public int getY() {
+    public int y() {
         return this.y;
     }
 
-    public int getWidth() {
+    public int width() {
         return dx;
     }
 
-    public void setWidth(int width) {
+    public void width(int width) {
         this.dx = width;
     }
 
-    public void setHeight(int height) {
+    public void height(int height) {
         this.dy = height;
     }
 
-    public int getHeight() {
+    public int height() {
         return dy;
     }
+
+    // size compat
+    // Size compatibility
+
+    // Size compatibility
+
+    public final void setX(int x) {
+        x(x);
+    }
+
+    public final void setY(int y) {
+        y(y);
+    }
+
+    public final void setWidth(int width) {
+        width(width);
+    }
+
+    public final void setHeight(int height) {
+        height(height);
+    }
+
+    public final int getX() {
+        return x();
+    }
+
+    public final int getY() {
+        return y();
+    }
+
+    public final int getWidth() {
+        return width();
+    }
+
+    public final int getHeight() {
+        return height();
+    }
+    //
 
     public <T extends DrawableWidget> T cast() {
         return (T) this;
@@ -269,30 +312,32 @@ public abstract class DrawableWidget
         screen.addDrawableChild(this);
     }
 
-    public void mouseMoved(double mouseX, double mouseY) {
-        // should not move
-    }
+    // input methods api
 
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+    public abstract boolean onMouseClicked(double mouseX, double mouseY, int button);
+
+    public abstract boolean onMouseReleased(double mouseX, double mouseY, int button);
+
+    public void onMouseMoved(double mouseX, double mouseY) {}
+
+    public boolean onMouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         // should not drag
         return false;
     }
 
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        // should not scrolled
-
+    public boolean onMouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         return false;
     }
 
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean onKeyPressed(int keyCode, int scanCode, int modifiers) {
         return false;
     }
 
-    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+    public boolean onKeyReleased(int keyCode, int scanCode, int modifiers) {
         return false;
     }
 
-    public boolean charTyped(char chr, int modifiers) {
+    public boolean onCharTyped(char chr, int modifiers) {
         return false;
     }
 
@@ -301,7 +346,9 @@ public abstract class DrawableWidget
     public final void visitWidgets(Consumer<AbstractWidget> consumer) {}
 
     public NarratableEntry.NarrationPriority narrationPriority() {
-        return this.selected ? NarratableEntry.NarrationPriority.HOVERED : NarratableEntry.NarrationPriority.NONE;
+        return this.currentMouseHighlighting
+                ? NarratableEntry.NarrationPriority.HOVERED
+                : NarratableEntry.NarrationPriority.NONE;
     }
 
     public final void updateNarration(NarrationElementOutput builder) {}
@@ -320,6 +367,9 @@ public abstract class DrawableWidget
         return ScreenRectangle.empty();
     }
 
+    // -------------------------------- API compat
+    // dragging api
+
     public boolean isDragging() {
         return false;
     }
@@ -329,7 +379,7 @@ public abstract class DrawableWidget
     public boolean startDrag(Screen screen, double mouseX, double mouseY) {
         return false;
     }
-    // -------------------------------- API compat for higher version
+
     // will only be modified on main thread
     public static int THREAD_SAFE_MODIFIER_CACHE = 0;
     public static boolean THREAD_SAFE_DOUBLE_CLICK = false;
@@ -337,31 +387,42 @@ public abstract class DrawableWidget
     public final boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
         THREAD_SAFE_MODIFIER_CACHE = click.modifiers();
         THREAD_SAFE_DOUBLE_CLICK = doubled;
-        return this.mouseClicked(click.x(), click.y(), click.button());
+        return this.onMouseClicked(click.x(), click.y(), click.button());
     }
 
     public final boolean mouseReleased(MouseButtonEvent click) {
         THREAD_SAFE_MODIFIER_CACHE = click.modifiers();
-        return this.mouseReleased(click.x(), click.y(), click.button());
+        return this.onMouseReleased(click.x(), click.y(), click.button());
     }
 
     public final boolean mouseDragged(MouseButtonEvent click, double offsetX, double offsetY) {
         THREAD_SAFE_MODIFIER_CACHE = click.modifiers();
-        return this.mouseDragged(click.x(), click.y(), click.button(), offsetX, offsetY);
+        return this.onMouseDragged(click.x(), click.y(), click.button(), offsetX, offsetY);
     }
 
     public final boolean keyPressed(KeyEvent input) {
         THREAD_SAFE_MODIFIER_CACHE = input.modifiers();
-        return this.keyPressed(input.key(), input.scancode(), input.modifiers());
+        return this.onKeyPressed(input.key(), input.scancode(), input.modifiers());
     }
 
     public final boolean keyReleased(KeyEvent input) {
         THREAD_SAFE_MODIFIER_CACHE = input.modifiers();
-        return this.keyReleased(input.key(), input.scancode(), input.modifiers());
+        return this.onKeyReleased(input.key(), input.scancode(), input.modifiers());
     }
 
     public final boolean charTyped(CharacterEvent input) {
         THREAD_SAFE_MODIFIER_CACHE = 0;
-        return this.charTyped((char) input.codepoint(), 0);
+        return this.onCharTyped((char) input.codepoint(), 0);
+    }
+
+    public final void mouseMoved(double mouseX, double mouseY) {
+        // should not move
+        onMouseMoved(mouseX, mouseY);
+    }
+
+    public final boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        // should not scrolled
+
+        return onMouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 }

@@ -13,6 +13,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import org.jetbrains.annotations.MustBeInvokedByOverriders;
 
 public class GenericScreen extends Screen implements NarratableEntry, Draggable {
     protected int backgroundWidth;
@@ -41,6 +42,7 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
         this.backgroundHeight = backgroundDefaultHeight;
     }
 
+    @MustBeInvokedByOverriders
     protected void init0() {
         this.x = (this.width - this.backgroundWidth) / 2;
         if (this.height > this.backgroundDefaultHeight + 24) {
@@ -52,14 +54,25 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
         }
     }
 
-    @Override
     protected void init() {
         super.init();
         init0();
+        refreshWidgets();
     }
 
+    public int getWidth() {
+        return this.width;
+    }
+
+    public int getHeight() {
+        return this.height;
+    }
+
+    @MustBeInvokedByOverriders
+    protected void refreshWidgets() {}
+
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+    public final boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         // call for all children
         Iterator var5 = this.children().iterator();
         GuiEventListener element;
@@ -132,7 +145,7 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
         return true;
     }
 
-    public void renderBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks) {
+    public final void renderBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks) {
         if (minecraft.level == null) {
             super.extractBackground(context, mouseX, mouseY, deltaTicks);
         }

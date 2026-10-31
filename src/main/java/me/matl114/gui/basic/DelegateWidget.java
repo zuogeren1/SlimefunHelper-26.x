@@ -48,8 +48,8 @@ public class DelegateWidget extends DrawableWidget implements Draggable {
         return this.delegate != null && this.delegate.isSubWidget();
     }
 
-    public boolean isSelected() {
-        return this.delegate != null && this.delegate.isSelected();
+    public boolean shouldHighlight() {
+        return this.delegate != null && this.delegate.shouldHighlight();
     }
     // remove the extra Depth here, do not set this
     //    public <T extends DrawableWidget> T setExtraDepth(int depth){
@@ -76,12 +76,6 @@ public class DelegateWidget extends DrawableWidget implements Draggable {
     public void setSubWidget(boolean s) {
         if (this.delegate != null) {
             this.delegate.setSubWidget(s);
-        }
-    }
-
-    public void setSelected(boolean s) {
-        if (this.delegate != null) {
-            this.delegate.setSelected(s);
         }
     }
 
@@ -119,93 +113,93 @@ public class DelegateWidget extends DrawableWidget implements Draggable {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        return this.delegate != null && this.delegate.mouseClicked(mouseX, mouseY, button);
+    public boolean onMouseClicked(double mouseX, double mouseY, int button) {
+        return this.delegate != null && this.delegate.onMouseClicked(mouseX, mouseY, button);
     }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        return this.delegate != null && this.delegate.mouseReleased(mouseX, mouseY, button);
+    public boolean onMouseReleased(double mouseX, double mouseY, int button) {
+        return this.delegate != null && this.delegate.onMouseReleased(mouseX, mouseY, button);
     }
 
-    public void mouseMoved(double mouseX, double mouseY) {
+    public void onMouseMoved(double mouseX, double mouseY) {
         // should not move
         if (this.delegate != null) {
-            this.delegate.mouseMoved(mouseX, mouseY);
+            this.delegate.onMouseMoved(mouseX, mouseY);
         }
     }
 
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+    public boolean onMouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         // should not drag
-        return this.delegate != null && this.delegate.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+        return this.delegate != null && this.delegate.onMouseDragged(mouseX, mouseY, button, deltaX, deltaY);
     }
 
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+    public boolean onMouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         // should not scrolled
-        return this.delegate != null && this.delegate.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        return this.delegate != null && this.delegate.onMouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        return this.delegate != null && this.delegate.keyPressed(keyCode, scanCode, modifiers);
+    public boolean onKeyPressed(int keyCode, int scanCode, int modifiers) {
+        return this.delegate != null && this.delegate.onKeyPressed(keyCode, scanCode, modifiers);
     }
 
-    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-        return this.delegate != null && this.delegate.keyReleased(keyCode, scanCode, modifiers);
+    public boolean onKeyReleased(int keyCode, int scanCode, int modifiers) {
+        return this.delegate != null && this.delegate.onKeyReleased(keyCode, scanCode, modifiers);
     }
 
-    public boolean isMouseOver(double mouseX, double mouseY) {
-        return this.delegate != null && this.delegate.isMouseOver(mouseX, mouseY);
+    public boolean isOver(double mouseX, double mouseY) {
+        return this.delegate != null && this.delegate.isOver(mouseX, mouseY);
     }
 
-    public void setFocused(boolean focused) {
+    public void setSelected(boolean focused) {
         if (delegate != null) {
-            this.delegate.setFocused(focused);
+            this.delegate.setSelected(focused);
         }
         // Debug.info("This method should not be called!");
     }
 
-    public boolean isFocused() {
-        return this.delegate != null && this.delegate.focused;
+    public boolean isSelected() {
+        return this.delegate != null && this.delegate.interacting;
     }
 
-    public void setX(int x) {
+    public void x(int x) {
         if (this.delegate != null) {
-            this.delegate.setX(x);
+            this.delegate.x(x);
         }
     }
 
-    public void setY(int y) {
+    public void y(int y) {
         if (delegate != null) {
-            this.delegate.setY(y);
+            this.delegate.y(y);
         }
     }
 
-    public void setWidth(int x) {
+    public void width(int x) {
         if (this.delegate != null) {
-            this.delegate.setWidth(x);
+            this.delegate.width(x);
         }
     }
 
-    public void setHeight(int y) {
+    public void height(int y) {
         if (delegate != null) {
-            this.delegate.setHeight(y);
+            this.delegate.height(y);
         }
     }
 
-    public final int getX() {
-        return this.delegate == null ? 0 : this.delegate.getX();
+    public final int x() {
+        return this.delegate == null ? 0 : this.delegate.x();
     }
 
-    public final int getY() {
-        return this.delegate == null ? 0 : this.delegate.getY();
+    public final int y() {
+        return this.delegate == null ? 0 : this.delegate.y();
     }
 
-    public final int getWidth() {
-        return this.delegate == null ? 0 : this.delegate.getWidth();
+    public final int width() {
+        return this.delegate == null ? 0 : this.delegate.width();
     }
 
-    public final int getHeight() {
-        return this.delegate == null ? 0 : this.delegate.getHeight();
+    public final int height() {
+        return this.delegate == null ? 0 : this.delegate.height();
     }
 
     public <T extends DrawableWidget> T addToSub(SubScreenWidget screen) {
@@ -215,8 +209,8 @@ public class DelegateWidget extends DrawableWidget implements Draggable {
     }
 
     @Override
-    public boolean charTyped(char chr, int modifiers) {
-        return this.delegate != null && this.delegate.charTyped(chr, modifiers);
+    public boolean onCharTyped(char chr, int modifiers) {
+        return this.delegate != null && this.delegate.onCharTyped(chr, modifiers);
     }
 
     public NarrationPriority narrationPriority() {
