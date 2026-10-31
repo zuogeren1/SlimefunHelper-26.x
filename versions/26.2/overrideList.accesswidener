@@ -106,3 +106,5 @@ accessible	field	net/minecraft/client/multiplayer/prediction/BlockStatePredictio
 accessible	field	net/minecraft/client/renderer/rendertype/RenderType	state	Lnet/minecraft/client/renderer/rendertype/RenderSetup;
 accessible	field	net/minecraft/client/renderer/rendertype/RenderSetup	textures	Ljava/util/Map;
 accessible	class	net/minecraft/client/renderer/rendertype/RenderSetup$TextureBinding
+accessible	field	net/minecraft/client/Minecraft	fontManager	Lnet/minecraft/client/gui/font/FontManager;
+accessible	method	net/minecraft/client/gui/font/FontManager	getFontSetRaw	(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/gui/font/FontSet;

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
@@ -31,6 +32,7 @@ import net.minecraft.client.gui.font.providers.GlyphProviderDefinition;
 import net.minecraft.client.gui.font.providers.TrueTypeGlyphProviderDefinition;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FontDescription;
+import net.minecraft.network.chat.Style;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackLocationInfo;
 import net.minecraft.server.packs.PackResources;
@@ -40,6 +42,8 @@ import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.server.packs.resources.IoSupplier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.util.StringDecomposer;
 import net.minecraft.util.Util;
 
 /**
@@ -48,9 +52,10 @@ import net.minecraft.util.Util;
  * <p>26.x 的一份字体就是一个 {@code FontSet}（字形图集交给 {@code GlyphStitcher}），而 ttf 装载器
  * {@code TrueTypeGlyphProviderDefinition} 只吃 {@code ResourceManager}。这里按 {@code FontManager}
  * 造 FontSet 的三步等价写法自己拼一套：先用只提供本地 ttf 的 {@code ResourceManager}/{@code PackResources}
- * 喂给装载器，再把得到的 {@code GlyphProvider} 塞进自建 {@code FontSet}，最后用只认这份 FontSet 的
- * {@code Font.Provider} 造一个 {@code Font} 交给父类当 delegate——父类会把每段样式的字体改写成构造时
- * 传进去的那个 id，于是整段文本都走本地字体。
+ * 喂给装载器，再把得到的 {@code GlyphProvider} 塞进自建 {@code FontSet}，最后用「本类 fontId 查这份
+ * FontSet、其余转交 {@code FontManager}」的 {@code Font.Provider} 造一个 {@code Font} 交给父类当 delegate
+ * ——父类会把每段样式的字体改写成构造时传进去的那个 id，于是整段文本都走本地字体；本地字体缺的码点
+ * 再由本类按码点放回原样式，回落到原版字体。
  *
  * <p>{@code FontManager} 对不认识的字体 id 会静默回落到 missingFontSet（全空心方块），所以装载失败
  * 必须由本类自己判定：失败时退回原版字体并把 {@link #isAvailable()} 置 false。
@@ -66,6 +71,9 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
     private final Path path;
     private final float fontSize;
     private final LoadedFont loaded;
+    private final FontDescription.Resource localFont;
+    /** 逐码点缓存「本地字体有没有这个字形」；结论与 FontSet 同寿命，所以只放实例字段。 */
+    private final Map<Integer, Boolean> localGlyphs = new ConcurrentHashMap<>();
 
     public LocalFontTextDrawer(Path path) {
         this(path, DEFAULT_FONT_SIZE);
@@ -80,6 +88,7 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
         this.path = path;
         this.fontSize = fontSize;
         this.loaded = loaded;
+        this.localFont = new FontDescription.Resource(loaded.fontId());
     }
 
     public Path path() {
@@ -118,7 +127,7 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
             fontSet = new FontSet(new GlyphStitcher(minecraft.getTextureManager(), fontId));
             fontSet.reload(
                     List.of(new GlyphProvider.Conditional(provider, FontOption.Filter.ALWAYS_PASS)), Set.of());
-            return new LoadedFont(new Font(new LocalFontProvider(fontSet)), fontId, fontSet, provider);
+            return new LoadedFont(new Font(new LocalFontProvider(fontSet, fontId)), fontId, fontSet, provider);
         } catch (Exception exception) {
             if (fontSet != null) fontSet.close();
             if (provider != null) provider.close();
@@ -132,6 +141,63 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
         // 装载失败时本门面实际画的是原版字体，行高必须跟着原版走，否则排版会错位。
         return isAvailable() ? fontSize : super.getTextHeight();
     }
+
+    /**
+     * 逐码点决定这个字符用哪份字体：本地字体有这个字形就换成 {@code fontId}，没有就保持原样式不动。
+     *
+     * <p>父类把整段文本的字体一律改写成 {@code fontId}，本地 ttf 缺字（CJK、符号）时那些字符只能落到
+     * {@code FontSet} 的 missing 字形（不可见）；这里改成按码点分流，缺字的样式不带本地 fontId，
+     * {@code Font#prepareText} 取字形时就落回原版字体。
+     */
+    @Override
+    public FormattedCharSequence withFont(FormattedCharSequence text) {
+        if (!isAvailable()) return text;
+        return sink -> text.accept(
+                (index, style, codePoint) -> sink.accept(index, withLocalFont(codePoint, style), codePoint));
+    }
+
+    @Override
+    public FormattedCharSequence formattedString(String text, boolean mirror) {
+        if (!isAvailable()) return super.formattedString(text, mirror);
+        String renderedText = mirror && delegate.isBidirectional() ? delegate.bidirectionalShaping(text) : text;
+        List<FontCharacter> characters = new ArrayList<>();
+        StringDecomposer.iterateFormatted(renderedText, Style.EMPTY, (index, style, codePoint) -> {
+            characters.add(new FontCharacter(index, withLocalFont(codePoint, style), codePoint));
+            return true;
+        });
+        return sink -> {
+            for (FontCharacter character : characters) {
+                if (!sink.accept(character.index(), character.style(), character.codePoint())) {
+                    return false;
+                }
+            }
+            return true;
+        };
+    }
+
+    /** 缺字时不改样式，交给原版字体；其余字符仍然整段改用本地字体。 */
+    private Style withLocalFont(int codePoint, Style style) {
+        return hasLocalGlyph(codePoint) ? style.withFont(localFont) : style;
+    }
+
+    /**
+     * 本地 ttf 是否真有这个码点的字形。
+     *
+     * <p>不能问 {@code FontSet#source}：它查不到字形时返回的是 missing 字形而不是 null。装载器
+     * （{@code TrueTypeGlyphProvider}）对 cmap 之外的码点返回 null，所以直接问 provider。
+     * 空格与控制字符不走字形判断，直接算「本地有」，它们的宽度归本地字体管。
+     */
+    private boolean hasLocalGlyph(int codePoint) {
+        if (codePoint <= 32) return true;
+        Boolean cached = localGlyphs.get(codePoint);
+        if (cached != null) return cached;
+        boolean present = loaded.provider().getGlyph(codePoint) != null;
+        localGlyphs.put(codePoint, present);
+        return present;
+    }
+
+    /** 预先把字符与样式算好；{@code FormattedCharSequence} 会被消费多次，别在 sink 里重算。 */
+    private record FontCharacter(int index, Style style, int codePoint) {}
 
     @Override
     public void close() {
@@ -238,22 +304,28 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
     }
 
     /**
-     * 只认一份 {@code FontSet} 的 {@code Font.Provider}。
+     * 本地字体 + 原版字体的 {@code Font.Provider}。
      *
-     * <p>父类会把每段样式的字体都改写成构造时传进去的那个 id，所以这里不必按描述分发：直接返回本地字形。
-     * 反过来，按描述分发会让 {@code minecraft:default} 之类的描述落到 {@code FontManager} 的 missingFontSet。
+     * <p>样式里写着本类的 fontId 就返回本地字形；其余（缺字回落后残留的原样式、{@code minecraft:default}
+     * 以及别的资源字体）一律转交 {@code FontManager}——否则缺字会再次拿到本地 FontSet 的 missing 字形，
+     * 回落等于没做。
      */
     private static final class LocalFontProvider implements Font.Provider {
         private final FontSet fontSet;
         private final GlyphSource source;
+        private final Identifier fontId;
 
-        private LocalFontProvider(FontSet fontSet) {
+        private LocalFontProvider(FontSet fontSet, Identifier fontId) {
             this.fontSet = fontSet;
             this.source = fontSet.source(false);
+            this.fontId = fontId;
         }
 
         @Override
         public GlyphSource glyphs(FontDescription font) {
+            if (font instanceof FontDescription.Resource resource && !fontId.equals(resource.id())) {
+                return Minecraft.getInstance().fontManager.getFontSetRaw(resource.id()).source(false);
+            }
             return source;
         }
 
