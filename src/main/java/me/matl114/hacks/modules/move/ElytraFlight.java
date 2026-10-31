@@ -249,6 +249,7 @@ public class ElytraFlight extends BaseModule implements LegalMovementManager.Mov
                                 && movementInput.y > 0.5
                                 && autoPullupModeWhenPressBlankOnly.get()) {
                             algorithm = ElytraOptimizeUtils.getPullupOnlyAl(algorithm);
+                            movementInput = new Vec3(0, movementInput.y, 1);
                         }
                         Vec2 rotation = EntityUtils.movementInputToRotation(movementInput, player.getYRot());
                         motionRotation = rotation;

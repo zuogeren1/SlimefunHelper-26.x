@@ -1393,7 +1393,7 @@ public class KitReplenish extends BaseModule {
         if (mc.gameMode.getPlayerMode().isCreative()) {
             Rule rule = kit.rule();
             Container inventory = createInventory(kit);
-            for (var i = rule.from(); i < rule.to(); ++i) {
+            for (var i = 0; i < inventory.getContainerSize(); ++i) {
                 InvTasks.setCreativeInventory(inventory.getItem(i), i);
             }
         } else {
@@ -1473,14 +1473,8 @@ public class KitReplenish extends BaseModule {
         int stage;
 
         private void createSummary() {
-            int from = Math.clamp(
-                    Math.clamp(rule.from(), 0, inventory.getContainerSize()),
-                    0,
-                    InventoryUtils.getPlayerBackpackSize());
-            int to = Math.clamp(
-                    Math.clamp(rule.to(), 0, inventory.getContainerSize()), 0, InventoryUtils.getPlayerBackpackSize());
-            this.rule = this.rule.withFrom(from).withTo(to);
-            this.viewInventory = InventoryUtils.createSubInventoryView(inventory, from, to);
+            int from = rule.from();
+            int to = rule.to();
             toReplenishSummary = new LinkedHashMap<>();
             overwhelmSummary = new LinkedHashMap<>();
             for (int i = from; i < to; ++i) {
@@ -1514,14 +1508,25 @@ public class KitReplenish extends BaseModule {
         public void setKit(@Nonnull Kit kit) {
             this.name = kit.name();
             this.rule = kit.rule();
-            this.inventory = createInventory(kit);
+            Container kitInventory = createInventory(kit);
+            int maxSize = Math.min(kitInventory.getContainerSize(), InventoryUtils.getPlayerBackpackSize());
+            int from = Math.clamp(rule.from(), 0, maxSize);
+            int to = Math.clamp(rule.to(), from, maxSize);
+            this.rule = this.rule.withFrom(from).withTo(to);
+            this.inventory = kitInventory;
+            this.viewInventory = InventoryUtils.createSubInventoryView(kitInventory, from, to);
             createSummary();
         }
 
         public void setInventory(@Nonnull Container inventory, String name) {
             this.name = name;
             this.rule = new Rule(Type.GREEDY, 0, inventory.getContainerSize(), false, false, false, true, false, false);
+            int maxSize = Math.min(inventory.getContainerSize(), InventoryUtils.getPlayerBackpackSize());
+            int from = Math.clamp(rule.from(), 0, maxSize);
+            int to = Math.clamp(rule.to(), from, maxSize);
+            this.rule = this.rule.withFrom(from).withTo(to);
             this.inventory = inventory;
+            this.viewInventory = InventoryUtils.createSubInventoryView(inventory, from, to);
             createSummary();
         }
 
@@ -1542,6 +1547,13 @@ public class KitReplenish extends BaseModule {
         }
     }
 
+    public Kit getCurrentKit() {
+        if (this.requestKit != null) {
+            return this.requestKit;
+        }
+        return this.kitMap == null ? null : this.kitMap.getDefaultKit();
+    }
+
     public void replenishCurrentKit() {
         if (checkNull()) return;
         Transaction trans = this.transaction;
@@ -1556,7 +1568,7 @@ public class KitReplenish extends BaseModule {
             return;
         }
 
-        Kit kit = this.requestKit != null ? this.requestKit : this.kitMap.getDefaultKit();
+        Kit kit = getCurrentKit();
         if (kit != null) {
             logI18N("message.kit-manager.kit-replenish.request.success", kit.name());
             this.transaction = new Transaction();

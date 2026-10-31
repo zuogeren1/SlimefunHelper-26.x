@@ -69,8 +69,8 @@ public abstract class IndexedScreen<T, W extends GuiEventListener & Renderable &
     protected abstract W createSelectingDisplayWidget(T val);
 
     @Override
-    protected void init() {
-        super.init();
+    protected void refreshWidgets() {
+        super.refreshWidgets();
         saveSelected();
         createDelegate();
         addRenderableWidget(this.subScreenDelegate);

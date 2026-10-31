@@ -164,7 +164,7 @@ public class ChatTools extends BaseModule {
         if (ClientUtils.getScreen(mc) instanceof ChatScreen chat && chat.getFocused() instanceof EditBox textField) {
             return textField;
         } else if (basicSubScreenWidget != null
-                && basicSubScreenWidget.isFocused()
+                && basicSubScreenWidget.isSelected()
                 && basicSubScreenWidget.getSelected() instanceof ContentDelegateWidget<?> contentDelegateWidget
                 && contentDelegateWidget.getDelegate() instanceof EditBox text) {
             return text;

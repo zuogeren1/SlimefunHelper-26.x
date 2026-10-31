@@ -113,6 +113,7 @@
 		"hack.ClientPlayerInteractionManagerMixin",
 		"hack.ResourcePackPositionMixin",
 		"hack.ScreenMixin",
+		"hack.SkyRenderingMixin",
 		"hack.SlimeBlockMixin",
 		"hack.SplashOverlayMixin",
 		"hack.SpriteAtlasTextureMixin",

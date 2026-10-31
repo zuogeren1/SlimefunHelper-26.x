@@ -14,9 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import lombok.Getter;
-import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.events.Listener;
-import me.matl114.gui.complex.config.ConfigurateNewStyleScreen;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModuleEntry;
 import me.matl114.hacks.api.ModuleGroup;
@@ -33,11 +31,13 @@ import net.minecraft.ReportedException;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ProgressScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.inventory.BookEditScreen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.network.protocol.game.ServerboundEditBookPacket;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Items;
 
 public class MainTasks {
@@ -93,11 +93,27 @@ public class MainTasks {
         if (mc.player != null) {
             if (mc.player.getMainHandItem().getItem() == Items.WRITABLE_BOOK) {
                 Debug.chat("生成了书内容");
-                String generatedContent = "§b§k" + ("1a锕β".repeat(250));
+                if (!(ClientUtils.getScreen(mc) instanceof BookEditScreen)) {
+
+                    InteractionTasks.interactItem(InteractionHand.MAIN_HAND, true, true);
+                }
+                int nCopies;
+                if (args.length >= 1) {
+                    nCopies = Integer.parseInt(args[0]);
+                } else {
+                    nCopies = 100;
+                }
+                int len;
+                if (args.length >= 2) {
+                    len = Integer.parseInt(args[1]);
+                } else {
+                    len = 250;
+                }
+                String generatedContent = "§b§k" + ("1a锕β".repeat(len));
                 mc.getConnection()
                         .send(new ServerboundEditBookPacket(
                                 InventoryUtils.getSelectedSlot(),
-                                Collections.nCopies(100, generatedContent),
+                                Collections.nCopies(nCopies, generatedContent),
                                 args.length > 0 ? Optional.of(String.join("\n", args)) : Optional.empty()));
             } else {
                 Debug.chat("手持物品不是书");
@@ -233,18 +249,23 @@ public class MainTasks {
 
     public static void fillFakeSubChunkWithStone() {}
 
+    /**
+     * 兼容旧调用点（ChatTasks / ConfigManager 尚未同步到 ClickGui.INSTANCE.openConfigScreen()）；
+     * 上游已删除该方法，等这两处同步落地后应一并删掉。
+     */
     @ApiMethod
     public static void openConfigNewStyleScreen() {
-        ScreenAccess.of(new ConfigurateNewStyleScreen(Config.REGISTRY.stream().toList()))
-                .openFromCurrent();
+        ClickGui.INSTANCE.openConfigScreen();
+    }
+
+    @ApiMethod
+    public static void openConfigScreen() {
+        ClickGui.INSTANCE.openConfigScreen();
     }
 
     @ApiMethod
     public static void openConfigScreen(Config config) {
-        ConfigurateNewStyleScreen newStyleScreen =
-                new ConfigurateNewStyleScreen(Config.REGISTRY.stream().toList());
-        newStyleScreen.setGlobal(config);
-        ScreenAccess.of(newStyleScreen).openFromCurrent();
+        ClickGui.INSTANCE.openConfigScreen(config);
     }
 
     @ApiMethod

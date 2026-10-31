@@ -6,6 +6,7 @@ import it.unimi.dsi.fastutil.objects.ReferenceArraySet;
 import it.unimi.dsi.fastutil.objects.ReferenceSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.BiConsumer;
@@ -26,7 +27,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
-import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 import net.minecraft.network.protocol.common.ClientboundKeepAlivePacket;
 import net.minecraft.network.protocol.common.CommonPacketTypes;
 import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
@@ -87,6 +87,12 @@ public class PacketManager {
     public static boolean startFlushIn = false;
     public static boolean startFlushOut = false;
     private static final Minecraft mc = Minecraft.getInstance();
+    private static Set<PacketType<?>> disconnectTypes =
+            Set.of(CommonPacketTypes.CLIENTBOUND_DISCONNECT, GamePacketTypes.CLIENTBOUND_START_CONFIGURATION, GamePacketTypes.CLIENTBOUND_RESPAWN);
+
+    public static boolean isDisconnectOrRespawn(PacketType<?> recv) {
+        return disconnectTypes.contains(recv);
+    }
 
     public static boolean handleQueueInPacket(Packet<?> packet, Connection connection) {
         // do not handle flushing packets
@@ -96,24 +102,16 @@ public class PacketManager {
         checkImmediatelyFlush();
         // todo: what about BundlePacket
         if (connection.getPacketListener() instanceof ClientGamePacketListener play) {
-            if (packet instanceof ClientboundDisconnectPacket
-                    || (packet instanceof ClientboundSetHealthPacket hl && hl.getHealth() <= 0.0)
-                    || packet instanceof ClientboundRespawnPacket
-                    || packet instanceof ClientboundStartConfigurationPacket) {
-                // clear all
-                clearAndShutdown();
-            } else {
-                Event<PacketStorage.Recv> queueEvent = new Event<>(
-                        new PacketStorageRecvImpl(packet, System.currentTimeMillis(), connection),
-                        true,
-                        false,
-                        connection,
-                        true);
-                packetQueueInEvent.handleValue(queueEvent);
-                if (queueEvent.isCancelled()) {
-                    handleQueueIn(queueEvent.context());
-                    return true;
-                }
+            Event<PacketStorage.Recv> queueEvent = new Event<>(
+                    new PacketStorageRecvImpl(packet, System.currentTimeMillis(), connection),
+                    true,
+                    false,
+                    connection,
+                    true);
+            packetQueueInEvent.handleValue(queueEvent);
+            if (queueEvent.isCancelled()) {
+                handleQueueIn(queueEvent.context());
+                return true;
             }
         }
         return false;
@@ -170,19 +168,12 @@ public class PacketManager {
             return false;
         }
         if (connection.getPacketListener() instanceof ClientGamePacketListener play) {
-            if (packet instanceof ServerboundConfigurationAcknowledgedPacket) {
-                clearAndShutdown();
-            } else {
-                Event<PacketStorage.Send> queueEvent = new Event<>(
-                        new PacketStorageSendImpl(packet, System.currentTimeMillis(), callback),
-                        true,
-                        false,
-                        connection);
-                packetQueueOutEvent.handleValue(queueEvent);
-                if (queueEvent.isCancelled()) {
-                    handleQueueOut(queueEvent.context());
-                    return true;
-                }
+            Event<PacketStorage.Send> queueEvent = new Event<>(
+                    new PacketStorageSendImpl(packet, System.currentTimeMillis(), callback), true, false, connection);
+            packetQueueOutEvent.handleValue(queueEvent);
+            if (queueEvent.isCancelled()) {
+                handleQueueOut(queueEvent.context());
+                return true;
             }
         }
         return false;

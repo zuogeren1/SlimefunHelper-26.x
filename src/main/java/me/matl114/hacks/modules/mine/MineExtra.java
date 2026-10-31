@@ -14,13 +14,18 @@ import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
+import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.move.LegacySnapRotManager;
+import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.move.RotationManager;
 import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.enums.GhostHandMode;
+import me.matl114.hacks.utils.enums.LegalMiningMode;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
@@ -28,6 +33,7 @@ import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ColorUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.NetworkUtils;
+import me.matl114.utils.RaycastUtils;
 import me.matl114.utils.RenderUtils;
 import me.matl114.utils.WorldUtils;
 import me.matl114.utils.collections.IndexEntry;
@@ -70,9 +76,6 @@ public class MineExtra extends BaseModule {
     public final KeyBindRef quickMineKeyBind = toggleHotkey(
                     fastbreak.addHotkey(), new MultiKeyBind(), fastbreak.addEnable())
             .build();
-
-    public final FlagRef fakeInstaBreak =
-            flagBuilder(fastbreak.add("use-fake-instant-break")).build();
 
     public final EnumRef<Mode> fastBreakBypassMode = builder(fastbreak.add("bypass-mode"), Mode.class)
             .defaultValue(Mode.NO_BYPASS)
@@ -358,7 +361,18 @@ public class MineExtra extends BaseModule {
         }
         ServerboundPlayerActionPacket packet = packetEvent.context();
         if (packet.getAction() == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK) {
+            if (mc.gameMode != null
+                    && Objects.equals(
+                            PlayerInteractionAccess.of(mc.gameMode).getCurrentMiningPos(), packet.getPos())) {
+                lastStartingMineIsInstantBreak = mc.player != null
+                        && mc.level != null
+                        && predictBlockBreakingSpeedAt(packet.getPos()) > Math.min(1.0F, breakThreshold.get());
+                shouldUseQuickMine();
+            }
             updateGainedAdvantageCooldown(packetEvent);
+        }
+        if (packet.getAction() == ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK) {
+            onPostStopMiningLegally(packetEvent);
         }
         if (instaBreakGhostHand != null
                 && packet.getAction() == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK
@@ -638,6 +652,41 @@ public class MineExtra extends BaseModule {
         return Math.max(0, lastFinishBreakingCooldownTill + extra - Tasks.getTick());
     }
 
+    public boolean handleMineMode(BlockPos pos, LegalMiningMode mode) {
+        if (pos == null || mc.player == null) {
+            return false;
+        }
+        if (mode == LegalMiningMode.NONE) {
+            return true;
+        }
+        boolean directlyHit = RaycastUtils.canRaycastHit(
+                mc.player,
+                PlayerStateManager.INSTANCE.lastPitch,
+                PlayerStateManager.INSTANCE.lastYaw,
+                pos,
+                InteractExtra.INSTANCE.getBlockReachDistance());
+        return switch (mode) {
+            case NONE -> true;
+            case LEGACY_SNAP -> {
+                if (!directlyHit) {
+                    LegacySnapRotManager.INSTANCE.snapAt(
+                            Vec3.atCenterOf(pos).subtract(mc.player.getEyePosition()).normalize(), false);
+                }
+                yield true;
+            }
+            case DELAY_MOVEMENT -> {
+                if (directlyHit) {
+                    yield true;
+                }
+                RotationManager manager = RotationManager.INSTANCE;
+                if (manager != null) {
+                    manager.request(RotationManager.ofBlock(() -> pos));
+                }
+                yield false;
+            }
+        };
+    }
+
     public boolean isSafeCooldownThreshold() {
         if (fastBreakBypassMode.get().hasAc()) {
             if (fastBreakBypassMode.get() == Mode.BYPASS_GRIM_LEGIT) {
@@ -672,11 +721,6 @@ public class MineExtra extends BaseModule {
             }
         }
         return cooldownOverride;
-    }
-
-    public void onStartingMine(BlockPos pos, float speed, boolean instaBreak) {
-        MineExtra mineExtra = this;
-        lastStartingMineIsInstantBreak = instaBreak || speed > Math.min(1.0F, mineExtra.breakThreshold.get());
     }
 
     private void updateGainedAdvantageCooldown(Event<ServerboundPlayerActionPacket> event) {
@@ -736,7 +780,12 @@ public class MineExtra extends BaseModule {
         }
     }
 
-    public void onPostStopMiningLegally(BlockPos pos) {
+    public void onPostStopMiningLegally(Event<ServerboundPlayerActionPacket> packetEvent) {
+        if (packetEvent.isCancelled()
+                || packetEvent.context().getAction() != ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK) {
+            return;
+        }
+        BlockPos pos = packetEvent.context().getPos();
         MineExtra mineExtra = MineExtra.INSTANCE;
         int threshold = mineExtra.grimACProgressThreshold.get();
         ignoreNextFastBreakStatus = 0;
@@ -747,19 +796,18 @@ public class MineExtra extends BaseModule {
             gainedAdvantageMining = (int) (gainedAdvantageMining * 0.9);
             if (gainedAdvantageMining > threshold
                     && mineExtra.fastBreakBypassMode.getValue() == Mode.BYPASS_GRIM_LEGIT
-                    && mc.player != null) {
-                gainedAdvantageMining = 150;
+                    && mc.player != null
+                    && mc.level != null
+                    && mc.gameMode != null) {
                 if (!mc.player.getAbilities().instabuild) {
                     LocalPlayer player = Minecraft.getInstance().player;
                     Direction dir = Direction.getApproximateNearest(
                                     Vec3.atCenterOf(pos).subtract(player.getEyePosition()))
                             .getOpposite();
-                    for (int i = 0; i < 20; ++i) {
-                        mc.gameMode.startPrediction(mc.level, (sequence -> {
-                            return new ServerboundPlayerActionPacket(
-                                    ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, dir, sequence);
-                        }));
-                    }
+                    mc.gameMode.startPrediction(mc.level, (sequence -> {
+                        return new ServerboundPlayerActionPacket(
+                                ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, dir, sequence);
+                    }));
                 }
             }
         }
@@ -804,19 +852,10 @@ public class MineExtra extends BaseModule {
     }
 
     /**
-     * 判断一个挖掘速度是否应被视为 instant / pseudo-instant 分支。
-     *
-     * <p>它统一复用 breakThreshold 与 fakeInstaBreak 的阈值语义，避免这些判定散落在多个 hook 和接口实现里。
+     * 判断当前挖掘速度是否达到瞬时破坏条件。
      */
     public boolean shouldTreatAsInstantBreak(float speed) {
         return speed >= 1.0F || (speed > breakThreshold.get() && quickMine.get());
-    }
-
-    /**
-     * 判断这次 attack 后是否应立即补一个 stop，实现 early stop。
-     */
-    public boolean shouldTriggerEarlyStop(float speed) {
-        return quickMine.get() && fakeInstaBreak.get() && speed < 1.0F && speed > breakThreshold.get();
     }
 
     /**

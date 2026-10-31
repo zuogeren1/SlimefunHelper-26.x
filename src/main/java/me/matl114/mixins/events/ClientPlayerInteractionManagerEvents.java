@@ -141,6 +141,7 @@ public abstract class ClientPlayerInteractionManagerEvents {
         BlockState state = minecraft.level.getBlockState(hitResult.getBlockPos());
         MutableBoolean placeBlock = new MutableBoolean(false);
         BlockPos predictingPlace = new BlockPlaceContext(minecraft.player, hand, stackCopy, hitResult).getClickedPos();
+        BlockState oldPlaceState = world.getBlockState(predictingPlace);
         original.call(instance, world, (PredictiveAction) (seq) -> {
             lastInteractCaptureBlockPlace.addLast(placeBlock);
             try {
@@ -150,7 +151,8 @@ public abstract class ClientPlayerInteractionManagerEvents {
                             stackCopy,
                             state,
                             actionResult.getValue(),
-                            placeBlock.booleanValue() ? Optional.of(predictingPlace) : Optional.empty()));
+                            placeBlock.booleanValue() ? Optional.of(predictingPlace) : Optional.empty(),
+                            oldPlaceState));
                 }
                 return packet;
             } finally {

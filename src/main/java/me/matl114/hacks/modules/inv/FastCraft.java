@@ -111,8 +111,7 @@ public class FastCraft extends BaseModule {
                 if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
                     return false;
                 }
-                mc.gameMode.handleContainerInput(
-                        screen.getMenu().containerId, slot, 1, ContainerInput.THROW, mc.player);
+                InvTasks.clickSlotAsync(slot, 1, ContainerInput.THROW);
                 return true;
             });
         } else {
@@ -120,8 +119,7 @@ public class FastCraft extends BaseModule {
                 if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
                     return false;
                 }
-                mc.gameMode.handleContainerInput(
-                        screen.getMenu().containerId, slot, 1, ContainerInput.QUICK_MOVE, mc.player);
+                InvTasks.clickSlotAsync(slot, 1, ContainerInput.QUICK_MOVE);
                 return true;
             });
         }

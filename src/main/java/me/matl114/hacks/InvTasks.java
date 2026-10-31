@@ -121,7 +121,6 @@ public class InvTasks {
                 && handler.getSlot(index).getItem().getCount() > 1
                 && getFastInv().enableLeftOne.get()) {
             //            Debug.info("quick move 1");
-            int syncId = handler.containerId;
             if (!handler.getCarried().isEmpty()) {
                 Debug.chat(Component.literal("[left 1] ")
                         .withStyle(ChatFormatting.RED)
@@ -154,8 +153,8 @@ public class InvTasks {
                 if (mc.gameMode == null || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
                     return false;
                 }
-                mc.gameMode.handleContainerInput(syncId, index, 0, ContainerInput.PICKUP, mc.player);
-                mc.gameMode.handleContainerInput(syncId, index, 1, ContainerInput.PICKUP, mc.player);
+                clickSlotAsync(index, 0, ContainerInput.PICKUP);
+                clickSlotAsync(index, 1, ContainerInput.PICKUP);
                 return true;
             });
             ItemStack sample = handler.getCarried();
@@ -178,7 +177,7 @@ public class InvTasks {
                                 || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
                             return false;
                         }
-                        mc.gameMode.handleContainerInput(syncId, fi, 0, ContainerInput.PICKUP, mc.player);
+                        clickSlotAsync(fi, 0, ContainerInput.PICKUP);
                         return true;
                     });
                     if (handler.getCarried().isEmpty()) {
@@ -191,7 +190,7 @@ public class InvTasks {
                     return false;
                 }
                 if (!handler.getCarried().isEmpty()) {
-                    mc.gameMode.handleContainerInput(syncId, index, 0, ContainerInput.PICKUP, mc.player);
+                    clickSlotAsync(index, 0, ContainerInput.PICKUP);
                 }
                 return true;
             });
@@ -219,9 +218,9 @@ public class InvTasks {
                 }
                 if (!handler.getCarried().isEmpty()) {
 
-                    mc.gameMode.handleContainerInput(handler.containerId, -999, 0, ContainerInput.PICKUP, mc.player);
+                    clickSlotAsync(-999, 0, ContainerInput.PICKUP);
                 }
-                mc.gameMode.handleContainerInput(handler.containerId, index, 0, ContainerInput.QUICK_MOVE, mc.player);
+                clickSlotAsync(index, 0, ContainerInput.QUICK_MOVE);
                 return true;
             });
         }
@@ -660,10 +659,10 @@ public class InvTasks {
 
     @ApiMethod
     public static void moveStackFromTo(AbstractContainerMenu handler, int fromIndex, int toSlot) {
-        mc.gameMode.handleContainerInput(handler.containerId, fromIndex, 0, ContainerInput.PICKUP, mc.player);
-        mc.gameMode.handleContainerInput(handler.containerId, toSlot, 0, ContainerInput.PICKUP, mc.player);
+        clickSlotAsync(fromIndex, 0, ContainerInput.PICKUP);
+        clickSlotAsync(toSlot, 0, ContainerInput.PICKUP);
         if (!handler.getCarried().isEmpty()) {
-            mc.gameMode.handleContainerInput(handler.containerId, fromIndex, 0, ContainerInput.PICKUP, mc.player);
+            clickSlotAsync(fromIndex, 0, ContainerInput.PICKUP);
         }
     }
 
@@ -696,49 +695,38 @@ public class InvTasks {
                     int distanceToHalf = Math.abs(halfTrans - amount);
                     int minDelta = Math.min(Math.min(amount, currentFromAmount - amount), distanceToHalf);
                     if (minDelta == amount) {
-                        mc.gameMode.handleContainerInput(
-                                handler.containerId, fromIndex, 0, ContainerInput.PICKUP, mc.player);
+                        clickSlotAsync(fromIndex, 0, ContainerInput.PICKUP);
                         for (var i = 0; i < amount; ++i) {
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, toSlot, 1, ContainerInput.PICKUP, mc.player);
+                            clickSlotAsync(toSlot, 1, ContainerInput.PICKUP);
                         }
                         if (!handler.getCarried().isEmpty()) {
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, fromIndex, 0, ContainerInput.PICKUP, mc.player);
+                            clickSlotAsync(fromIndex, 0, ContainerInput.PICKUP);
                         }
                         return;
                     } else if (minDelta == currentFromAmount - amount) {
-                        mc.gameMode.handleContainerInput(
-                                handler.containerId, fromIndex, 0, ContainerInput.PICKUP, mc.player);
+                        clickSlotAsync(fromIndex, 0, ContainerInput.PICKUP);
                         for (int i = 0; i < minDelta; ++i) {
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, fromIndex, 1, ContainerInput.PICKUP, mc.player);
+                            clickSlotAsync(fromIndex, 1, ContainerInput.PICKUP);
                         }
-                        mc.gameMode.handleContainerInput(
-                                handler.containerId, toSlot, 0, ContainerInput.PICKUP, mc.player);
+                        clickSlotAsync(toSlot, 0, ContainerInput.PICKUP);
                         return;
                     } else {
                         //
                         if (halfTrans <= amount) {
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, fromIndex, 1, ContainerInput.PICKUP, mc.player);
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, toSlot, 0, ContainerInput.PICKUP, mc.player);
+                            clickSlotAsync(fromIndex, 1, ContainerInput.PICKUP);
+                            clickSlotAsync(toSlot, 0, ContainerInput.PICKUP);
                             // 通过计算currentTo增长了多少来更新amount
                             amount = amount - currentTo.getItem().getCount() + currentToAmount;
                             currentToAmount = currentTo.getItem().getCount();
                             currentFromAmount = currentFrom.getItem().getCount();
                             continue;
                         } else {
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, fromIndex, 1, ContainerInput.PICKUP, mc.player);
+                            clickSlotAsync(fromIndex, 1, ContainerInput.PICKUP);
                             int trans = (currentFromAmount + 1) / 2 - amount;
                             for (int i = 0; i < trans; ++i) {
-                                mc.gameMode.handleContainerInput(
-                                        handler.containerId, fromIndex, 1, ContainerInput.PICKUP, mc.player);
+                                clickSlotAsync(fromIndex, 1, ContainerInput.PICKUP);
                             }
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, toSlot, 0, ContainerInput.PICKUP, mc.player);
+                            clickSlotAsync(toSlot, 0, ContainerInput.PICKUP);
                             return;
                         }
                     }

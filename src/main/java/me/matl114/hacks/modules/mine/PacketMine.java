@@ -9,6 +9,7 @@ import me.matl114.events.Listener;
 import me.matl114.events.annotations.Cancelable;
 import me.matl114.events.channels.EventChannelDispatcher;
 import me.matl114.events.impl.BlockBreak;
+import me.matl114.events.impl.BlockUpdate;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -22,6 +23,7 @@ import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.enums.GhostHandMode;
+import me.matl114.hacks.utils.enums.LegalMiningMode;
 import me.matl114.managers.*;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
@@ -33,14 +35,18 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.util.Util;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
 public class PacketMine extends BaseModule {
+    private static final long TICK_MINE_EVENT_WINDOW_MS = 50L;
+
     public static PacketMine INSTANCE;
 
     public PacketMine() {
@@ -104,14 +110,59 @@ public class PacketMine extends BaseModule {
 
     public final FlagRef swingHand = flagBuilder(packetMine.add("swing-hand")).build();
 
+    public final EnumRef<LegalMiningMode> legalMiningMode = builder(
+                    packetMine.add("legal-mining-mode"), LegalMiningMode.class)
+            .defaultValue(LegalMiningMode.NONE)
+            .build();
+
     BlockPos lastMinePos;
+    private BlockPos requestedBlock;
+    private boolean delayMine;
+    private long lastTickTime;
 
     @Override
     public void registerAll() {
         super.registerAll();
+        registerListener(Listener.getPreTick(), this::onPreTick);
         registerListener(Listener.getPreGameTick(), this::onTick);
         registerListener(Listener.getMineBlockAction(), this::onMineBlockAction);
+        registerListener(Listener.getBlockUpdateListener(), this::onBlockUpdate);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
+    }
+
+    private void clearRequest() {
+        requestedBlock = null;
+        delayMine = false;
+    }
+
+    private void refreshRequestedBlock() {
+        if (checkNull()
+                || (requestedBlock != null
+                        && (mc.level.getBlockState(requestedBlock).isAir()
+                                || !InteractExtra.INSTANCE.isWithinInteractRange(
+                                        mc.player.position(), requestedBlock)))) {
+            clearRequest();
+        }
+    }
+
+    private void onPreTick() {
+        refreshRequestedBlock();
+    }
+
+    public BlockPos getRequestedBlock() {
+        refreshRequestedBlock();
+        return requestedBlock;
+    }
+
+    private boolean wasRecentlyTicked() {
+        return lastTickTime > 0L && Util.getMillis() - lastTickTime <= TICK_MINE_EVENT_WINDOW_MS;
+    }
+
+    private void onBlockUpdate(Event<BlockUpdate> event) {
+        BlockUpdate update = event.context();
+        if (update.newState().isAir() && Objects.equals(requestedBlock, update.pos())) {
+            clearRequest();
+        }
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
@@ -147,7 +198,20 @@ public class PacketMine extends BaseModule {
 
     public void onTick() {
         if (isActive()) {
+            BlockPos request = getRequestedBlock();
             if (checkNull()) return;
+            if (delayMine) {
+                if (MineExtra.INSTANCE.getMiningPacketCooldown(0) == 0) {
+                    if (request != null) {
+                        if (!MineExtra.INSTANCE.handleMineMode(request, legalMiningMode.get())) {
+                            return;
+                        }
+                        PlayerInteractionAccess.of(mc.gameMode).sendStartBreakPacket(request);
+                    }
+                    delayMine = false;
+                }
+                return;
+            }
             if (eatingAbort.get() && mc.player.isUsingItem()) {
                 return;
             }
@@ -160,6 +224,7 @@ public class PacketMine extends BaseModule {
     }
 
     public void tickMine() {
+        lastTickTime = Util.getMillis();
         if (mc.gameMode != null && mc.player != null) {
             BlockPos pos = PlayerInteractionAccess.of(mc.gameMode).getCurrentMiningPos();
             if (pos == null) return;
@@ -181,6 +246,9 @@ public class PacketMine extends BaseModule {
                                 new BlockBreak(pos, BlockBreak.Stage.PRE, currentTool, progress), true, false);
                         packetMineAction.handleValue(eventPre);
                         if (!eventPre.isCancelled()) {
+                            if (!MineExtra.INSTANCE.handleMineMode(pos, legalMiningMode.get())) {
+                                return;
+                            }
                             if (groundDeceive.get() && !mc.player.onGround()) {
                                 boolean shouldExecute = true;
                                 if (groundOnlyWhenNoControl.get()
@@ -237,8 +305,38 @@ public class PacketMine extends BaseModule {
     }
 
     public void onMineBlockAction(Event<HitResult> event) {
-        if (event.context != null && event.context.getType() == HitResult.Type.BLOCK) {
+        if (event.context instanceof BlockHitResult hitResult) {
             lastMinePos = null;
+            BlockPos pos = hitResult.getBlockPos().immutable();
+            if (checkNull() || mc.level.getBlockState(pos).isAir()) {
+                clearRequest();
+                return;
+            }
+            if (Objects.equals(getCurrentMiningPos(), pos)) {
+                clearRequest();
+                return;
+            } else {
+                requestedBlock = pos;
+                getRequestedBlock();
+            }
+        }
+        if (!isActive() || !wasRecentlyTicked()) return;
+        if (event.context instanceof BlockHitResult hitResult) {
+            BlockPos pos = hitResult.getBlockPos().immutable();
+            if (!MineExtra.INSTANCE.handleMineMode(pos, legalMiningMode.get())) {
+                event.cancel();
+                delayMine = true;
+                return;
+            }
+        }
+        if (delayMine) {
+            event.cancel();
+            return;
+        } else if (event.context instanceof BlockHitResult
+                && requestedBlock != null
+                && !MineExtra.INSTANCE.isSafeCooldownThreshold()) {
+            event.cancel();
+            delayMine = true;
         }
     }
 

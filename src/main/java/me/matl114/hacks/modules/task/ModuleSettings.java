@@ -3,6 +3,7 @@ package me.matl114.hacks.modules.task;
 import java.util.List;
 import me.matl114.accessors.events.ChatHudAccess;
 import me.matl114.accessors.gui.TextFieldAccess;
+import me.matl114.hacks.utils.gui.ClassicClickGuiScreen;
 import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.DrawableWidget;
@@ -86,7 +87,7 @@ public class ModuleSettings extends BaseModule {
     }
 
     public boolean shouldNotExecuteInInput() {
-        if (ClientUtils.getScreen(mc) instanceof ClickGui.ClickGuiMainScreen clickGui) {
+        if (ClientUtils.getScreen(mc) instanceof ClassicClickGuiScreen clickGui) {
             return false;
         }
         var focused = ClientUtils.getScreen(mc).getFocused();

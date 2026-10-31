@@ -59,7 +59,9 @@ import org.joml.Vector3f;
  */
 public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
 
-    private static final Minecraft mc = Minecraft.getInstance();
+    private static Minecraft client() {
+        return Minecraft.getInstance();
+    }
 
     /** 26.2 无「无深度测试」枚举，用 ALWAYS_PASS + 不写深度表达等价语义。 */
     private static final DepthStencilState NO_DEPTH_TEST_STATE = new DepthStencilState(CompareOp.ALWAYS_PASS, false);
@@ -665,7 +667,7 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
             stack.translate(vec3d.x, vec3d.y, vec3d.z);
         }
         ItemStackRenderState state = new ItemStackRenderState();
-        mc.getItemModelResolver().updateForTopItem(state, itemStack, context, mc.level, null, -999);
+        client().getItemModelResolver().updateForTopItem(state, itemStack, context, client().level, null, -999);
         // 26.2: 直接提交到当前 collector，由 FeatureRenderDispatcher 统一渲染
         state.submit(stack, collector, displayInfo.light(), displayInfo.overlay(), displayInfo.outlineColor());
         if (!bl) {

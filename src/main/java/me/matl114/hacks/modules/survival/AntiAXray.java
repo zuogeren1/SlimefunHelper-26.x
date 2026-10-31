@@ -8,6 +8,7 @@ import me.matl114.hacks.MineTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.interact.InteractExtra;
+import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.utils.tasks.TimerExecutor;
 import me.matl114.hooks.ViaFabricPlusHooks;
@@ -97,12 +98,14 @@ public class AntiAXray extends BaseModule {
                     Direction dir =
                             Direction.getApproximateNearest(shouldFacing).getOpposite();
                     if (legal.get()) {
-                        mc.gameMode.startPrediction(mc.level, (sequence) -> {
-                            // use real direction
-                            return new ServerboundPlayerActionPacket(
-                                    ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, testPos, dir, sequence);
-                        });
-                        PlayerInteractionAccess.of(mc.gameMode).sendAbortBreakPacket();
+                        if (MineExtra.INSTANCE.getMiningPacketCooldown(1) <= 0) {
+                            mc.gameMode.startPrediction(mc.level, (sequence) -> {
+                                // use real direction
+                                return new ServerboundPlayerActionPacket(
+                                        ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, testPos, dir, sequence);
+                            });
+                            PlayerInteractionAccess.of(mc.gameMode).sendAbortBreakPacket();
+                        }
                     } else {
                         mc.gameMode.startPrediction(mc.level, (sequence) -> {
                             // use real direction

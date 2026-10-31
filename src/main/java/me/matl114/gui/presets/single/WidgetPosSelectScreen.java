@@ -37,8 +37,8 @@ public class WidgetPosSelectScreen extends GenericScreen {
     }
 
     @Override
-    protected void init() {
-        super.init();
+    protected void refreshWidgets() {
+        super.refreshWidgets();
         elementFactory
                 .createTitle(
                         () -> this.titleLabel,

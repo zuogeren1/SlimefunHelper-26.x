@@ -245,7 +245,7 @@ public class ConfigManager extends BaseModule {
     }
 
     public void onOpen() {
-        Tasks.scheduleDelayed(MainTasks::openConfigNewStyleScreen, 1);
+        Tasks.scheduleDelayed(ClickGui.INSTANCE::openConfigScreen, 1);
         Debug.chat(Component.literal("成功打开配置文件界面").withStyle(ChatFormatting.GREEN));
     }
 
@@ -331,14 +331,7 @@ public class ConfigManager extends BaseModule {
         String confirm = args.nextNonnullString();
         if ("--confirm".equals(confirm)) {
             if ("all".equalsIgnoreCase(configName)) {
-                for (var config : Config.REGISTRY) {
-                    for (var path : config.getVisiblePaths()) {
-                        var ref = config.get(Config.cutToPath(path));
-                        if (ref != null && ref.hasDefaultValue()) {
-                            ref.resetValue();
-                        }
-                    }
-                }
+                resetAll();
             } else {
                 var config = Config.REGISTRY.getValue(Identifier.tryParse(configName));
                 if (config == null) {
@@ -360,6 +353,17 @@ public class ConfigManager extends BaseModule {
                             .withStyle(ChatFormatting.BOLD)
                             .withStyle(style -> style.withClickEvent(ChatUtils.getSuggestCommand(
                                     MainCommand.MAIN_PREFIX + "config resetall " + configName + " --confirm"))));
+        }
+    }
+
+    public void resetAll() {
+        for (var config : Config.REGISTRY) {
+            for (var path : config.getVisiblePaths()) {
+                var ref = config.get(Config.cutToPath(path));
+                if (ref != null && ref.hasDefaultValue()) {
+                    ref.resetValue();
+                }
+            }
         }
     }
 

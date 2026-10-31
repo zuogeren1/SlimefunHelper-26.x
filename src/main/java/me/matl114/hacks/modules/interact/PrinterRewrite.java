@@ -115,6 +115,11 @@ public class PrinterRewrite extends BaseModule {
     public final FlagRef returnBlock =
             flagBuilder(litematicaPrinterRewrite.add("ghost-hand-swap-back")).build();
 
+    public final EnumRef<GhostHandMode> preferredGhostHand = builder(
+                    litematicaPrinterRewrite.add("preferred-ghost-hand-mode"), GhostHandMode.class)
+            .defaultValue(GhostHandMode.INV_SWAP)
+            .build();
+
     public final FlagRef autoSneak = builder(litematicaPrinterRewrite.add("auto-sneak"), Boolean.class)
             .defaultValue(true)
             .build();
@@ -385,7 +390,8 @@ public class PrinterRewrite extends BaseModule {
                     putCanNotPlace(pos);
                     return false;
                 }
-                Runnable callback = InvExtra.INSTANCE.swapItemToHand(idx, false, GhostHandMode.INV_SWAP);
+                Runnable callback = InvExtra.INSTANCE.swapItemToHand(
+                        idx, false, preferredGhostHand.get().getPreferredMode(idx));
                 if (callback == null) {
                     putCanNotPlace(pos);
                     return false;
@@ -463,7 +469,8 @@ public class PrinterRewrite extends BaseModule {
             if (rotation.flag() == mc.player.isShiftKeyDown()) {
                 var rot = rotation.val();
 
-                Runnable callback = InvExtra.INSTANCE.swapItemToHand(item, false, GhostHandMode.INV_SWAP);
+                Runnable callback = InvExtra.INSTANCE.swapItemToHand(
+                        item, false, preferredGhostHand.get().getPreferredMode(item));
                 if (callback != null) {
                     InteractionTasks.interactItem(InteractionHand.MAIN_HAND, rot.x, rot.y, true, swingHand.get());
                     suc = true;
@@ -632,7 +639,8 @@ public class PrinterRewrite extends BaseModule {
                         putCanNotPlace(pos);
                         return false;
                     }
-                    Runnable runnable = InvExtra.INSTANCE.swapItemToHand(re.index(), false, GhostHandMode.INV_SWAP);
+                    Runnable runnable = InvExtra.INSTANCE.swapItemToHand(
+                            re.index(), false, preferredGhostHand.get().getPreferredMode(re.index()));
                     if (runnable != null) {
                         if (!InteractionTasks.handlePlaceMode(mode.get(), hitResult.val(), InteractionHand.MAIN_HAND)) {
                             InteractionTasks.finishInteractGhostHand(mode.get(), runnable);
@@ -684,6 +692,7 @@ public class PrinterRewrite extends BaseModule {
 
     public void onPresetReload(Event<EventContainer<ModulePreset>> event) {
         ModulePreset preset = event.context.getValue();
+        preferredGhostHand.set(preset.getGhostHandMode(preferredGhostHand.get()));
         if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
         if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
         if (!preset.isOptionPreset()) {

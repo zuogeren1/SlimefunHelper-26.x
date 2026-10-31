@@ -12,22 +12,28 @@ import me.matl114.events.PacketManager;
 import me.matl114.events.RenderListener;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.packets.PacketStorage;
+import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.move.FloatingUtils;
 import me.matl114.hacks.modules.move.PlayerInputManager;
 import me.matl114.hacks.modules.move.RotationManager;
+import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.entity.EntityMovementStatus;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
+import me.matl114.managers.config.KeyBindRef;
+import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.RaycastUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.GamePacketTypes;
+import net.minecraft.network.protocol.game.ServerboundClientCommandPacket;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -83,6 +89,11 @@ public class Misc extends BaseModule {
     private final RenderCollector<List<Vec3>> parkourTrajectory = RenderCollectors.createLinesCollector();
     public final FlagRef parkourUsePacketQueue =
             flagBuilder(autoParkour.add("use-packet-queue")).defaultValue(false).build();
+
+    public final ModulePath tests = root.add("tests");
+    public final KeyBindRef test1 = hotkey(tests.add("test-1"), new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.wrapAsHandler(this::runTest1))
+            .build();
 
     private static final int PARKOUR_COLOR = Color.CYAN.getRGB();
     private static final int JUMP_COLOR = Color.GREEN.getRGB();
@@ -1139,5 +1150,20 @@ public class Misc extends BaseModule {
         if (!autoParkourEnable.get()) return;
         parkourTarget.render3D(event.context.stack(), event.context.partialTicks());
         parkourTrajectory.render3D(event.context.stack(), event.context.partialTicks());
+    }
+
+    public void runTest1() {
+        if (checkNull()) return;
+        ChatTasks.sayMessage("/suicide", true);
+        mc.getConnection().send(new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));
+        mc.gameMode.handleContainerInput(
+                0,
+                mc.player
+                        .inventoryMenu
+                        .findSlot(mc.player.getInventory(), 0)
+                        .getAsInt(),
+                0,
+                ContainerInput.THROW,
+                mc.player);
     }
 }

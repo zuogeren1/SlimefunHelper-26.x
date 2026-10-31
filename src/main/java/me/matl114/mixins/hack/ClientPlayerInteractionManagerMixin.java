@@ -267,7 +267,6 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
         if (resetProgress) {
             resetLocalMiningProgress();
         }
-        this.destroyTicks = 0.0F;
         this.destroyDelay =
                 MineExtra.INSTANCE.cooldownOverride.get() ? MineExtra.INSTANCE.getMiningPacketCooldown(0) : 5;
     }
@@ -496,6 +495,24 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
         }
     }
 
+    @WrapOperation(
+            method = "continueDestroyBlock",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startDestroyBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/core/Direction;)Z"))
+    private boolean fastbreakAfterAttackBlock(
+            MultiPlayerGameMode instance, BlockPos pos, Direction direction, Operation<Boolean> original) {
+        boolean attackStarted = original.call(instance, pos, direction);
+        if (attackStarted
+                && sameDestroyTarget(pos)
+                && breakIfComplete(pos, this.minecraft.level.getBlockState(pos), direction)) {
+            return true;
+        }
+        return attackStarted;
+    }
+
     //
     // fixme: fix
     @Inject(
@@ -615,38 +632,11 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
             method = "startDestroyBlock",
             at =
                     @At(
-                            value = "INVOKE",
-                            target =
-                                    "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startPrediction(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/client/multiplayer/prediction/PredictiveAction;)V",
-                            ordinal = 0,
-                            shift = At.Shift.AFTER),
-            locals = LocalCapture.CAPTURE_FAILSOFT)
-    public void instaBreakPacket(
-            BlockPos pos,
-            Direction direction,
-            CallbackInfoReturnable<Boolean> cir,
-            net.minecraft.world.level.block.state.BlockState blockState) {
-        MineExtra.INSTANCE.onStartingMine(pos, Float.MAX_VALUE, true);
-    }
-
-    @Inject(
-            method = "startDestroyBlock",
-            at =
-                    @At(
                             value = "FIELD",
                             target = "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;destroyDelay:I",
-                            shift = At.Shift.BEFORE),
-            locals = LocalCapture.CAPTURE_FAILSOFT,
-            cancellable = true)
-    public void fastBreakCreative(
-            BlockPos pos,
-            Direction direction,
-            CallbackInfoReturnable<Boolean> cir,
-            net.minecraft.world.level.block.state.BlockState blockState) {
+                            shift = At.Shift.AFTER))
+    public void creativeCooldownOverride(BlockPos pos, Direction direction, CallbackInfoReturnable<Boolean> cir) {
         applyPostStopState(false);
-        if (MineExtra.INSTANCE.quickMine.get()) {
-            cir.setReturnValue(true);
-        }
     }
 
     @WrapOperation(
@@ -666,52 +656,6 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
     }
 
     @Inject(
-            method = "startDestroyBlock",
-            at =
-                    @At(
-                            value = "INVOKE",
-                            target =
-                                    "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startPrediction(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/client/multiplayer/prediction/PredictiveAction;)V",
-                            ordinal = 1,
-                            shift = At.Shift.AFTER),
-            locals = LocalCapture.CAPTURE_FAILSOFT)
-    public void earlyBreakPacket(
-            BlockPos pos,
-            Direction direction,
-            CallbackInfoReturnable<Boolean> cir,
-            net.minecraft.world.level.block.state.BlockState blockState) {
-        float speed;
-        var usingTool = MineExtra.INSTANCE.getGhostHandMiningTool(blockState);
-        float playerSpeed = WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
-                this.minecraft.player, blockState, usingTool.val());
-        speed = WorldUtils.calcBlockBreakingDelta(blockState, this.minecraft.level, pos, playerSpeed);
-
-        MineExtra mineExtra = MineExtra.INSTANCE;
-        mineExtra.onStartingMine(pos, speed, false);
-        if (!mineExtra.shouldUseQuickMine() || blockState.isAir()) {
-            return;
-        }
-        if (mineExtra.shouldTriggerEarlyStop(speed)) {
-            DisablerManager.INSTANCE.flushACPlaceBreakQueue();
-            GhostHandMode preferred = MineExtra.INSTANCE.ghostHandPreferredMode.get();
-            GhostHandMode modeSelect = preferred.isAcceptable(usingTool.index()) ? preferred : GhostHandMode.INV_SWAP;
-            Runnable fastbreakCallback = InvExtra.INSTANCE.swapItemToHand(usingTool.index(), false, modeSelect);
-            AttributeUtils.updateAttribute(this.minecraft.player);
-            clearBreakingState();
-            this.startPrediction(Minecraft.getInstance().level, (sequence) -> {
-                this.destroyBlock(pos);
-                return new ServerboundPlayerActionPacket(
-                        ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, pos, direction, sequence);
-            });
-            if (fastbreakCallback != null) {
-                fastbreakCallback.run();
-            }
-            mineExtra.onPostStopMiningFastBreak(pos, speed, this.destroyProgress);
-            applyPostStopState(!mineExtra.optimizeOneBlock.get());
-        }
-    }
-
-    @Inject(
             method = "continueDestroyBlock",
             at =
                     @At(
@@ -719,25 +663,9 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                             target =
                                     "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startPrediction(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/client/multiplayer/prediction/PredictiveAction;)V",
                             ordinal = 0,
-                            shift = At.Shift.AFTER),
-            cancellable = true,
-            locals = LocalCapture.CAPTURE_FAILSOFT)
-    public void instaBreakPacketWhenUpdate(BlockPos pos, Direction direction, CallbackInfoReturnable<Boolean> cir) {
-        MineExtra.INSTANCE.onStartingMine(pos, Float.MAX_VALUE, true);
-        applyPostStopState(false);
-    }
-
-    @Inject(
-            method = "continueDestroyBlock",
-            at =
-                    @At(
-                            value = "INVOKE",
-                            target =
-                                    "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startPrediction(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/client/multiplayer/prediction/PredictiveAction;)V",
-                            ordinal = 1,
                             shift = At.Shift.AFTER))
-    private void onCommonBlockBreak(BlockPos pos, Direction direction, CallbackInfoReturnable<Boolean> cir) {
-        MineExtra.INSTANCE.onPostStopMiningLegally(pos);
+    public void instaBreakPacketWhenUpdate(BlockPos pos, Direction direction, CallbackInfoReturnable<Boolean> cir) {
+        applyPostStopState(false);
     }
 
     //    @Inject(method = "getReachDistance",at = @At(value = "HEAD"),cancellable = true)

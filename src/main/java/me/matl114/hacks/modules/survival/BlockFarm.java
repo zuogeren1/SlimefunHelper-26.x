@@ -24,6 +24,7 @@ import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.utils.render.RenderCollector;
+import me.matl114.versioned.api.VItem;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -70,9 +71,6 @@ public class BlockFarm extends BaseModule {
     public final NBTRef<EntrySet<Item>> whiteList = builder(root.add("white-list"), EntrySet.<Item>parameter())
             .defaultValue(new EntrySet<>(BuiltInRegistries.ITEM, List.of(Items.ENDER_CHEST, Items.BOOKSHELF)))
             .build();
-
-    public final FlagRef swingHand =
-            builder(root.add("swing-hand"), Boolean.class).defaultValue(true).build();
 
     public final FlagRef render = flagBuilder(root.add("render")).build();
 
@@ -165,9 +163,15 @@ public class BlockFarm extends BaseModule {
     public void tickMineAndPlace(BlockItem blockItem) {
         int multiply = mul.get();
         Runnable callback = null;
+        ItemStack currentTool = mc.player.getItemInHand(InteractionHand.MAIN_HAND);
+        boolean isTool = VItem.getInstance().isTool(currentTool);
         var access = PlayerInteractionAccess.of(mc.gameMode);
 
         for (var i = 0; i < multiply; ++i) {
+            if (isTool && callback != null) {
+                callback.run();
+                callback = null;
+            }
             if (access.breakIfComplete()) {
                 if (mc.player.getItemInHand(InteractionHand.MAIN_HAND).getItem() != blockItem) {
                     if (callback != null) {

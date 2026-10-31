@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
+import me.matl114.accessors.interfaces.MetadataHolder;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.BlockUpdate;
@@ -32,6 +33,7 @@ import me.matl114.utils.InteractUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.MathUtils;
 import me.matl114.utils.ScreenUtils;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.item.ItemStack;
@@ -43,6 +45,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 
 public class AntiReplenish extends BaseModule {
+    private static final String KEY_NEWLY_PLACED_SHULKER_BOX =
+            "slimefunhelper:anti_replenish/newly_placed_shulker_box";
+
     public AntiReplenish() {
         super("AntiReplenish");
         bindFlag(enable);
@@ -59,6 +64,17 @@ public class AntiReplenish extends BaseModule {
             .validator(Configs.doubleRange(0, 100))
             .updateListener(s -> blockSeq = MathUtils.create3DPointListAroundPlayer(s))
             .build();
+
+    public final FlagRef onlyWhenEnemyNearby =
+            flagBuilder(root.add("only-when-enemy-nearby")).build();
+
+    public final DoubleRef enemyDistance = doubleBuilder(root.add("enemy-distance"))
+            .defaultValue(8.0D)
+            .validator(Configs.doubleRange(0, 100))
+            .build();
+
+    public final FlagRef onlyNewPlacedBoxes =
+            flagBuilder(root.add("only-new-boxes")).build();
 
     public final IntRef delay = intBuilder(root.add("delay"))
             .defaultValue(10)
@@ -121,6 +137,11 @@ public class AntiReplenish extends BaseModule {
     public void onPreHandleEvent() {
         if (enable.get()) {
             cachedStolenPoses.removeIf(s -> !(mc.level.getBlockState(s).getBlock() instanceof ShulkerBoxBlock));
+            if (onlyWhenEnemyNearby.get()
+                    && TargetSelector.INSTANCE.getAttackableEntities(enemyDistance.get()).stream()
+                            .noneMatch(Player.class::isInstance)) {
+                return;
+            }
             if (eatingAbort.get() && mc.player.isUsingItem()) return;
             if (pendingWaitingScreen && !zeroTick.get()) {
                 return;
@@ -132,6 +153,10 @@ public class AntiReplenish extends BaseModule {
                 if (!cachedStolenPoses.contains(testPos)
                         && mc.level.getBlockState(testPos).getBlock() instanceof ShulkerBoxBlock
                         && mc.level.getBlockEntity(testPos) instanceof ShulkerBoxBlockEntity be
+                        && (!onlyNewPlacedBoxes.get()
+                                || (be instanceof MetadataHolder holder
+                                        && !holder.isMetaEmpty()
+                                        && holder.getMetadata().get(this, KEY_NEWLY_PLACED_SHULKER_BOX) != null))
                         && (!ChestHistory.INSTANCE.isShulkerBoxPlacedBySelf(testPos) && !doesShulkerContainsAnyData(be))
                         && !mc.player.isSecondaryUseActive()
                         && InteractUtils.canShulkerOpen(mc.level, testPos, mc.level.getBlockState(testPos))
@@ -208,10 +233,19 @@ public class AntiReplenish extends BaseModule {
     }
 
     public void onBlockUpdate(Event<BlockUpdate> event) {
+        BlockUpdate update = event.context();
+        if (onlyNewPlacedBoxes.get()
+                && !(update.oldState().getBlock() instanceof ShulkerBoxBlock)
+                && update.newState().getBlock() instanceof ShulkerBoxBlock
+                && update.world().hasChunk(update.pos().getX() >> 4, update.pos().getZ() >> 4)
+                && update.world().getBlockEntity(update.pos()) instanceof ShulkerBoxBlockEntity blockEntity
+                && blockEntity instanceof MetadataHolder holder) {
+            holder.getMetadata().put(this, KEY_NEWLY_PLACED_SHULKER_BOX, true);
+        }
         if (enable.get()) {
-            if (event.context.oldState().getBlock() instanceof ShulkerBoxBlock
-                    && !(event.context.newState().getBlock() instanceof ShulkerBoxBlock)) {
-                cachedStolenPoses.remove(event.context.pos());
+            if (update.oldState().getBlock() instanceof ShulkerBoxBlock
+                    && !(update.newState().getBlock() instanceof ShulkerBoxBlock)) {
+                cachedStolenPoses.remove(update.pos());
             }
         }
     }

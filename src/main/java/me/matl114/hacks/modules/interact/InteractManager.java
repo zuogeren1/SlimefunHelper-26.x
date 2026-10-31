@@ -141,6 +141,7 @@ public class InteractManager extends BaseModule {
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
         ModulePreset preset = event.context.getValue();
+        ghostHand.set(preset.getGhostHandMode(ghostHand.get()));
         if (preset.isSwingPlacePreset()) swing.set(preset.getSwingPlace(swing.get()));
     }
 

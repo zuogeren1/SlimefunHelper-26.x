@@ -26,6 +26,7 @@ import me.matl114.hacks.utils.entity.FakePlayerEntity;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
+import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -55,13 +56,23 @@ import net.minecraft.world.level.block.RespawnAnchorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.apache.commons.lang3.stream.Streams;
 
 public class FakePlayer extends BaseModule {
     public FakePlayer() {
         super("FakePlayer");
+        bindFlag(enable);
     }
 
     public final ModulePath root = makePath(Configs.EXTRA_CONFIG, "other.fake-player");
+
+    public final FlagRef enable = flagBuilder(root.addEnable()).hideConfig().build();
+
+    public final KeyBindRef hotkey =
+            toggleHotkey(root.addHotkey(), new MultiKeyBind(), root.addEnable()).build();
+
+    public final FlagRef removeIfPresent =
+            flagBuilder(root.add("remove-if-present"), true).build();
 
     public final StringRef name = builder(root.add("name"), StringRef.TYPE)
             .defaultValue("juhaoshabi666")
@@ -113,6 +124,35 @@ public class FakePlayer extends BaseModule {
                 this::onExplode,
                 Integer.MIN_VALUE);
         registerListener(Listener.getPreGameTick(), this::onTickKinetic);
+    }
+
+    @Override
+    public void onEnableModule() {
+        super.onEnableModule();
+        if (!removeIfPresent.get()) enable.set(false);
+        if (checkNull()) {
+            return;
+        }
+        if (removeIfPresent.get() && Streams.of(mc.level.entitiesForRendering()).anyMatch(s -> s instanceof FakePlayerEntity)) {
+            Streams.of(mc.level.entitiesForRendering())
+                    .filter(s -> s instanceof FakePlayerEntity)
+                    .map(FakePlayerEntity.class::cast)
+                    .forEach(this::removeFakePlayer);
+            return;
+        }
+        createNewFakePlayer();
+    }
+
+    @Override
+    public void onDisableModule() {
+        super.onDisableModule();
+        if (removeIfPresent.get()) {
+            Streams.of(mc.level.entitiesForRendering())
+                    .filter(s -> s instanceof FakePlayerEntity)
+                    .map(FakePlayerEntity.class::cast)
+                    .forEach(this::removeFakePlayer);
+            return;
+        }
     }
 
     @Override

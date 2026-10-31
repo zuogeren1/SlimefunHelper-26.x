@@ -14,6 +14,9 @@ import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.InteractUtils;
 import me.matl114.utils.MathUtils;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.HasCustomInventoryScreen;
+import net.minecraft.world.entity.ItemSteerable;
+import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.vehicle.VehicleEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
@@ -50,7 +53,7 @@ public class AutoRide extends BaseModule {
                 cd1 = 0;
                 double reach = CombatExtra.INSTANCE.getAttackRange();
                 AABB box = mc.player.getBoundingBox().inflate(reach + 3, reach + 3, reach + 3);
-                var entites = mc.level.getEntities(mc.player, box, re -> re instanceof VehicleEntity);
+                var entites = mc.level.getEntities(mc.player, box, this::isRideable);
                 Entity selected = null;
                 for (var re : entites) {
                     if (re == lastEntity) {
@@ -72,5 +75,12 @@ public class AutoRide extends BaseModule {
                 }
             }
         }
+    }
+
+    private boolean isRideable(Entity entity) {
+        return entity instanceof VehicleEntity
+                || entity instanceof HasCustomInventoryScreen
+                || entity instanceof ItemSteerable
+                || entity instanceof HappyGhast;
     }
 }

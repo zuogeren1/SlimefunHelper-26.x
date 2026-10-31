@@ -589,8 +589,8 @@ public class ServerScanner extends BaseModule {
         DrawableWidget outputWidget = createOutputWidget();
         var screen = new GenericScreen(Component.literal("Server Scanner"), 400, 360) {
             @Override
-            protected void init() {
-                super.init();
+            protected void refreshWidgets() {
+                super.refreshWidgets();
                 SubScreenWidget delegate = new SubScreenWidget(this.x, this.y, 400, 360);
                 delegate.addDrawableChild(inputWidget);
                 delegate.addDrawableChild(selectWidget);
@@ -643,7 +643,7 @@ public class ServerScanner extends BaseModule {
                                     lastRenderTick.put(ip, Tasks.getTick());
                                 }
                             }
-                            if (element.isMouseOver(mouseX, mouseY)) {
+                            if (element.isOver(mouseX, mouseY)) {
                                 RenderHandler.drawHighlightFrame(
                                         context,
                                         0,
@@ -793,7 +793,7 @@ public class ServerScanner extends BaseModule {
                         return true;
                     }
                 })
-                .setHighLightColor((el, h) -> ((DrawableWidget) el).isFocused() ? CommonColors.WHITE : null)
+                .setHighLightColor((el, h) -> ((DrawableWidget) el).isSelected() ? CommonColors.WHITE : null)
                 .setShowTooltips(false);
     }
 

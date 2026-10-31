@@ -108,8 +108,7 @@ public class FastInv extends BaseModule {
                                     return false;
                                 }
 
-                                mc.gameMode.handleContainerInput(
-                                        handler.containerId, idx, 0, ContainerInput.QUICK_MOVE, mc.player);
+                                InvTasks.clickSlotAsync(idx, 0, ContainerInput.QUICK_MOVE);
                                 return true;
                             });
                         }
@@ -159,13 +158,11 @@ public class FastInv extends BaseModule {
                             if (!ItemStack.isSameItem(stack, cleanedStack)
                                     || !ItemStack.isSameItemSameComponents(
                                             ItemStackUtils.getCleanedItem(stack, false, false), cleanedStack)) {
-                                mc.gameMode.handleContainerInput(
-                                        handler.containerId, index, 0, ContainerInput.PICKUP, mc.player);
-                                mc.gameMode.handleContainerInput(
-                                        handler.containerId, -999, 0, ContainerInput.PICKUP, mc.player);
+                                InvTasks.clickSlotAsync(index, 0, ContainerInput.PICKUP);
+                                InvTasks.clickSlotAsync(-999, 0, ContainerInput.PICKUP);
                                 return true;
                             }
-                            mc.gameMode.handleContainerInput(handler.containerId, -999, 0, ContainerInput.PICKUP, mc.player);
+                            InvTasks.clickSlotAsync(-999, 0, ContainerInput.PICKUP);
                             return true;
                         });
                         for (var re = 0; re < slots.size(); re++) {
@@ -183,8 +180,7 @@ public class FastInv extends BaseModule {
                                     return false;
                                 }
 
-                                mc.gameMode.handleContainerInput(
-                                        handler.containerId, idx, 1, ContainerInput.THROW, mc.player);
+                                InvTasks.clickSlotAsync(idx, 1, ContainerInput.THROW);
                                 return true;
                             });
                         }
@@ -212,8 +208,7 @@ public class FastInv extends BaseModule {
                         }
                         ItemStack stack = slot.getItem();
                         if (enableEmptyClick.get() || !stack.isEmpty()) {
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, index, 1, ContainerInput.QUICK_MOVE, mc.player);
+                            InvTasks.clickSlotAsync(index, 1, ContainerInput.QUICK_MOVE);
                             return true;
                         } else {
                             return false;
@@ -240,8 +235,7 @@ public class FastInv extends BaseModule {
                         }
                         ItemStack stack = slot.getItem();
                         if (enableEmptyClick.get() || !stack.isEmpty()) {
-                            mc.gameMode.handleContainerInput(
-                                    handler.containerId, index, 1, ContainerInput.QUICK_MOVE, mc.player);
+                            InvTasks.clickSlotAsync(index, 1, ContainerInput.QUICK_MOVE);
                             return true;
                         } else {
                             return false;

@@ -165,6 +165,7 @@ import net.minecraft.world.level.block.SuspiciousEffectHolder;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
+import net.minecraft.world.level.block.piston.MovingPistonBlock;
 import net.minecraft.world.level.block.state.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
@@ -193,7 +194,7 @@ public class InteractUtils {
         BlockPlaceContext placement =
                 new BlockPlaceContext(player, InteractionHand.MAIN_HAND, new ItemStack(blockItem), blockHitResult);
         placement = blockItem.updatePlacementContext(placement);
-        return blockItem.getPlacementState(placement);
+        return placement == null ? null : blockItem.getPlacementState(placement);
     }
 
     @Nullable
@@ -408,7 +409,9 @@ public class InteractUtils {
             return isInteractableRespawnAnchor(state, interactStack);
         }
         if (block instanceof LecternBlock) {
-            return state.hasProperty(LecternBlock.HAS_BOOK) && state.getValue(LecternBlock.HAS_BOOK);
+            // With a nonempty hand, even an empty lectern consumes the default block action.
+            return !interactStack.isEmpty()
+                    || (state.hasProperty(LecternBlock.HAS_BOOK) && state.getValue(LecternBlock.HAS_BOOK));
         }
         if (block instanceof FenceBlock) {
             return canFenceConsume(world, pos, player);
@@ -521,6 +524,19 @@ public class InteractUtils {
                         || entry instanceof ButtonBlock
                         || entry instanceof RedStoneOreBlock
                         || entry instanceof NoteBlock
+                        || entry instanceof ChiseledBookShelfBlock
+                        || entry instanceof ShelfBlock
+                        || entry instanceof EnchantingTableBlock
+                        || entry instanceof CopperGolemStatueBlock
+                        || entry instanceof ComparatorBlock
+                        || entry instanceof RepeaterBlock
+                        || entry instanceof DaylightDetectorBlock
+                        || entry instanceof RedStoneWireBlock
+                        || entry instanceof SweetBerryBushBlock
+                        || entry instanceof CaveVinesBlock
+                        || entry instanceof CaveVinesPlantBlock
+                        || entry instanceof VaultBlock
+                        || entry instanceof MovingPistonBlock
                         || entry instanceof LightBlock
                         || entry instanceof DragonEggBlock
                         || entry instanceof ChestBlock

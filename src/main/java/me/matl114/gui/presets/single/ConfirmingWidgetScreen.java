@@ -25,18 +25,18 @@ public class ConfirmingWidgetScreen extends ConfirmingBigScreen {
     }
 
     protected int getCenteredX() {
-        return ((this.width - this.currentWidget.getWidth()) / 2) - this.currentWidget.getX();
+        return ((this.width - this.currentWidget.width()) / 2) - this.currentWidget.x();
     }
 
     protected int getCenteredY() {
         return CONTENT_START_Y
-                + ((content_end_y - CONTENT_START_Y - this.currentWidget.getHeight()) / 2)
-                - this.currentWidget.getY();
+                + ((content_end_y - CONTENT_START_Y - this.currentWidget.height()) / 2)
+                - this.currentWidget.y();
     }
 
     @Override
-    protected void init() {
-        super.init();
+    protected void refreshWidgets() {
+        super.refreshWidgets();
         currentWidget = widget.apply(this);
         var sbscreen = new DynamicSubScreenWidget(
                 ValueAccessor.ofIgnore(this::getCenteredX), ValueAccessor.ofIgnore(this::getCenteredY));

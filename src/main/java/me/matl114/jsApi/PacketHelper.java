@@ -132,7 +132,8 @@ public class PacketHelper {
                                 .copy(),
                         mc.level.getBlockState(hitResult.getBlockPos()),
                         InteractionResult.SUCCESS,
-                        Optional.empty()));
+                        Optional.empty(),
+                        mc.level.getBlockState(hitResult.getBlockPos())));
             }
             return packet;
         });

@@ -211,6 +211,7 @@ public class Scaffold extends BaseModule {
                         legalMode.get().canMultiRotPlace())
                 ? mul.get()
                 : 1;
+        cnt = Math.min(cnt, path.size());
         int ccc = 0;
         for (var i = 0; i < cnt; ++i) {
             BlockPos next = path.get(i);
@@ -296,6 +297,7 @@ public class Scaffold extends BaseModule {
 
     public void onPresetReload(Event<EventContainer<ModulePreset>> event) {
         ModulePreset preset = event.context.getValue();
+        ghostHand.set(preset.getGhostHandMode(ghostHand.get()));
         if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
         if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
         if (!preset.isOptionPreset()) {

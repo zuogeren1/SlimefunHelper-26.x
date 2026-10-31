@@ -182,6 +182,10 @@ public class PlayerStateManager extends BaseModule {
                 this::onMove,
                 Integer.MAX_VALUE);
         registerListener(
+                Listener.getPacketPoint().getChannel(ServerboundMoveVehiclePacket.class),
+                this::onVehicleMove,
+                Integer.MAX_VALUE);
+        registerListener(
                 Listener.getPacketPostHandlePoint().getChannel(ClientboundSetEntityMotionPacket.class),
                 this::onPostPlayerVelocityUpdate,
                 Integer.MAX_VALUE);
@@ -333,6 +337,18 @@ public class PlayerStateManager extends BaseModule {
                 updateAFK();
             }
         }
+    }
+
+    public void onVehicleMove(Event<ServerboundMoveVehiclePacket> event) {
+        if (event.isCancelled() || mc.player == null || !mc.player.isPassenger()) return;
+
+        Entity vehicle = mc.player.getRootVehicle();
+        Vec3 passengerOffset = mc.player.position().subtract(vehicle.position());
+        Vec3 playerPosition = event.context.position().add(passengerOffset);
+        lastX = playerPosition.x;
+        lastY = playerPosition.y;
+        lastZ = playerPosition.z;
+        fallDistance = 0.0D;
     }
 
     public void onPostPlayerPositionLook(Event<ClientboundPlayerPositionPacket> eventPositionLook) {
@@ -590,6 +606,11 @@ public class PlayerStateManager extends BaseModule {
     private int cooldownInvSummary = 0;
 
     public void handleTick() {
+        if (mc.player.isPassenger()) {
+            lastX = mc.player.getX();
+            lastY = mc.player.getY();
+            lastZ = mc.player.getZ();
+        }
         // base flag ticks;
         lastInLava = mc.player.isInLava();
         lastInWater = checkRegionFluid(FluidTags.WATER);

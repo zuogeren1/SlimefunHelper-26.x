@@ -76,12 +76,7 @@ public class AutoStore extends BaseModule {
                                             || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
                                         return false;
                                     }
-                                    mc.gameMode.handleContainerInput(
-                                            handledScreen.getMenu().containerId,
-                                            slot,
-                                            0,
-                                            ContainerInput.PICKUP,
-                                            player);
+                                    InvTasks.clickSlotAsync(slot, 0, ContainerInput.PICKUP);
                                     return true;
                                 });
                             } else {
@@ -90,8 +85,7 @@ public class AutoStore extends BaseModule {
                                             || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
                                         return false;
                                     }
-                                    mc.gameMode.handleContainerInput(
-                                            handledScreen.getMenu().containerId, slot, 0, ContainerInput.THROW, player);
+                                    InvTasks.clickSlotAsync(slot, 0, ContainerInput.THROW);
                                     return true;
                                 });
                             }
@@ -107,8 +101,8 @@ public class AutoStore extends BaseModule {
                                         || InvTasks.getCurrentServerScreenHandler(mc.player) != handler) {
                                     return false;
                                 }
-                                mc.gameMode.handleContainerInput(handledScreen.getMenu().containerId, i, 1, ContainerInput.PICKUP, player);
-                                mc.gameMode.handleContainerInput(handledScreen.getMenu().containerId, slot, 0, ContainerInput.PICKUP, player);
+                                InvTasks.clickSlotAsync(i, 1, ContainerInput.PICKUP);
+                                InvTasks.clickSlotAsync(slot, 0, ContainerInput.PICKUP);
                                 return true;
                             });
                             return;
