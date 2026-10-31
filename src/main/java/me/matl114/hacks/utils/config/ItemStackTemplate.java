@@ -24,7 +24,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
@@ -57,10 +56,20 @@ public final class ItemStackTemplate implements NBTParsable<ItemStackTemplate> {
         this.nbt = nbt.copy();
     }
 
+    /**
+     * 26.2 起 {@code new ItemStack(Item)} 会读数据组件注册表，而本类是在模块构造期（配置默认值）
+     * 被 new 的，那时 Components 还没绑定，会抛 {@code NullPointerException: Components not bound yet}。
+     * 这里只写 {@code id} 字段：{@code ItemStack.MAP_CODEC} 的 {@code count} 缺省为 1、
+     * {@code components} 缺省为空 patch，因此二者解码结果等价。
+     */
     public ItemStackTemplate(Item item) {
-        this((CompoundTag) ItemStack.CODEC
-                .encodeStart(NbtOps.INSTANCE, new ItemStack(item))
-                .getOrThrow());
+        this(withItemId(item));
+    }
+
+    private static CompoundTag withItemId(Item item) {
+        CompoundTag tag = new CompoundTag();
+        tag.putString("id", BuiltInRegistries.ITEM.getKey(item).toString());
+        return tag;
     }
 
     private ItemStackTemplate(ItemStack itemStack) {
