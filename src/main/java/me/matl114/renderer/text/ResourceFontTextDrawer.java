@@ -36,14 +36,21 @@ public class ResourceFontTextDrawer extends VanillaTextDrawer {
     }
 
     public ResourceFontTextDrawer(Font delegate, Identifier fontId) {
+        this(delegate, fontId, fontExists(fontId));
+    }
+
+    /**
+     * @param available 调用方已经自己把这份字体装好了（例如本地 ttf 的 FontSet），跳过资源存在性检查。
+     */
+    protected ResourceFontTextDrawer(Font delegate, Identifier fontId, boolean available) {
         super(delegate);
         this.fontId = fontId;
         // 26.2: FontManager 对不认识的字体 id 直接回落到 minecraft:missing（每个字符都是空心方块），
-        // 而自定义字体的装载链（尤其 SYSTEM 风格的本地 ttf）当前版本还没落地，所以先确认资源真的存在；
-        // 不存在就按原版字体绘制——宁可丢自定义字体，也不能整屏不可读。
-        this.available = fontExists(fontId);
-        this.fontStyle = this.available ? Style.EMPTY.withFont(new FontDescription.Resource(fontId)) : Style.EMPTY;
-        if (!this.available && WARNED_IDS.add(fontId)) {
+        // 所以默认构造器要先确认资源真的存在；不存在就按原版字体绘制——
+        // 宁可丢自定义字体，也不能整屏不可读。
+        this.available = available;
+        this.fontStyle = available ? Style.EMPTY.withFont(new FontDescription.Resource(fontId)) : Style.EMPTY;
+        if (!available && WARNED_IDS.add(fontId)) {
             Debug.info("Font " + fontId + " is not loaded, falling back to the vanilla font");
         }
     }

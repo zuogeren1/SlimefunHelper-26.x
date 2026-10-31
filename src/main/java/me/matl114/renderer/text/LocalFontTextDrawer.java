@@ -1,6 +1,8 @@
 package me.matl114.renderer.text;
 
+import com.mojang.blaze3d.font.GlyphProvider;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -13,38 +15,71 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 import me.matl114.plugins.internal.MainPlugin;
+import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GlyphSource;
+import net.minecraft.client.gui.font.FontOption;
+import net.minecraft.client.gui.font.FontSet;
+import net.minecraft.client.gui.font.GlyphStitcher;
+import net.minecraft.client.gui.font.glyphs.EffectGlyph;
+import net.minecraft.client.gui.font.providers.GlyphProviderDefinition;
+import net.minecraft.client.gui.font.providers.TrueTypeGlyphProviderDefinition;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FontDescription;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.PackLocationInfo;
+import net.minecraft.server.packs.PackResources;
+import net.minecraft.server.packs.PackType;
+import net.minecraft.server.packs.metadata.MetadataSectionType;
+import net.minecraft.server.packs.repository.PackSource;
+import net.minecraft.server.packs.resources.IoSupplier;
+import net.minecraft.server.packs.resources.Resource;
+import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.Util;
 
 /**
  * 本地 ttf 字体。
  *
- * <p>26.x 把字体内部管线重写过：{@code FontStorage} 变成 {@code FontSet}，字形图集走
- * {@code GlyphStitcher}，装载一个 ttf 还要模拟整套 {@code PackResources}/{@code ResourceManager}。
- * 这条链路需要单独按 26.2 源码逐层核对，暂不在本批次落地——本类先按资源字体
- * {@link #FONT_LOCATION} 走常规字体解析，扫描/查找本地字体的能力（纯 java）保持可用。
+ * <p>26.x 的一份字体就是一个 {@code FontSet}（字形图集交给 {@code GlyphStitcher}），而 ttf 装载器
+ * {@code TrueTypeGlyphProviderDefinition} 只吃 {@code ResourceManager}。这里按 {@code FontManager}
+ * 造 FontSet 的三步等价写法自己拼一套：先用只提供本地 ttf 的 {@code ResourceManager}/{@code PackResources}
+ * 喂给装载器，再把得到的 {@code GlyphProvider} 塞进自建 {@code FontSet}，最后用只认这份 FontSet 的
+ * {@code Font.Provider} 造一个 {@code Font} 交给父类当 delegate——父类会把每段样式的字体改写成构造时
+ * 传进去的那个 id，于是整段文本都走本地字体。
+ *
+ * <p>{@code FontManager} 对不认识的字体 id 会静默回落到 missingFontSet（全空心方块），所以装载失败
+ * 必须由本类自己判定：失败时退回原版字体并把 {@link #isAvailable()} 置 false。
  */
 public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements AutoCloseable {
     private static final Identifier FONT_LOCATION = MainPlugin.identifier("local-font.ttf");
+    private static final float OVERSAMPLE = 4.0F;
+    private static final TrueTypeGlyphProviderDefinition.Shift SHIFT =
+            new TrueTypeGlyphProviderDefinition.Shift(0.0F, 1.0F);
+    private static final AtomicLong FONT_INSTANCES = new AtomicLong();
     public static final float DEFAULT_FONT_SIZE = 11.0F;
 
     private final Path path;
     private final float fontSize;
+    private final LoadedFont loaded;
 
     public LocalFontTextDrawer(Path path) {
         this(path, DEFAULT_FONT_SIZE);
     }
 
     public LocalFontTextDrawer(Path path, float fontSize) {
-        super(Minecraft.getInstance().font, FONT_LOCATION);
-        if (path == null || !Files.isRegularFile(path)) {
-            throw new IllegalArgumentException("Font file does not exist: " + path);
-        }
+        this(path, fontSize, load(path, fontSize));
+    }
+
+    private LocalFontTextDrawer(Path path, float fontSize, LoadedFont loaded) {
+        super(loaded.font(), loaded.fontId(), loaded.fontSet() != null);
         this.path = path;
         this.fontSize = fontSize;
+        this.loaded = loaded;
     }
 
     public Path path() {
@@ -55,14 +90,54 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
         return fontSize;
     }
 
+    /**
+     * 把本地 ttf 装成一份独立的 {@code FontSet}；任何一环失败都退回原版字体。
+     *
+     * <p>{@code FontManager#createFontSet} 是私有的，这里按它的三步写法复刻：建 {@code GlyphStitcher} →
+     * 建 {@code FontSet} → {@code reload} 一批自带过滤条件的 {@code GlyphProvider}。{@code fontId} 每个实例
+     * 唯一，否则 {@code GlyphStitcher} 注册的字形图集名会互相顶掉。
+     */
+    private static LoadedFont load(Path path, float fontSize) {
+        if (path == null || !Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("Font file does not exist: " + path);
+        }
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) {
+            throw new IllegalStateException("Local font cannot be loaded before Minecraft is initialized");
+        }
+        Identifier fontId = MainPlugin.identifier("local-font/" + FONT_INSTANCES.getAndIncrement());
+        GlyphProvider provider = null;
+        FontSet fontSet = null;
+        try {
+            TrueTypeGlyphProviderDefinition definition =
+                    new TrueTypeGlyphProviderDefinition(FONT_LOCATION, fontSize, OVERSAMPLE, SHIFT, "");
+            GlyphProviderDefinition.Loader loader = definition.unpack()
+                    .left()
+                    .orElseThrow(() -> new IllegalStateException("TTF definition has no loader"));
+            provider = loader.load(new LocalFontResourceManager(minecraft.getResourceManager(), FONT_LOCATION, path));
+            fontSet = new FontSet(new GlyphStitcher(minecraft.getTextureManager(), fontId));
+            fontSet.reload(
+                    List.of(new GlyphProvider.Conditional(provider, FontOption.Filter.ALWAYS_PASS)), Set.of());
+            return new LoadedFont(new Font(new LocalFontProvider(fontSet)), fontId, fontSet, provider);
+        } catch (Exception exception) {
+            if (fontSet != null) fontSet.close();
+            if (provider != null) provider.close();
+            Debug.info("Failed to load local font " + path + ", falling back to the vanilla font: " + exception);
+            return LoadedFont.fallback();
+        }
+    }
+
     @Override
     public float getTextHeight() {
-        // 装载链没落地时本门面实际画的是原版字体，行高必须跟着原版走，否则排版会错位。
+        // 装载失败时本门面实际画的是原版字体，行高必须跟着原版走，否则排版会错位。
         return isAvailable() ? fontSize : super.getTextHeight();
     }
 
     @Override
-    public void close() {}
+    public void close() {
+        if (loaded.fontSet() != null) loaded.fontSet().close();
+        if (loaded.provider() != null) loaded.provider().close();
+    }
 
     public static List<FontFile> scanFonts() {
         Set<Path> roots = new HashSet<>();
@@ -153,6 +228,163 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
 
     private static void addRoot(Set<Path> roots, Path path) {
         if (path != null) roots.add(path.toAbsolutePath().normalize());
+    }
+
+    /** 一次装载的结果；失败时 {@code fontSet}/{@code provider} 为 null，{@code font} 就是原版字体。 */
+    private record LoadedFont(Font font, Identifier fontId, FontSet fontSet, GlyphProvider provider) {
+        private static LoadedFont fallback() {
+            return new LoadedFont(Minecraft.getInstance().font, FONT_LOCATION, null, null);
+        }
+    }
+
+    /**
+     * 只认一份 {@code FontSet} 的 {@code Font.Provider}。
+     *
+     * <p>父类会把每段样式的字体都改写成构造时传进去的那个 id，所以这里不必按描述分发：直接返回本地字形。
+     * 反过来，按描述分发会让 {@code minecraft:default} 之类的描述落到 {@code FontManager} 的 missingFontSet。
+     */
+    private static final class LocalFontProvider implements Font.Provider {
+        private final FontSet fontSet;
+        private final GlyphSource source;
+
+        private LocalFontProvider(FontSet fontSet) {
+            this.fontSet = fontSet;
+            this.source = fontSet.source(false);
+        }
+
+        @Override
+        public GlyphSource glyphs(FontDescription font) {
+            return source;
+        }
+
+        @Override
+        public EffectGlyph effect() {
+            return fontSet.whiteGlyph();
+        }
+    }
+
+    /**
+     * 只多出一个 {@code <ns>:font/xxx} 的 {@code ResourceManager}，其余全部转交给真正的实现。
+     * ttf 装载器只用到 {@code #open}，但接口方法必须齐。
+     */
+    private static final class LocalFontResourceManager implements ResourceManager {
+        private final ResourceManager delegate;
+        private final Identifier resourceId;
+        private final Resource resource;
+
+        private LocalFontResourceManager(ResourceManager delegate, Identifier location, Path path) {
+            this.delegate = delegate;
+            this.resourceId = location.withPrefix("font/");
+            this.resource = new Resource(new LocalFontResourcePack(this.resourceId, path), IoSupplier.create(path));
+        }
+
+        @Override
+        public Optional<Resource> getResource(Identifier location) {
+            if (this.resourceId.equals(location)) {
+                return Optional.of(this.resource);
+            }
+            return this.delegate.getResource(location);
+        }
+
+        @Override
+        public Set<String> getNamespaces() {
+            Set<String> namespaces = new HashSet<>(this.delegate.getNamespaces());
+            namespaces.add(this.resourceId.getNamespace());
+            return namespaces;
+        }
+
+        @Override
+        public List<Resource> getResourceStack(Identifier location) {
+            if (this.resourceId.equals(location)) {
+                List<Resource> stack = new ArrayList<>(this.delegate.getResourceStack(location));
+                stack.add(this.resource);
+                return stack;
+            }
+            return this.delegate.getResourceStack(location);
+        }
+
+        @Override
+        public Map<Identifier, Resource> listResources(String directory, Predicate<Identifier> filter) {
+            Map<Identifier, Resource> resources = new HashMap<>(this.delegate.listResources(directory, filter));
+            if (this.resourceId.getPath().startsWith(directory) && filter.test(this.resourceId)) {
+                resources.put(this.resourceId, this.resource);
+            }
+            return resources;
+        }
+
+        @Override
+        public Map<Identifier, List<Resource>> listResourceStacks(String directory, Predicate<Identifier> filter) {
+            Map<Identifier, List<Resource>> stacks = new HashMap<>(this.delegate.listResourceStacks(directory, filter));
+            if (this.resourceId.getPath().startsWith(directory) && filter.test(this.resourceId)) {
+                List<Resource> matches = new ArrayList<>(stacks.getOrDefault(this.resourceId, List.of()));
+                matches.add(this.resource);
+                stacks.put(this.resourceId, matches);
+            }
+            return stacks;
+        }
+
+        @Override
+        public Stream<PackResources> listPacks() {
+            return this.delegate.listPacks();
+        }
+    }
+
+    /** 只暴露 {@code <ns>:font/xxx} 这一个资源的资源包，用来给 {@link Resource} 当来源。 */
+    private static final class LocalFontResourcePack implements PackResources {
+        private static final PackLocationInfo LOCATION = new PackLocationInfo(
+                "slimefunhelper-local-font",
+                Component.literal("SlimefunHelper local font"),
+                PackSource.DEFAULT,
+                Optional.empty());
+
+        private final Identifier resourceId;
+        private final Path path;
+
+        private LocalFontResourcePack(Identifier resourceId, Path path) {
+            this.resourceId = resourceId;
+            this.path = path;
+        }
+
+        @Override
+        public IoSupplier<InputStream> getRootResource(String... path) {
+            return null;
+        }
+
+        @Override
+        public IoSupplier<InputStream> getResource(PackType type, Identifier location) {
+            if (type == PackType.CLIENT_RESOURCES && this.resourceId.equals(location)) {
+                return IoSupplier.create(this.path);
+            }
+            return null;
+        }
+
+        @Override
+        public void listResources(
+                PackType type, String namespace, String directory, PackResources.ResourceOutput output) {
+            if (type == PackType.CLIENT_RESOURCES
+                    && this.resourceId.getNamespace().equals(namespace)
+                    && this.resourceId.getPath().startsWith(directory)) {
+                output.accept(this.resourceId, IoSupplier.create(this.path));
+            }
+        }
+
+        @Override
+        public Set<String> getNamespaces(PackType type) {
+            return type == PackType.CLIENT_RESOURCES ? Set.of(this.resourceId.getNamespace()) : Set.of();
+        }
+
+        @Override
+        public <T> T getMetadataSection(MetadataSectionType<T> metadataSerializer) {
+            return null;
+        }
+
+        @Override
+        public PackLocationInfo location() {
+            return LOCATION;
+        }
+
+        @Override
+        public void close() {}
     }
 
     public record FontFile(String family, String style, Path path) {

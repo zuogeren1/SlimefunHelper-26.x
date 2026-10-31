@@ -1,5 +1,6 @@
 package me.matl114.hacks.utils.render;
 
+import me.matl114.utils.render.EntityBoundaryCollector;
 import me.matl114.utils.render.EntityBoxCollector;
 import me.matl114.utils.render.EntityFaceCollector;
 import me.matl114.utils.render.EntityFrameCollector;
@@ -269,6 +270,10 @@ public class RenderCollectors {
 
     public static RenderCollector<Entity> createEntityFaceCollector() {
         return new EntityFaceCollector();
+    }
+
+    public static RenderCollector<Entity> createEntityBoundaryCollector() {
+        return new EntityBoundaryCollector();
     }
 
     public static RenderCollector<Entity> createEntityFrameCollector() {

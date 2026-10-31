@@ -128,11 +128,13 @@ public class EntityESP extends BaseModule {
 
     private final RenderCollector<Entity> renderOutline = RenderCollectors.createEntityBoxCollector(true, false, false);
     private final RenderCollector<Entity> renderFace = RenderCollectors.createEntityFaceCollector();
+    private final RenderCollector<Entity> renderBoundary = RenderCollectors.createEntityBoundaryCollector();
     private final RenderCollector<Entity> entityTracer = RenderCollectors.createEntityTracerCollector();
 
     public void onTick() {
         renderOutline.clear();
         renderFace.clear();
+        renderBoundary.clear();
         entityTracer.clear();
 
         boolean enable = this.enable.get();
@@ -198,6 +200,7 @@ public class EntityESP extends BaseModule {
     public void render(Object object, float tickDelta) {
         if (object instanceof PoseStack stack) {
             renderOutline.render3D(stack, tickDelta);
+            renderBoundary.render3D(stack, tickDelta);
             entityTracer.render3D(stack, tickDelta);
         } else if (object instanceof VDrawContext vdraw) {
             renderOutline.render2D(vdraw, tickDelta);
@@ -214,6 +217,7 @@ public class EntityESP extends BaseModule {
         }
         if (highLightSettings.get().getEntryValueOr(entity.getType(), false)) {
             renderFace.submit(entity, ColorUtils.withAlphaInt(color.getRGB(), 32));
+            renderBoundary.submit(entity, color.getRGB());
         }
         if (renderTraceSettings.get().getEntryValueOr(entity.getType(), false)) {
             entityTracer.submit(entity, color.getRGB());
