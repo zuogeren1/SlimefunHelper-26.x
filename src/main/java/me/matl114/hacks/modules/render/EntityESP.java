@@ -192,13 +192,14 @@ public class EntityESP extends BaseModule {
             float tickDelta = event.context.partialTicks();
             render(event.context.drawContext(), tickDelta);
         }
-        if (enable.get()) {
+        if (enable.get() && renderMode.get().isIn(RenderMode.RENDER_2D)) {
             renderFace.render2D(event.context.drawContext(), event.context.partialTicks());
         }
     }
 
     public void render(Object object, float tickDelta) {
         if (object instanceof PoseStack stack) {
+            renderFace.render3D(stack, tickDelta);
             renderOutline.render3D(stack, tickDelta);
             renderBoundary.render3D(stack, tickDelta);
             entityTracer.render3D(stack, tickDelta);

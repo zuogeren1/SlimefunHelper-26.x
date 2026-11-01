@@ -3,6 +3,8 @@ package me.matl114.utils.render;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import me.matl114.utils.Debug;
 import me.matl114.utils.RenderUtils;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.versioned.api.VDrawContext;
@@ -29,6 +31,9 @@ import net.minecraft.world.phys.Vec3;
  * 与其余 {@link RenderCollector} 实现的画法对得上。
  */
 public class EntityModelCollector extends RenderCollector.Impl<Entity> {
+    /** 抓面失败计数：前几次留痕，之后静默（避免每帧刷屏）。 */
+    private static final AtomicInteger CAPTURE_FAILURES = new AtomicInteger();
+
     protected final List<IndexEntry<Entity>> entities = new ArrayList<>();
 
     /** 抓到的单个面：四个顶点 + uv + 来源贴图（纯色面 texture 为 null）。 */
@@ -95,8 +100,13 @@ public class EntityModelCollector extends RenderCollector.Impl<Entity> {
                         renderState.z - cameraPos.z,
                         matrices,
                         collector);
-            } catch (Exception ignored) {
-                // 单个实体没有渲染器 / 渲染器自己抛错，都不该把调试功能升级成崩溃：跳过它，继续抓别的实体
+            } catch (Exception failure) {
+                // 单个实体没有渲染器 / 渲染器自己抛错，都不该把调试功能升级成崩溃：跳过它，继续抓别的实体。
+                // 但前几次失败要留痕，否则抓面失败会表现成「什么都没画」，无从定位。
+                if (CAPTURE_FAILURES.getAndIncrement() < 3) {
+                    Debug.info(
+                            "capture failed for %s".formatted(entity.getType()), failure);
+                }
             }
         }
         //#else
