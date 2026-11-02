@@ -38,6 +38,10 @@ public interface PlayerInteractBlockC2SPacketAccess {
         }
 
         public BlockPos getPlaceBlockPos(InteractionHand hand, BlockHitResult blockHitResult) {
+            // 预测放置点已算出时直接用它，否则 easy-place / litematica 会退回点击点、落到错方块
+            if (placePos.isPresent()) {
+                return placePos.get();
+            }
             // optimize air place
             if (oldState.isAir()) {
                 return blockHitResult.getBlockPos();

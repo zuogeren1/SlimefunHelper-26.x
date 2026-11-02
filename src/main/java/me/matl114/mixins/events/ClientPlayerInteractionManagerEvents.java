@@ -27,6 +27,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.crafting.display.RecipeDisplayId;
@@ -140,7 +141,15 @@ public abstract class ClientPlayerInteractionManagerEvents {
         ItemStack stackCopy = minecraft.player.getItemInHand(hand).copy();
         BlockState state = minecraft.level.getBlockState(hitResult.getBlockPos());
         MutableBoolean placeBlock = new MutableBoolean(false);
-        BlockPos predictingPlace = new BlockPlaceContext(minecraft.player, hand, stackCopy, hitResult).getClickedPos();
+        // 床/告示牌/脚手架这类物品会在放置时改写落点，预测位置要跟 BlockItem 的修正走，否则坐标取错。
+        BlockPlaceContext placeContext = new BlockPlaceContext(minecraft.player, hand, stackCopy, hitResult);
+        if (stackCopy.getItem() instanceof BlockItem blockItem) {
+            BlockPlaceContext correctedContext = blockItem.updatePlacementContext(placeContext);
+            if (correctedContext != null) {
+                placeContext = correctedContext;
+            }
+        }
+        BlockPos predictingPlace = placeContext.getClickedPos();
         BlockState oldPlaceState = world.getBlockState(predictingPlace);
         original.call(instance, world, (PredictiveAction) (seq) -> {
             lastInteractCaptureBlockPlace.addLast(placeBlock);
