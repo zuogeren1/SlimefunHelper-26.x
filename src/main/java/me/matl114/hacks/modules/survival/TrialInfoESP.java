@@ -233,10 +233,8 @@ public class TrialInfoESP extends BaseModule {
                     cachedVaultsAndTrials.put(pos, sets);
                 }
             }
-            boolean anyTrialNearby = false;
             for (var re : cachedVaultsAndTrials.values()) {
                 for (var bp : re) {
-                    anyTrialNearby = true;
                     BlockEntity be = mc.level.getBlockEntity(bp);
                     List<Component> textLines = new ArrayList<>();
                     WrapColor color;

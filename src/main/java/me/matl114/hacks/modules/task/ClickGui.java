@@ -153,11 +153,6 @@ public class ClickGui extends BaseModule {
         return configElementFactory;
     }
 
-    /** 上游把取色工厂拆成 configElementFactory / getGuiSettings；ConnectionProxy 与 EncryptChat 仍从这里取背景，保留入口。 */
-    public ElementFactory getGuiElementFactory() {
-        return guiElementFactory;
-    }
-
     private boolean isGuiStyle(net.minecraft.resources.Identifier id) {
         return ClickGuiStyles.getOrDefault(guiStyle.get().value()).id().equals(id);
     }

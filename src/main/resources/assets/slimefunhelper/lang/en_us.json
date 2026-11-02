@@ -4618,7 +4618,6 @@
 	"place-utils.auto-slab.preferred-ghost-hand-mode": "优先鬼手模式",
 	"place-utils.auto-plate.preferred-ghost-hand-mode": "优先鬼手模式",
 	"player-info.name-tag.render-mode": "渲染模式",
-	"move-safety.no-fall.fake-ground-new-grim": "新版Grim",
 	"move-speed.safe-sneak.enable": "安全潜行",
 	"move-speed.safe-sneak.hotkey": "安全潜行",
 	"move-speed.safe-sneak.only-sneak-press": "仅按潜行键时",

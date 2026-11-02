@@ -5,7 +5,6 @@ import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.basic.Draggable;
 import me.matl114.gui.basic.DrawableWidget;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
@@ -143,12 +142,6 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
             return true;
         }
         return true;
-    }
-
-    public final void renderBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float deltaTicks) {
-        if (minecraft.level == null) {
-            super.extractBackground(context, mouseX, mouseY, deltaTicks);
-        }
     }
 
     public void resetScreen() {

@@ -40,9 +40,7 @@ public record InteractRequestImpl(
 
     @Override
     public void successCallback(InteractionQueue queue) {
-        if (successCallback != null) {
-            successCallback.accept(queue);
-        }
+        successCallback.accept(queue);
     }
 
     @Override
@@ -50,4 +48,3 @@ public record InteractRequestImpl(
         return itemPredicate.test(itemStack) ? 1.0 : null;
     }
 }
-
