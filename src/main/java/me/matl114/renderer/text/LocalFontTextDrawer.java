@@ -22,6 +22,7 @@ import java.util.stream.Stream;
 import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.StringSplitter;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GlyphSource;
 import net.minecraft.client.gui.font.FontOption;
@@ -32,6 +33,7 @@ import net.minecraft.client.gui.font.providers.GlyphProviderDefinition;
 import net.minecraft.client.gui.font.providers.TrueTypeGlyphProviderDefinition;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FontDescription;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.Style;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackLocationInfo;
@@ -175,9 +177,66 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
         };
     }
 
-    /** 缺字时不改样式，交给原版字体；其余字符仍然整段改用本地字体。 */
+    /**
+     * {@code FormattedText} 路径（量宽、断行、截断）的同一套缺字回落：父类给每个片段整体塞上 {@code fontId}，
+     * 本地 ttf 缺字时那些码点只能按 missing 字形量宽度，和绘制对不上。这里按码点把片段切成「本地有字形」
+     * 与「本地缺字形」两类，只有前者的样式换成 {@code fontId}。
+     */
+    @Override
+    public FormattedText withFont(FormattedText text) {
+        if (!isAvailable()) return text;
+        List<FormattedText> parts = new ArrayList<>();
+        text.visit(
+                (style, string) -> {
+                    splitByLocalGlyph(style, string, parts);
+                    return Optional.empty();
+                },
+                Style.EMPTY);
+        return FormattedText.composite(parts);
+    }
+
+    /** {@code StringSplitter} 量宽度同样要按码点回落，否则它算出来的宽度和绘制不一致。 */
+    @Override
+    public StringSplitter getTextHandler() {
+        if (!isAvailable()) return super.getTextHandler();
+        return new StringSplitter((codePoint, style) ->
+                delegate.getSplitter()
+                        .stringWidth(FormattedCharSequence.codepoint(codePoint, withLocalFont(codePoint, style))));
+    }
+
+    /** 把一个样式片段按「本地有没有字形」切开，每段单独决定用哪份字体。 */
+    private void splitByLocalGlyph(Style style, String string, List<FormattedText> parts) {
+        int length = string.length();
+        int start = 0;
+        boolean local = length > 0 && hasLocalGlyph(string.codePointAt(0));
+        for (int index = 0; index < length; ) {
+            int codePoint = string.codePointAt(index);
+            boolean hasGlyph = hasLocalGlyph(codePoint);
+            if (hasGlyph != local) {
+                parts.add(FormattedText.of(string.substring(start, index), withLocalFont(local, style)));
+                start = index;
+                local = hasGlyph;
+            }
+            index += Character.charCount(codePoint);
+        }
+        if (start < length) {
+            parts.add(FormattedText.of(string.substring(start), withLocalFont(local, style)));
+        }
+    }
+
+    /** 缺字时保留原样式原本的字体（回落原版），其余字符改用本地字体。 */
     private Style withLocalFont(int codePoint, Style style) {
-        return hasLocalGlyph(codePoint) ? style.withFont(localFont) : style;
+        return withLocalFont(hasLocalGlyph(codePoint), style);
+    }
+
+    /**
+     * 缺字那一半「保留原样式」，但要把样式原本的字体描述显式写回去：{@code Style#applyTo} 会拿外层样式补空字段，
+     * 而 {@code wrapLines}/{@code trimToWidth} 传给父类的是带本地 fontId 的 {@code fontStyle}，字体留空就会被
+     * 重新填成本地字体，回落等于没做。{@code Style#getFont()} 对空字体返回 {@code FontDescription#DEFAULT}，
+     * 与原样式实际绘制的字体一致。
+     */
+    private Style withLocalFont(boolean local, Style style) {
+        return local ? style.withFont(localFont) : style.withFont(style.getFont());
     }
 
     /**

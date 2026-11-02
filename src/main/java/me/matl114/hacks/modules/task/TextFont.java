@@ -44,7 +44,8 @@ public class TextFont extends BaseModule {
 
     public final StringRef textFontType = builder(root.add("font-name"), StringRef.TYPE)
             .defaultValue("")
-            .show(() -> textStyle.get().isIn(TextStyle.VANILLA))
+            // 本地字体名只在 SYSTEM 下被 updateTextFont 使用，显示条件必须与之一致（上游写的 VANILLA 是笔误）
+            .show(() -> textStyle.get().isIn(TextStyle.SYSTEM))
             .updateListener(s -> updateTextFont())
             .build();
 
