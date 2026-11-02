@@ -140,7 +140,14 @@ public final class PluginManager {
     private ModVersion getHostVersion() {
         String version =
                 plugins.get(0).getContainer().getMetadata().getVersion().getFriendlyString();
-        return ModVersion.parseTrailing(version);
+        // 本仓库发布版本允许带 `-fixN` 后缀，而 parseTrailing 是「取尾部数字段」：
+        // `1.2.1.3-fix1` 会被解析成 [1]，宿主版本会被判得比任何插件最低版本都低。
+        // 因此只取开头的「数字 + 点」段。
+        int end = 0;
+        while (end < version.length() && (Character.isDigit(version.charAt(end)) || version.charAt(end) == '.')) {
+            end++;
+        }
+        return ModVersion.parse(end > 0 ? version.substring(0, end) : version);
     }
 
     public List<SlimefunHelperPlugin> getPlugins() {
