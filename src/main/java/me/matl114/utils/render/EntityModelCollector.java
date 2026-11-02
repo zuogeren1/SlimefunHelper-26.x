@@ -92,14 +92,21 @@ public class EntityModelCollector extends RenderCollector.Impl<Entity> {
                 EntityRenderState renderState = renderer.createRenderState(entity, partialTick);
                 collector.begin(entry.index(), resolveTexture(renderer, renderState));
                 // 传相机相对坐标（与 LevelRenderer 提交实体时一致），抓到的顶点也就落在相机相对空间
-                dispatcher.submit(
-                        renderState,
-                        cameraState,
-                        renderState.x - cameraPos.x,
-                        renderState.y - cameraPos.y,
-                        renderState.z - cameraPos.z,
-                        matrices,
-                        collector);
+                // submit 内部会 push/translate/pop 这个 PoseStack，但它一旦抛异常就弹不回来；
+                // 我们在外面再包一层，保证共享的 PoseStack 不会因为抓面失败而失衡。
+                matrices.pushPose();
+                try {
+                    dispatcher.submit(
+                            renderState,
+                            cameraState,
+                            renderState.x - cameraPos.x,
+                            renderState.y - cameraPos.y,
+                            renderState.z - cameraPos.z,
+                            matrices,
+                            collector);
+                } finally {
+                    matrices.popPose();
+                }
             } catch (Exception failure) {
                 // 单个实体没有渲染器 / 渲染器自己抛错，都不该把调试功能升级成崩溃：跳过它，继续抓别的实体。
                 // 但前几次失败要留痕，否则抓面失败会表现成「什么都没画」，无从定位。

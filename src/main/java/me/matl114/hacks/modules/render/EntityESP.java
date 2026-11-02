@@ -191,9 +191,7 @@ public class EntityESP extends BaseModule {
         if (enable.get() && renderMode.get().isIn(RenderMode.RENDER_2D)) {
             float tickDelta = event.context.partialTicks();
             render(event.context.drawContext(), tickDelta);
-        }
-        if (enable.get() && renderMode.get().isIn(RenderMode.RENDER_2D)) {
-            renderFace.render2D(event.context.drawContext(), event.context.partialTicks());
+            renderFace.render2D(event.context.drawContext(), tickDelta);
         }
     }
 

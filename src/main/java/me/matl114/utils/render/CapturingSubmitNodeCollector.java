@@ -4,9 +4,11 @@ package me.matl114.utils.render;
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.model.Model;
+import net.minecraft.client.model.geom.builders.UVPair;
 import net.minecraft.client.renderer.OrderedSubmitNodeCollector;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.MovingBlockRenderState;
@@ -27,6 +29,7 @@ import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Quaternionf;
+import org.joml.Vector3fc;
 
 /**
  * 捕获式 {@link SubmitNodeCollector}：把实体渲染器的提交转成「面」而不是顶点缓冲。
@@ -37,7 +40,7 @@ import org.joml.Quaternionf;
  * 所以这里自建一个 collector 接过提交，在 {@link #submitModel} 里把同一条渲染路径再走一遍，
  * 只是把顶点交给 {@link CapturingVertexConsumer} 抄下来。
  *
- * <p>除 {@link #submitModel} 与 {@link #submitCustomGeometry} 外的提交（名牌、影子、粒子、方块、物品…）
+ * <p>除 {@link #submitModel}、{@link #submitCustomGeometry} 与 {@link #submitItem} 外的提交（名牌、影子、粒子、方块…）
  * 都与「实体模型的面」无关，全部空实现。
  */
 public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
@@ -169,6 +172,18 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
     @Override
     public void submitShapeOutline(PoseStack poseStack, VoxelShape shape, RenderType renderType, int color, float width, boolean afterTerrain) {}
 
+    /**
+     * 物品（掉落物 / 展示框 / 手持 / 物品展示实体）走的是另一条提交：进到这里时模型已经烘成 {@link BakedQuad}
+     * （{@code ItemStackRenderState.LayerRenderState#submit} 把 quads 直接交出去），物品的本地变换也已经压进 pose，
+     * 所以按 {@code ItemFeatureRenderer#prepareMainSubmit}（{@code ItemFeatureRenderer.java:60-70}）的读法
+     * 把四边形逐顶点喂进捕获式 buffer：位置乘 pose，uv 用 quad 自带的图集坐标。
+     *
+     * <p>贴图按 quad 的 sprite 取图集：物品的各层可能分别落在 items / blocks 图集上，按面取才不会串图；
+     * 图集 id 配合 atlas 空间 uv 与本仓库 {@code DrawContext_v1_21_11#drawGuiTextureQuad} 的用法一致。
+     *
+     * <p>不按 {@code outlineColor} 过滤：{@code SubmitNodeCollection#submitItem} 只会在这一次调用里
+     * 把同一份 quads 再塞进 outline 阶段，并不是第二次提交；滤掉的话发光实体手上的物品会整块消失。
+     */
     @Override
     public void submitItem(
             PoseStack poseStack,
@@ -178,7 +193,29 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
             int outlineColor,
             int[] tintLayers,
             List<BakedQuad> quads,
-            ItemStackRenderState.FoilType foilType) {}
+            ItemStackRenderState.FoilType foilType) {
+        if (quads.isEmpty()) {
+            return;
+        }
+        PoseStack.Pose pose = poseStack.last();
+        Identifier quadTexture = quads.getFirst().materialInfo().sprite().atlasLocation();
+        CapturingVertexConsumer consumer = new CapturingVertexConsumer(quadTexture, this::emit);
+        for (BakedQuad quad : quads) {
+            Identifier texture = quad.materialInfo().sprite().atlasLocation();
+            if (!Objects.equals(texture, quadTexture)) {
+                consumer.finish();
+                consumer = new CapturingVertexConsumer(texture, this::emit);
+                quadTexture = texture;
+            }
+            for (int vertex = 0; vertex < BakedQuad.VERTEX_COUNT; vertex++) {
+                Vector3fc position = quad.position(vertex);
+                long packedUv = quad.packedUV(vertex);
+                consumer.addVertex(pose, position.x(), position.y(), position.z())
+                        .setUv(UVPair.unpackU(packedUv), UVPair.unpackV(packedUv));
+            }
+        }
+        consumer.finish();
+    }
 
     @Override
     public void submitQuadParticleGroup(QuadParticleRenderState particles) {}
