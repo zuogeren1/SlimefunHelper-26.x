@@ -166,6 +166,12 @@ processResources {
 				"minecraft_version": project.minecraft_version
 		)
 	}
+
+	// 插件 API 的默认最低宿主版本：写进 jar，运行期由 SlimefunHelperPlugin 读取，
+	// 这样它永远等于本次构建的 mod_version，不会和 gradle.properties 脱钩。
+	filesMatching("slimefunhelper-plugin-api.txt") {
+		expand("version": project.mod_version)
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {
