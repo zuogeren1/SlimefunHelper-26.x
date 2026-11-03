@@ -21,7 +21,8 @@ import net.minecraft.world.InteractionHand;
  * <p>第二批（发光 + 边框，仅 26.2）的接点在此预留：26.2 的手部几何走 SubmitNodeCollector，
  * 可以「抓面 → 用 identity PoseStack 重提交回同一个 collector」，不需要上游的 mask 后处理；
  * 收口点对应上游 {@code HandView#renderHandOutline}，即 {@code RenderListener.getRender2DEvent()}。
- * 相关配置项 {@code glow / glowColor / glowAlpha / boundaryColor} 随第二批一起注册，本轮不加。
+ * 发光层配置（{@code glow / glowColor / glowAlpha / boundaryColor}）需要重提交路径才能生效，
+ * 注册时必须与 {@code HandFaceCollector} 一起接上。
  */
 public class HandView extends BaseModule {
     public static HandView INSTANCE;

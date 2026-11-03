@@ -117,7 +117,7 @@ public class EntityModelCollector extends RenderCollector.Impl<Entity> {
             }
         }
         //#else
-        //$$ // 26.1.2 的提交节点接口形态不同（submitModelPart / submitParticleGroup 签名都不一样），本轮只在 26.2 恢复抓面。
+        //$$ // 26.1.2 的提交节点接口形态不同（submitModelPart / submitParticleGroup 签名都不一样），抓面只在 26.2 可用。
         //#endif
     }
 

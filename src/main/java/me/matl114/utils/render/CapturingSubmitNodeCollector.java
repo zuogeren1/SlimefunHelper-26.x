@@ -226,7 +226,7 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
 //#else
 //$$ /**
 //$$  * 26.1.2 侧的空壳：该版本的提交节点接口形态不同（submitModelPart / submitParticleGroup 等签名都不一样），
-//$$  * 本轮只在 26.2 上恢复抓面，所以这里只留一个可编译的同名类，供两个版本共用的源码引用点解析。
+//$$  * 抓面只在 26.2 可用；这里留一个同名空壳供两版本共用的源码引用点解析。
 //$$  */
 //$$ public final class CapturingSubmitNodeCollector {
 //$$     private CapturingSubmitNodeCollector() {}

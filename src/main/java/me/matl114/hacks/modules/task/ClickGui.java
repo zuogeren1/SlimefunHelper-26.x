@@ -848,7 +848,7 @@ public class ClickGui extends BaseModule {
                     saved.setX(x);
                     saved.setY(y);
                 } else if (!saved.isManual()) {
-                    // 老数据里「不是旧自动排版」的位置就是用户自己放的，当场冻结，之后不再参与重排
+                    // 已被判定为手工布局的组不再参与自动重排，否则会覆盖用户摆放
                     saved.setManual(true);
                 }
                 rowHeight = Math.max(rowHeight, heightOf.applyAsInt(name));
