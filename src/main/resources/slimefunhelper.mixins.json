@@ -105,6 +105,7 @@
 		"hack.GameRenderMixin",
 		"hack.InGameHudMixin",
 		"hack.InGameOverlayRendererMixin",
+		"hack.ItemInHandRendererMixin",
 		"hack.LightMapTextureMixin",
 		"hack.LivingEntityMixin",
 		"hack.PlayerAbilityMixin",

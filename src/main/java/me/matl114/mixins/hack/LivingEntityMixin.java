@@ -8,9 +8,12 @@ import me.matl114.accessors.access.LivingEntityAccess;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.move.ElytraExtra;
+import me.matl114.hacks.modules.render.HandView;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.utils.entity.PlayerInputUtils;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.world.entity.*;
@@ -31,6 +34,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Environment(EnvType.CLIENT)
 @Mixin(LivingEntity.class)
@@ -189,5 +193,32 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
         } else {
             original.call(instance);
         }
+    }
+
+    @Inject(method = "getCurrentSwingDuration", at = @At("RETURN"), cancellable = true)
+    private void applyHandViewSwingSpeed(CallbackInfoReturnable<Integer> cir) {
+        HandView handView = HandView.INSTANCE;
+        if (checkClientPlayer()
+                && handView != null
+                && handView.isActive()
+                && handView.swingSpeedEnabled.get()
+                && handView.swingSpeed.get() != 1.0D) {
+            // 保留 vanilla 的物品/药水修正，并把挥手时长下限压到 1 tick
+            cir.setReturnValue(Math.max(1, (int) Math.round(cir.getReturnValue() / handView.swingSpeed.get())));
+        }
+    }
+
+    // 与上游 1:1：只拦「贴墙 + 跳跃」的那一处 onClimbable；handleOnClimbable 的限速与
+    // resetFallDistance 保持不动（拦掉会带出坠落伤害），按住跳跃键时照旧能爬（保留 !jump() 守卫）
+    @WrapOperation(
+            method = "handleRelativeFrictionAndCalculateMovement",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;onClimbable()Z"))
+    private boolean onNoClimbing(LivingEntity instance, Operation<Boolean> original) {
+        if (checkClientPlayer()
+                && MovTasks.getVelocity().noClimbing.get()
+                && !PlayerInputUtils.of(Minecraft.getInstance().player).jump()) {
+            return false;
+        }
+        return original.call(instance);
     }
 }

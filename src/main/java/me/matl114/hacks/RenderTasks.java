@@ -565,6 +565,9 @@ public class RenderTasks {
     @Getter
     private static SkyRender skyRender;
 
+    @Getter
+    private static HandView handView;
+
     private static void initModules(ModuleManager m) {
         renderExtra = new RenderExtra().register(m);
         noRender = new NoRender().register(m);
@@ -594,6 +597,7 @@ public class RenderTasks {
         itemDisplay = new ItemDisplay().register(m);
         shulkerDisplay = new ShulkerDisplay().register(m);
         skyRender = new SkyRender().register(m);
+        handView = new HandView().register(m);
     }
 
     static {
