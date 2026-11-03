@@ -129,6 +129,27 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
     }
 
     /**
+     * 占住备用挖掘槽位并记录起始 tick。
+     *
+     * <p>槽位已被占用时返回 false，调用方据此判定这次失败确认被丢弃。
+     */
+    @Override
+    @Unique
+    public boolean commitFailBreak(BlockPos pos, int startTick) {
+        if (currentFailBreakPos != null) return false;
+        currentFailBreakPos = pos.immutable();
+        failBreakStartTick = startTick;
+        return true;
+    }
+
+    @Override
+    @Unique
+    public void clearActiveFailBreak() {
+        currentFailBreakPos = null;
+        failBreakStartTick = 0;
+    }
+
+    /**
      * 判断 failBreak 槽位当前是否空闲。
      *
      * <p>这是对外暴露的稳定语义，调用方不需要再依赖 null 细节自行拼装状态判断。
