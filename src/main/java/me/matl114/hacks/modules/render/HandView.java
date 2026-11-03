@@ -2,27 +2,31 @@ package me.matl114.hacks.modules.render;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import java.awt.Color;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.Vec3;
+import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
+import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.NBTRef;
+import me.matl114.utils.render.HandFaceCollector;
 import net.minecraft.world.InteractionHand;
 
 /**
- * 第一人称手部模型变换（位移 / 旋转 / 缩放）与自定义挥手速度。
+ * 第一人称手部：模型变换（位移 / 旋转 / 缩放）、自定义挥手速度，以及发光壳层 / 边框的配置。
  *
  * <p>变换由 {@code ItemInHandRendererMixin} 在每只手的 {@code submitArmWithItem}（26.1.2 为
  * {@code renderArmWithItem}）HEAD 里 push 并应用、RETURN 里 pop，包住 vanilla 的整段提交
- * （空手 / 地图 / 弩 / 吃东西 / 举镜），因此本类不介入任何渲染管线，也不持有渲染状态。
+ * （空手 / 地图 / 弩 / 吃东西 / 举镜），因此变换本身不介入任何渲染管线。
  *
- * <p>第二批（发光 + 边框，仅 26.2）的接点在此预留：26.2 的手部几何走 SubmitNodeCollector，
- * 可以「抓面 → 用 identity PoseStack 重提交回同一个 collector」，不需要上游的 mask 后处理；
- * 收口点对应上游 {@code HandView#renderHandOutline}，即 {@code RenderListener.getRender2DEvent()}。
- * 发光层配置（{@code glow / glowColor / glowAlpha / boundaryColor}）需要重提交路径才能生效，
- * 注册时必须与 {@code HandFaceCollector} 一起接上。
+ * <p>发光与边框（{@code glow / glowColor / glowAlpha / boundaryColor}）的配置也在本类，画法在
+ * {@link HandFaceCollector}：{@code GameRenderMixin} 把这一帧的手部提交换成抓面 collector，提交结束后用
+ * identity PoseStack 把壳层与边线重提交回同一个 collector。两个版本的手部几何都只经
+ * {@code submitModelPart / submitItem / submitCustomGeometry} 三条出口，所以这条路径不随版本分叉，
+ * 也不需要上游那套 mask 后处理。
  */
 public class HandView extends BaseModule {
     public static HandView INSTANCE;
@@ -34,6 +38,25 @@ public class HandView extends BaseModule {
     public final ModulePath handAnimation = handView.add("hand-animation");
 
     public final FlagRef enable = flagBuilder(handView.addEnable()).build();
+
+    // 发光 / 边框：配置在模块上，抓面与重提交在 HandFaceCollector，两个版本都生效
+    public final FlagRef glow = flagBuilder(handView.add("glow")).build();
+
+    public final NBTRef<WrapColor> glowColor = builder(handView.add("glow-color"), WrapColor.class)
+            .defaultValue(new WrapColor(Color.CYAN))
+            .build();
+
+    public final IntRef glowAlpha = intBuilder(handView.add("glow-alpha"))
+            .defaultValue(32)
+            .validator(Configs.intRange(0, 255))
+            .build();
+
+    public final NBTRef<WrapColor> boundaryColor = builder(handView.add("boundary-color"), WrapColor.class)
+            .defaultValue(new WrapColor(Color.CYAN))
+            .build();
+
+    /** 每帧手部抓面的缓存；只有本模块用，写入与重提交都由 {@code GameRenderMixin} 驱动。 */
+    private final HandFaceCollector handFaces = new HandFaceCollector();
 
     public final FlagRef swingSpeedEnabled =
             flagBuilder(handAnimation.addEnable()).build();
@@ -84,6 +107,24 @@ public class HandView extends BaseModule {
         super("HandView");
         bindFlag(enable);
         INSTANCE = this;
+    }
+
+    /** 是否需要画发光层：模块启用且开了发光开关。 */
+    public boolean glowEnabled() {
+        return isActive() && glow.get();
+    }
+
+    public HandFaceCollector getHandFaces() {
+        return handFaces;
+    }
+
+    /** 壳层填充色：{@code glow-alpha} 只作用在这里，取 0 即壳层不可见、边线照画。 */
+    public int glowShellColor() {
+        return glowColor.get().withAlpha(glowAlpha.get());
+    }
+
+    public int glowBoundaryColor() {
+        return boundaryColor.get().withAlpha(255);
     }
 
     /**

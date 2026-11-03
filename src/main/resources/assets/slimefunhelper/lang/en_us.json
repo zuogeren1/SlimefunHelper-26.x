@@ -1817,6 +1817,7 @@
 	"hand-view.glow":"发光",
 	"hand-view.glow-color":"发光颜色",
 	"hand-view.glow-alpha":"发光透明度",
+	"hand-view.boundary-color":"边框颜色",
 	"configenum.encryptalgorithm.none":"None",
 	"configenum.encryptalgorithm.aes_cfb8":"AES - CFB8",
 	"configenum.encryptalgorithm.aes_gcm":"AES - GCM",
