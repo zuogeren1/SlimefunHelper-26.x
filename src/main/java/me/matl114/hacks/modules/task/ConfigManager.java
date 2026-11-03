@@ -1,14 +1,26 @@
 package me.matl114.hacks.modules.task;
 
+import com.google.gson.JsonElement;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.Dynamic;
+import com.mojang.serialization.JsonOps;
+import java.io.File;
+import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import me.matl114.gui.basic.ButtonAction;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.basic.SubScreenWidget;
+import me.matl114.gui.complex.file.FileSaveWidget;
+import me.matl114.gui.complex.file.FileSelectWidget;
+import me.matl114.gui.complex.file.FileTreeWidget;
 import me.matl114.gui.interfaces.ElementFactory;
+import me.matl114.gui.presets.single.CenterScreen;
 import me.matl114.managers.command.MainCommand;
+import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -35,7 +47,95 @@ import net.minecraft.util.Util;
 
 public class ConfigManager extends BaseModule {
     public ConfigManager() {
-        super("ConfigManager");
+        super("Config");
+    }
+
+    @Override
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank, ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createExecuteButton(
+                "widget.config-manager.save",
+                ButtonAction.run(() -> openSnapshotScreen(factory, true)),
+                0,
+                dblank,
+                dx,
+                dy));
+        acceptor.accept(factory.createExecuteButton(
+                "widget.config-manager.load",
+                ButtonAction.run(() -> openSnapshotScreen(factory, false)),
+                0,
+                dblank,
+                dx,
+                dy));
+    }
+
+    private static boolean isSnapshotFileName(String name) {
+        return name.endsWith(".nbt") || name.endsWith(".dat") || name.endsWith(".json");
+    }
+
+    private void openSnapshotScreen(ElementFactory factory, boolean saving) {
+        int width = Math.max(120, Math.min(440, mc.getWindow().getGuiScaledWidth() - 20));
+        int height = Math.max(150, Math.min(320, mc.getWindow().getGuiScaledHeight() - 30));
+        DrawableWidget widget = saving
+                ? factory.createFileSaver(
+                        FileManager.CONFIG_SAVE_FOLDER,
+                        "snapshot.nbt",
+                        ConfigManager::isSnapshotFileName,
+                        this::saveSelectedSnapshot,
+                        0,
+                        0,
+                        width,
+                        height)
+                : factory.createFileSelector(
+                        FileManager.CONFIG_SAVE_FOLDER,
+                        file -> isSnapshotFileName(file.getName()),
+                        this::loadSelectedSnapshot,
+                        0,
+                        0,
+                        width,
+                        height);
+        FileTreeWidget tree;
+        if (widget instanceof FileSelectWidget selector) {
+            // Use cached entry metadata to reject directories without stat calls during rendering.
+            // The confirmation handler additionally rechecks the file on disk.
+            selector.setSelectionPredicate(
+                    file -> !selector.getTree().isDirectorySelected() && isSnapshotFileName(file.getName()));
+            tree = selector.getTree();
+        } else {
+            tree = ((FileSaveWidget) widget).getTree();
+        }
+        SubScreenWidget content = new SubScreenWidget(0, 0, width, height);
+        content.addDrawableChild(widget);
+        content.addDrawableChild(tree.createShortcutWidget());
+        new CenterScreen(content).access().openFromCurrent();
+    }
+
+    private String snapshotRelativePath(File file) {
+        Path root = FileManager.CONFIG_SAVE_FOLDER.toPath().toAbsolutePath().normalize();
+        Path path = file.toPath().toAbsolutePath().normalize();
+        if (!path.startsWith(root)) throw new IllegalArgumentException("Snapshot is outside the snapshot folder");
+        return root.relativize(path).toString();
+    }
+
+    private void saveSelectedSnapshot(File file) {
+        Map<Identifier, MapRef> snapshotMap = new LinkedHashMap<>();
+        for (Config config : Config.REGISTRY) {
+            if (config.getRegistryKey() != null) {
+                snapshotMap.put(config.getRegistryKey().identifier(), filterSnapshotByPathPrefix(config, ""));
+            }
+        }
+        save(snapshotRelativePath(file), new ConfigSnapshot(snapshotMap));
+    }
+
+    private void loadSelectedSnapshot(File file) {
+        if (!file.isFile()) return;
+        String fileName = snapshotRelativePath(file);
+        ConfigSnapshot snapshot = load(fileName);
+        if (snapshot == null) return;
+        applySnapshot(snapshot, null, "");
+        Debug.chat(Component.translatable("message.command.config.snapshot.load-success", fileName)
+                .withStyle(ChatFormatting.GREEN));
     }
 
     @Override
@@ -391,14 +491,6 @@ public class ConfigManager extends BaseModule {
             Debug.chat(Component.literal(e.getMessage()).withStyle(ChatFormatting.RED));
             return;
         }
-        if (FileManager.getInstance().hasConfigStorage(fileName)) {
-            Debug.chat(Component.literal("当前配置文件已存在: " + fileName).withStyle(ChatFormatting.RED));
-            Debug.chat(Component.literal("点击本文本打开文件夹以查看或重命名")
-                    .withStyle(ChatFormatting.YELLOW)
-                    .withStyle(style -> style.withClickEvent(ChatUtils.getOpenFile(FileManager.CONFIG_SAVE_FOLDER))));
-            return;
-        }
-
         String allName = args.nextNonnullString();
         String pathPrefix = args.nextNonnullString().trim();
         ConfigSnapshot snapshot;
@@ -425,8 +517,6 @@ public class ConfigManager extends BaseModule {
             snapshot = new ConfigSnapshot(snapshotMap);
         }
 
-        DataResult<me.matl114.managers.config.Ref<?>> encoded =
-                ConfigSnapshot.CODEC.encodeStart(ConfigOp.INSTANCE, snapshot);
         save(fileName, snapshot);
     }
 
@@ -439,15 +529,6 @@ public class ConfigManager extends BaseModule {
             Debug.chat(Component.literal(e.getMessage()).withStyle(ChatFormatting.RED));
             return;
         }
-        if (FileManager.getInstance().hasConfigStorage(fileName)) {
-            Debug.chat(Component.translatable("message.command.config.hotkey.file-exists", fileName)
-                    .withStyle(ChatFormatting.RED));
-            Debug.chat(Component.translatable("message.command.config.hotkey.open-folder")
-                    .withStyle(ChatFormatting.YELLOW)
-                    .withStyle(style -> style.withClickEvent(ChatUtils.getOpenFile(FileManager.CONFIG_SAVE_FOLDER))));
-            return;
-        }
-
         Map<Identifier, MapRef> snapshotMap = new LinkedHashMap<>();
         for (Config config : Config.REGISTRY) {
             if (config.getRegistryKey() == null) {
@@ -476,13 +557,6 @@ public class ConfigManager extends BaseModule {
             Debug.chat(Component.literal(e.getMessage()).withStyle(ChatFormatting.RED));
             return;
         }
-        if (FileManager.getInstance().hasConfigStorage(fileName)) {
-            Debug.chat(Component.literal("当前配置文件已存在: " + fileName).withStyle(ChatFormatting.RED));
-            Debug.chat(Component.literal("点击本文本打开文件夹以查看或重命名")
-                    .withStyle(ChatFormatting.YELLOW)
-                    .withStyle(style -> style.withClickEvent(ChatUtils.getOpenFile(FileManager.CONFIG_SAVE_FOLDER))));
-            return;
-        }
         List<BaseModule> baseModules = readModuleArguments(argsReader);
         if (baseModules.isEmpty()) {
             return;
@@ -504,8 +578,8 @@ public class ConfigManager extends BaseModule {
     }
 
     public void save(String fileName, ConfigSnapshot snapshot) {
-        DataResult<me.matl114.managers.config.Ref<?>> encoded =
-                ConfigSnapshot.CODEC.encodeStart(ConfigOp.INSTANCE, snapshot);
+        // Materialize values before confirmation so later config edits do not change this save.
+        DataResult<JsonElement> encoded = ConfigSnapshot.CODEC.encodeStart(JsonOps.INSTANCE, snapshot);
         if (encoded.isError()) {
             String message = encoded.error().map(DataResult.Error::message).orElse("未知编码错误");
             Debug.chat(Component.translatable("message.command.config.save.error", message)
@@ -513,9 +587,21 @@ public class ConfigManager extends BaseModule {
             return;
         }
 
+        JsonElement data = encoded.getOrThrow();
+        if (FileManager.getInstance().hasConfigStorage(fileName)) {
+            Debug.chat(Component.translatable("message.command.config.save.replace", fileName)
+                    .withStyle(ChatFormatting.YELLOW)
+                    .append(ChatTasks.createCallbackText(() -> writeSnapshot(fileName, data))
+                            .withStyle(ChatFormatting.BOLD)));
+            return;
+        }
+        writeSnapshot(fileName, data);
+    }
+
+    private void writeSnapshot(String fileName, JsonElement data) {
         try (FileStorage storage =
                 FileManager.getInstance().getConfigStorage(fileName).asAutoSave()) {
-            storage.write(encoded.result().get(), ConfigOp.INSTANCE);
+            storage.write(data, JsonOps.INSTANCE);
             Debug.chat(Component.translatable("message.command.config.save.success", fileName)
                     .withStyle(ChatFormatting.GREEN)
                     .withStyle(style -> style.withClickEvent(
@@ -549,6 +635,12 @@ public class ConfigManager extends BaseModule {
         }
         var snapshot = load(fileName);
         if (snapshot == null) return;
+        applySnapshot(snapshot, config, prefix);
+
+        Debug.chat(Component.literal("成功加载配置快照" + fileName).withStyle(ChatFormatting.GREEN));
+    }
+
+    private void applySnapshot(ConfigSnapshot snapshot, Config config, String prefix) {
         if (config == null) {
             for (Map.Entry<Identifier, MapRef> entry : snapshot.snapSnot().entrySet()) {
                 Config config2 = Config.REGISTRY.getValue(entry.getKey());
@@ -582,8 +674,6 @@ public class ConfigManager extends BaseModule {
                 }
             }
         }
-
-        Debug.chat(Component.literal("成功加载配置快照" + fileName).withStyle(ChatFormatting.GREEN));
     }
 
     public void onLoadHotkey(ArgumentInputStream args) {
