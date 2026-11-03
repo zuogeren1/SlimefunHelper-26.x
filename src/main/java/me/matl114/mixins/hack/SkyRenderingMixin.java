@@ -5,6 +5,8 @@ import org.spongepowered.asm.mixin.Mixin;
 
 //#if MC >= 260200
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
@@ -20,8 +22,10 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.DynamicUniforms;
 import net.minecraft.client.renderer.state.level.SkyRenderState;
 import net.minecraft.client.renderer.texture.AbstractTexture;
+import net.minecraft.util.ARGB;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -78,6 +82,24 @@ public abstract class SkyRenderingMixin {
                 : original;
     }
 
+    // 26.2 的 renderEndSky 只调 1 参 writeTransform（ColorModulator 恒为白），自定义颜色没地方传；
+    // 改调 2 参重载把颜色写进 uniform，语义与 26.1.2 / 上游的「贴图 × 顶点色 × ColorModulator」一致。
+    @WrapOperation(
+            method = "renderEndSky",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/client/renderer/DynamicUniforms;writeTransform(Lorg/joml/Matrix4f;)Lcom/mojang/blaze3d/buffers/GpuBufferSlice;"))
+    private static GpuBufferSlice skyRender$tintEndSky(
+            DynamicUniforms instance, Matrix4f modelView, Operation<GpuBufferSlice> original) {
+        var module = SkyRender.INSTANCE;
+        if (module != null && module.hasCustomColor()) {
+            return instance.writeTransform(modelView, ARGB.vector4fFromARGB32(module.color.get().withAlpha(255)));
+        }
+        return original.call(instance, modelView);
+    }
+
     @Inject(method = "extractRenderState", at = @At("RETURN"))
     private void updateCustomSky(
             ClientLevel level, float partialTicks, Camera camera, SkyRenderState state, CallbackInfo ci) {
@@ -130,12 +152,7 @@ public abstract class SkyRenderingMixin {
     @Unique
     private GpuBuffer skyRender$createBackgroundVertices(int textureWidth, int textureHeight) {
         boolean sixTileAtlas = textureWidth % 3 == 0 && textureHeight % 2 == 0 && textureWidth / 3 == textureHeight / 2;
-        // 26.2 的末地天空管线没有独立染色 uniform，自定义颜色改用顶点色实现
-        int tint = -1;
-        var module = SkyRender.INSTANCE;
-        if (module != null && module.hasCustomColor()) {
-            tint = module.color.get().withAlpha(255);
-        }
+        // 顶点色恢复 -1（与上游一致），末地染色统一交给 ColorModulator（见 skyRender$tintEndSky）
         try (ByteBufferBuilder allocator = ByteBufferBuilder.exactlySized(
                 skyRender$FACE_COUNT * 4 * DefaultVertexFormat.POSITION_TEX_COLOR.getVertexSize())) {
             BufferBuilder builder =
@@ -163,10 +180,10 @@ public abstract class SkyRenderingMixin {
                     case 4 -> matrix.rotationX((float) (Math.PI / 2));
                     case 5 -> matrix.rotationX((float) (-Math.PI / 2));
                 }
-                builder.addVertex(matrix, -100, 100, -100).setUv(minU, minV).setColor(tint);
-                builder.addVertex(matrix, -100, -100, -100).setUv(minU, maxV).setColor(tint);
-                builder.addVertex(matrix, 100, -100, -100).setUv(maxU, maxV).setColor(tint);
-                builder.addVertex(matrix, 100, 100, -100).setUv(maxU, minV).setColor(tint);
+                builder.addVertex(matrix, -100, 100, -100).setUv(minU, minV).setColor(-1);
+                builder.addVertex(matrix, -100, -100, -100).setUv(minU, maxV).setColor(-1);
+                builder.addVertex(matrix, 100, -100, -100).setUv(maxU, maxV).setColor(-1);
+                builder.addVertex(matrix, 100, 100, -100).setUv(maxU, minV).setColor(-1);
             }
             try (MeshData built = builder.buildOrThrow()) {
                 return RenderSystem.getDevice().createBuffer(() -> "SkyRender background", 32, built.vertexBuffer());
@@ -186,6 +203,28 @@ public abstract class SkyRenderingMixin {
     }
 }
 //#else
+//$$ import me.matl114.hacks.modules.render.SkyRender;
+//$$ import net.minecraft.util.ARGB;
+//$$ import org.joml.Vector4fc;
+//$$ import org.spongepowered.asm.mixin.injection.At;
+//$$ import org.spongepowered.asm.mixin.injection.ModifyArg;
+//$$
 //$$ @Mixin(SkyRenderer.class)
-//$$ public abstract class SkyRenderingMixin {}
+//$$ public abstract class SkyRenderingMixin {
+//$$     // 26.1.2 的 renderEndSky 直接调 4 参 writeTransform，第 2 参就是 ColorModulator（与上游同款改法）
+//$$     @ModifyArg(
+//$$             method = "renderEndSky",
+//$$             at =
+//$$                     @At(
+//$$                             value = "INVOKE",
+//$$                             target =
+//$$                                     "Lnet/minecraft/client/renderer/DynamicUniforms;writeTransform(Lorg/joml/Matrix4fc;Lorg/joml/Vector4fc;Lorg/joml/Vector3fc;Lorg/joml/Matrix4fc;)Lcom/mojang/blaze3d/buffers/GpuBufferSlice;"),
+//$$             index = 1)
+//$$     private Vector4fc skyRender$tintEndSky(Vector4fc original) {
+//$$         var module = SkyRender.INSTANCE;
+//$$         return module != null && module.hasCustomColor()
+//$$                 ? ARGB.vector4fFromARGB32(module.color.get().withAlpha(255))
+//$$                 : original;
+//$$     }
+//$$ }
 //#endif
