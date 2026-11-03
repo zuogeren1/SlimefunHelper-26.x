@@ -204,10 +204,15 @@ public abstract class SkyRenderingMixin {
 }
 //#else
 //$$ import me.matl114.hacks.modules.render.SkyRender;
+//$$ import net.minecraft.client.Camera;
+//$$ import net.minecraft.client.multiplayer.ClientLevel;
+//$$ import net.minecraft.client.renderer.state.level.SkyRenderState;
 //$$ import net.minecraft.util.ARGB;
 //$$ import org.joml.Vector4fc;
 //$$ import org.spongepowered.asm.mixin.injection.At;
+//$$ import org.spongepowered.asm.mixin.injection.Inject;
 //$$ import org.spongepowered.asm.mixin.injection.ModifyArg;
+//$$ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 //$$
 //$$ @Mixin(SkyRenderer.class)
 //$$ public abstract class SkyRenderingMixin {
@@ -225,6 +230,21 @@ public abstract class SkyRenderingMixin {
 //$$         return module != null && module.hasCustomColor()
 //$$                 ? ARGB.vector4fFromARGB32(module.color.get().withAlpha(255))
 //$$                 : original;
+//$$     }
+//$$
+//$$     // 主世界天空唯一的染色出口是 state.skyColor（core/sky 直接把它当 ColorModulator 输出），
+//$$     // SkyRenderer 自己没有颜色来源，自定义色必须写进渲染状态。
+//$$     @Inject(method = "extractRenderState", at = @At("RETURN"))
+//$$     private void updateCustomSky(
+//$$             ClientLevel level, float partialTicks, Camera camera, SkyRenderState state, CallbackInfo ci) {
+//$$         var module = SkyRender.INSTANCE;
+//$$         if (module == null || !module.hasCustomColor()) {
+//$$             return;
+//$$         }
+//$$         state.skyColor = module.color.get().withAlpha(255);
+//$$         // 平铺纯色时不能再叠日出日落渐变与暗面圆盘，否则会把自定义色盖掉
+//$$         state.sunriseAndSunsetColor = 0;
+//$$         state.shouldRenderDarkDisc = false;
 //$$     }
 //$$ }
 //#endif
