@@ -14,6 +14,7 @@ import me.matl114.utils.AttributeUtils;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.util.Util;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -24,6 +25,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeMap;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -194,5 +196,16 @@ public abstract class LivingEntityEvents extends Entity
                 AttributeUtils.overrideViaAttributes(getClientLastEquipmentSnapshot(), this.getAttributes());
             }
         }
+    }
+
+    @Shadow
+    @Final
+    public static EntityDataAccessor<Byte> DATA_LIVING_ENTITY_FLAGS;
+
+    @Unique
+    @Override
+    public boolean isTrackedUsingItem() {
+        // 取同步标志位：useItem/useItemRemaining 只是本地字段，服务端可见的 using 状态在这一位
+        return ((Byte) this.entityData.get(DATA_LIVING_ENTITY_FLAGS) & 1) > 0;
     }
 }
