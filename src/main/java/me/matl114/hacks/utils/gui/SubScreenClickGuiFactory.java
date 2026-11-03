@@ -271,6 +271,8 @@ public final class SubScreenClickGuiFactory extends AbstractClassicClickGuiFacto
                                         int deltaY = (int) (mouseY - startMouseY);
                                         slideMeta.setX(slideMeta.getX() + deltaX);
                                         slideMeta.setY(slideMeta.getY() + deltaY);
+                                        // 坐标真的被拖动改过才置位：点表头展开/收起不算用户布局
+                                        slideMeta.setManual(true);
                                         move = true;
                                     }
                                     return true;

@@ -785,7 +785,7 @@ public class ClickGui extends BaseModule {
 
         public void checkDefault(String moduleName, int x, int y) {
             if (!moduleMetaMap.containsKey(moduleName)) {
-                ModuleSlideMeta newMeta = new ModuleSlideMeta(x, y, false);
+                ModuleSlideMeta newMeta = new ModuleSlideMeta(x, y, false, false);
                 moduleMetaMap.put(moduleName, newMeta);
             }
         }
@@ -843,10 +843,13 @@ public class ClickGui extends BaseModule {
                 }
                 ModuleSlideMeta saved = moduleMetaMap.get(name);
                 if (saved == null) {
-                    moduleMetaMap.put(name, new ModuleSlideMeta(x, y, false));
-                } else if (isLegacyAutoPlacement(saved, wX, wY)) {
+                    moduleMetaMap.put(name, new ModuleSlideMeta(x, y, false, false));
+                } else if (!saved.isManual() && isLegacyAutoPlacement(saved, wX, wY)) {
                     saved.setX(x);
                     saved.setY(y);
+                } else if (!saved.isManual()) {
+                    // 老数据里「不是旧自动排版」的位置就是用户自己放的，当场冻结，之后不再参与重排
+                    saved.setManual(true);
                 }
                 rowHeight = Math.max(rowHeight, heightOf.applyAsInt(name));
                 x += wX + DEFAULT_GAP;
@@ -927,10 +930,18 @@ public class ClickGui extends BaseModule {
             this.slidingDown = slidingDown;
         }
 
+        /** 用户拖过（或旧数据首次判定为手工布局）后为 true，自动排布不再重排这一组。 */
+        boolean manual;
+
+        public void setManual(boolean manual) {
+            this.manual = manual;
+        }
+
         public static Codec<ModuleSlideMeta> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                         Codec.INT.fieldOf("x_coord").forGetter(ModuleSlideMeta::getX),
                         Codec.INT.fieldOf("y_coord").forGetter(ModuleSlideMeta::getY),
-                        Codec.BOOL.fieldOf("sliding_down").forGetter(ModuleSlideMeta::isSlidingDown))
+                        Codec.BOOL.fieldOf("sliding_down").forGetter(ModuleSlideMeta::isSlidingDown),
+                        Codec.BOOL.optionalFieldOf("manual", false).forGetter(ModuleSlideMeta::isManual))
                 .apply(instance, ModuleSlideMeta::new));
     }
 }
