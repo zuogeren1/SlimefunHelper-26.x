@@ -31,6 +31,7 @@ import net.minecraft.client.renderer.gizmos.DrawableGizmoPrimitives;
 import net.minecraft.client.renderer.state.level.QuadParticleRenderState;
 import net.minecraft.world.phys.shapes.VoxelShape;
 //#else
+//$$ import com.mojang.blaze3d.systems.RenderSystem;
 //$$ import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 //#endif
 
@@ -42,10 +43,12 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * 地图等自定义几何 {@code submitCustomGeometry}。本类覆盖第一条与第二条来抓面，第三条只转发：
  * 地图的几何不是模型面，抓下来会得到一层面片而不是手。
  *
- * <p>重提交必须用 identity {@link PoseStack}：抓到的顶点已经乘过提交时的 pose，而执行期还会再乘一次当时的
- * model view（{@code RenderType#prepare} 读 {@code RenderSystem#getModelViewMatrixCopy}）。用 identity 提交，
- * 重提交的面与 vanilla 手部自己提交的面走同一条矩阵链，落点严格重合；复用 {@code ItemInHandRenderer} 的
- * PoseStack 会乘两次矩阵。
+ * <p>重提交的姿势要凑齐执行期那一次 model view（{@code RenderType#draw} 画的时候读 {@code RenderSystem} 的
+ * model view 栈顶）：抓到的顶点已经乘过提交时的 pose，根上正是那张 model view 的逆。两个版本的消费时机不同 ——
+ * 26.2 的重提交与手部进同一次 flush，执行期乘的还是提交时那张，姿势取 identity；26.1.2 的手部由
+ * {@code ItemInHandRenderer#renderHandsWithItems} 自己先 flush，本类补交的面留到外层 {@code renderLevel} 才画，
+ * 那一趟 model view 已经弹回 identity，姿势就得把提交时那张带回来。复用 {@code ItemInHandRenderer} 的 PoseStack
+ * 会再乘一次模型矩阵。
  *
  * <p>壳层是纯色而不是手部贴图：抓面侧拿不到与每个面配套的贴图（模型用 sprite、手持物每层各一张），套错就串图。
  */
@@ -107,20 +110,36 @@ public final class HandFaceCollector {
                 return;
             }
             // 顶点要等到执行期才被顶点消费者读到，而 faces 下一帧就被清空：外扩后的快照是唯一数据源
-            PoseStack identity = new PoseStack();
+            PoseStack pose = new PoseStack();
+            applyResubmitPose(pose);
             if (alpha(shellColor) > 0) {
-                submitShell(target, identity, shell, shellColor);
+                submitShell(target, pose, shell, shellColor);
             }
             if (alpha(boundaryColor) > 0) {
-                submitBoundary(target, identity, shell, boundaryColor);
+                submitBoundary(target, pose, shell, boundaryColor);
             }
         } finally {
             this.faces.clear();
         }
     }
 
-    private static void submitShell(SubmitNodeCollector target, PoseStack identity, List<Vec3[]> faces, int color) {
-        target.submitCustomGeometry(identity, Render_v1_21_11.QUADS_NO_CULL, (pose, buffer) -> {
+    /**
+     * 补上执行期还会乘、而抓面时已经反乘掉的那张 model view，重提交的面才落在手部自己的位置上。
+     *
+     * <p>两个版本的消费时机不同：26.2 与手部进同一次 flush，{@code renderItemInHand} 压上去的 model view 还没弹，
+     * 姿势取 identity；26.1.2 的手部由 {@code renderHandsWithItems} 自己先 flush 掉，本类补交的面要等到外层
+     * {@code renderLevel} 那一趟，此时 model view 栈已经弹回 identity，姿势必须把提交时那张带回来。
+     */
+    private static void applyResubmitPose(PoseStack pose) {
+        //#if MC >= 260200
+        // 26.2：执行期乘的就是抓面时反乘掉的那一张，这里再乘一次会把壳层挪开
+        //#else
+        //$$ pose.mulPose(RenderSystem.getModelViewMatrix());
+        //#endif
+    }
+
+    private static void submitShell(SubmitNodeCollector target, PoseStack poseStack, List<Vec3[]> faces, int color) {
+        target.submitCustomGeometry(poseStack, Render_v1_21_11.QUADS_NO_CULL, (pose, buffer) -> {
             for (Vec3[] face : faces) {
                 for (Vec3 vertex : face) {
                     buffer.addVertex(pose, (float) vertex.x, (float) vertex.y, (float) vertex.z)
@@ -130,8 +149,8 @@ public final class HandFaceCollector {
         });
     }
 
-    private static void submitBoundary(SubmitNodeCollector target, PoseStack identity, List<Vec3[]> faces, int color) {
-        target.submitCustomGeometry(identity, Render_v1_21_11.LINES, (pose, buffer) -> {
+    private static void submitBoundary(SubmitNodeCollector target, PoseStack poseStack, List<Vec3[]> faces, int color) {
+        target.submitCustomGeometry(poseStack, Render_v1_21_11.LINES, (pose, buffer) -> {
             for (Vec3[] face : faces) {
                 for (int index = 0; index < 4; index++) {
                     submitEdge(pose, buffer, face[index], face[(index + 1) & 3], color);

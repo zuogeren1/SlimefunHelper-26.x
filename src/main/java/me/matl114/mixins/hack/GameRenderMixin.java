@@ -46,9 +46,10 @@ public abstract class GameRenderMixin {
     /**
      * 第一人称手部发光：把这一帧的手部提交换成抓面 collector，提交结束后立刻把壳层与边线重提交回同一个 collector。
      *
-     * <p>挂在 {@code submitHandsWithItems} 的那一处调用上，而不是另起一个渲染事件：26.2 的 hand storage 在
-     * {@code renderItemInHand} 末尾被 {@code renderAllFeatures} 消费，26.1.2 由外层 {@code render} 在同一帧稍后消费；
-     * 两个版本里我们重提交的面与手部自己的提交进的是同一个 collector，矩阵与投影不可能错位。
+     * <p>挂在 {@code submitHandsWithItems} 的那一处调用上，而不是另起一个渲染事件：重提交的面与手部自己的提交进的是
+     * 同一个 collector。两者的消费时机并不一致 —— 26.2 由 {@code renderItemInHand} 末尾的 {@code renderAllFeatures}
+     * 一并消费，26.1.2 是 {@code renderHandsWithItems} 先在末尾把手部 flush 掉、补交的面留到外层 {@code renderLevel}
+     * 才画；两者之间差的那次 model view 由 {@link HandFaceCollector} 在重提交姿势里补回。
      *
      * <p>异常不能冒泡：会跳过 {@code renderItemInHand} 的 {@code modelViewStack.popMatrix}，
      * 之后每一帧的 model view 都被污染，比「不发光」严重得多。

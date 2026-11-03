@@ -23,10 +23,10 @@ import net.minecraft.world.InteractionHand;
  * （空手 / 地图 / 弩 / 吃东西 / 举镜），因此变换本身不介入任何渲染管线。
  *
  * <p>发光与边框（{@code glow / glowColor / glowAlpha / boundaryColor}）的配置也在本类，画法在
- * {@link HandFaceCollector}：{@code GameRenderMixin} 把这一帧的手部提交换成抓面 collector，提交结束后用
- * identity PoseStack 把壳层与边线重提交回同一个 collector。两个版本的手部几何都只经
- * {@code submitModelPart / submitItem / submitCustomGeometry} 三条出口，所以这条路径不随版本分叉，
- * 也不需要上游那套 mask 后处理。
+ * {@link HandFaceCollector}：{@code GameRenderMixin} 把这一帧的手部提交换成抓面 collector，提交结束后把壳层与
+ * 边线重提交回同一个 collector。两个版本的手部几何都只经 {@code submitModelPart / submitItem /
+ * submitCustomGeometry} 三条出口，所以抓面本身不随版本分叉；重提交的姿势按两个版本各自的消费时机在
+ * {@link HandFaceCollector} 里补，也不需要上游那套 mask 后处理。
  */
 public class HandView extends BaseModule {
     public static HandView INSTANCE;
