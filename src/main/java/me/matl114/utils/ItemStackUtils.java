@@ -253,7 +253,11 @@ public class ItemStackUtils {
      * 主菜单上的图标、注册表条目预览都处在这个阶段。
      */
     public static boolean itemComponentsBound() {
-        return BuiltInRegistries.ITEM.wrapAsHolder(Items.AIR).areComponentsBound();
+        if (BuiltInRegistries.ITEM.wrapAsHolder(Items.AIR).areComponentsBound()) {
+            return true;
+        }
+        ItemComponentsBootstrap.ensure();
+        return false;
     }
 
     /** 组件未绑定时给空槽，绑定后照常构造 —— 图标类调用点用它替代裸 {@code new ItemStack(...)}。 */
