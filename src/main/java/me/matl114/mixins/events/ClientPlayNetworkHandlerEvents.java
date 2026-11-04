@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import me.matl114.accessors.access.PlayerMoveC2SPacketAccess;
@@ -25,6 +26,7 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.social.PlayerSocialManager;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -41,7 +43,6 @@ import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLoginPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
-import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
@@ -58,7 +59,6 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
 
 @Environment(EnvType.CLIENT)
 @Mixin(ClientPacketListener.class)
@@ -260,26 +260,33 @@ public abstract class ClientPlayNetworkHandlerEvents {
         original.call(instance, packet);
     }
 
-    @Inject(
+    // 玩家进/出事件只从调用点取实参。@Local 依赖目标方法的局部变量表：handlePlayerInfoUpdate 里
+    // playerInfo 的条目只到调用点之后一格（区间 [64,94)、addPlayer 在 91），第三方 mixin 改写局部变量
+    // 时这张表还会被剥掉条目 —— 部分环境因此报
+    // "Found 0 candidate variables but exactly 1 is required"，整个 ClientPacketListener 加载失败。
+    // @WrapOperation 只认调用点描述符，与局部变量表无关。
+    @WrapOperation(
             method = "handlePlayerInfoUpdate",
             at =
                     @At(
                             value = "INVOKE",
                             target =
-                                    "Lnet/minecraft/client/gui/screens/social/PlayerSocialManager;addPlayer(Lnet/minecraft/client/multiplayer/PlayerInfo;)V",
-                            shift = At.Shift.AFTER),
-            locals = LocalCapture.CAPTURE_FAILHARD)
+                                    "Lnet/minecraft/client/gui/screens/social/PlayerSocialManager;addPlayer(Lnet/minecraft/client/multiplayer/PlayerInfo;)V"))
     private void onOtherPlayerJoin(
-            ClientboundPlayerInfoUpdatePacket packet, CallbackInfo ci, @Local PlayerInfo playerListEntry) {
+            PlayerSocialManager instance, PlayerInfo playerListEntry, Operation<Void> original) {
+        original.call(instance, playerListEntry);
         Listener.getOtherPlayerJoinPoint().broadcast(playerListEntry);
     }
 
-    @Inject(
+    @WrapOperation(
             method = "handlePlayerInfoRemove",
-            at = @At(value = "INVOKE", target = "Ljava/util/Set;remove(Ljava/lang/Object;)Z", shift = At.Shift.AFTER))
-    private void onOtherPlayerExit(
-            ClientboundPlayerInfoRemovePacket packet, CallbackInfo ci, @Local PlayerInfo playerListEntry) {
-        Listener.getOtherPlayerExitPoint().broadcast(playerListEntry);
+            at = @At(value = "INVOKE", target = "Ljava/util/Set;remove(Ljava/lang/Object;)Z"))
+    private boolean onOtherPlayerExit(Set<PlayerInfo> instance, Object value, Operation<Boolean> original) {
+        boolean removed = original.call(instance, value);
+        if (value instanceof PlayerInfo playerListEntry) {
+            Listener.getOtherPlayerExitPoint().broadcast(playerListEntry);
+        }
+        return removed;
     }
 
     @Inject(method = "applyPlayerInfoUpdate", at = @At("RETURN"))
