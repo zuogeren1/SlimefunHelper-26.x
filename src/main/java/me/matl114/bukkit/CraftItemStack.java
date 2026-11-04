@@ -100,7 +100,7 @@ public final class CraftItemStack extends BukkitItemStack {
 
                 return stack;
             } catch (Throwable throwable) {
-                return new ItemStack(Items.BARRIER);
+                return BukkitItemStackUtils.stackForbidden();
             }
 
         } else return ItemStack.EMPTY;

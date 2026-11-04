@@ -244,6 +244,23 @@ public class ItemStackUtils {
         }
     }
 
+    /**
+     * 物品数据组件是否已绑定。
+     *
+     * <p>26.2 起组件的最终值来自数据包：{@code DataComponentInitializers} 在加载数据包时统一
+     * {@code bindComponents}，本次启动还没进过世界也没连过服时 {@code Holder.Reference#components()}
+     * 仍是 null，此时任何 {@code new ItemStack(...)} 都会抛 {@code NullPointerException: Components not bound yet}。
+     * 主菜单上的图标、注册表条目预览都处在这个阶段。
+     */
+    public static boolean itemComponentsBound() {
+        return BuiltInRegistries.ITEM.wrapAsHolder(Items.AIR).areComponentsBound();
+    }
+
+    /** 组件未绑定时给空槽，绑定后照常构造 —— 图标类调用点用它替代裸 {@code new ItemStack(...)}。 */
+    public static ItemStack safeItemStack(ItemLike item) {
+        return itemComponentsBound() ? new ItemStack(item) : ItemStack.EMPTY;
+    }
+
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
     public static Component jsonRawToText(String jsonRaw) {

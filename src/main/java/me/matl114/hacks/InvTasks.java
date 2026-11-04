@@ -746,17 +746,17 @@ public class InvTasks {
     private static ItemStack invIconNoItemCache = null;
 
     public static ItemStack invIconUnknown() {
-        if (invIconUnknownCache == null) {
+        if (invIconUnknownCache == null && ItemStackUtils.itemComponentsBound()) {
             invIconUnknownCache = new ItemStack(Items.BARRIER);
         }
-        return invIconUnknownCache;
+        return invIconUnknownCache == null ? ItemStack.EMPTY : invIconUnknownCache;
     }
 
     public static ItemStack invIconNoItem() {
-        if (invIconNoItemCache == null) {
+        if (invIconNoItemCache == null && ItemStackUtils.itemComponentsBound()) {
             invIconNoItemCache = new ItemStack(Items.BEDROCK);
         }
-        return invIconNoItemCache;
+        return invIconNoItemCache == null ? ItemStack.EMPTY : invIconNoItemCache;
     }
 
     public static ItemStack generateIconForScreen(AbstractContainerScreen<?> screen) {
@@ -765,7 +765,7 @@ public class InvTasks {
             if (blockType != null) {
                 Item itemType = blockType.asItem();
                 if (itemType != Items.AIR) {
-                    return new ItemStack(itemType);
+                    return ItemStackUtils.safeItemStack(itemType);
                 }
             }
             return invIconNoItem();

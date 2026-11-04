@@ -1,6 +1,7 @@
 package me.matl114.gui.presets.single;
 
 import java.util.function.Function;
+import me.matl114.utils.ItemStackUtils;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.world.item.ItemStack;
@@ -21,6 +22,9 @@ public interface IIcon<T> {
 
         public static ItemStack get() {
             if (instance == null) {
+                if (!ItemStackUtils.itemComponentsBound()) {
+                    return ItemStack.EMPTY;
+                }
                 instance = new ItemStack(Items.BARRIER);
             }
             return instance;
@@ -43,7 +47,8 @@ public interface IIcon<T> {
 
     public static <T> IIcon<T> renderItem(Function<T, ItemStack> function) {
         return ((startIndexX, startIndexY, context, registerValue) -> {
-            context.drawItem(function.apply(registerValue), startIndexX, startIndexY, 114514, 0);
+            ItemStack stack = ItemStackUtils.itemComponentsBound() ? function.apply(registerValue) : ItemStack.EMPTY;
+            context.drawItem(stack, startIndexX, startIndexY, 114514, 0);
         });
     }
 

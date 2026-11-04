@@ -23,10 +23,10 @@ public class BukkitItemStackUtils {
     private static ItemStack stackForbiddenCache = null;
 
     public static ItemStack stackForbidden() {
-        if (stackForbiddenCache == null) {
+        if (stackForbiddenCache == null && itemComponentsBound()) {
             stackForbiddenCache = new ItemStack(Items.BARRIER, 1);
         }
-        return stackForbiddenCache;
+        return stackForbiddenCache == null ? ItemStack.EMPTY : stackForbiddenCache;
     }
 
     public static void init() {}

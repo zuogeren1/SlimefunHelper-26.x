@@ -393,10 +393,10 @@ public class RecipeDatabase extends BaseModule {
     private static ItemStack itemNullTypeCache = null;
 
     public static ItemStack itemNullType() {
-        if (itemNullTypeCache == null) {
+        if (itemNullTypeCache == null && ItemStackUtils.itemComponentsBound()) {
             itemNullTypeCache = new ItemStack(Items.BARRIER);
         }
-        return itemNullTypeCache;
+        return itemNullTypeCache == null ? ItemStack.EMPTY : itemNullTypeCache;
     }
 
     public static record CraftingType(String id, ItemStackDataWithAmount icon) {

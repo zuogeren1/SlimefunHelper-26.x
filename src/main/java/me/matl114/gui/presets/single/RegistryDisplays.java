@@ -49,13 +49,16 @@ public class RegistryDisplays {
     private static ItemStack defaultNullIcon = null;
 
     public static ItemStack defaultNullIcon() {
-        if (defaultNullIcon == null) {
+        if (defaultNullIcon == null && ItemStackUtils.itemComponentsBound()) {
             defaultNullIcon = new ItemStack(Items.BARRIER);
         }
-        return defaultNullIcon;
+        return defaultNullIcon == null ? ItemStack.EMPTY : defaultNullIcon;
     }
 
     public static ItemStack createEnchantmentIcon(Enchantment enchantment) {
+        if (!ItemStackUtils.itemComponentsBound()) {
+            return ItemStack.EMPTY;
+        }
         ItemStack itemStack = new ItemStack(Items.ENCHANTED_BOOK);
         Holder<Enchantment> entry =
                 RegistryUtils.getRegistryEntry(ItemStackUtils.registry(), Registries.ENCHANTMENT, enchantment);
@@ -109,7 +112,9 @@ public class RegistryDisplays {
         } else if (val instanceof EntityType<?> entityType) {
             return Component.translatable(entityType.getDescriptionId());
         } else if (val instanceof Item itemConvertible) {
-            return itemConvertible.getName(new ItemStack(itemConvertible));
+            return ItemStackUtils.itemComponentsBound()
+                    ? itemConvertible.getName(new ItemStack(itemConvertible))
+                    : Component.translatable(itemConvertible.getDescriptionId());
         } else if (val instanceof Block itemStack) {
             return itemStack.getName();
         } else if (val instanceof SoundEvent soundEvent) {

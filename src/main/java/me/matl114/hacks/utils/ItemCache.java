@@ -341,7 +341,7 @@ public class ItemCache {
             var re = this.getItem(id);
             return (re != null && re.isValid()) ? re.getItemStack().copy() : ItemStackData.missing();
         } else {
-            return new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.tryParse(id)));
+            return ItemStackUtils.safeItemStack(BuiltInRegistries.ITEM.getValue(Identifier.tryParse(id)));
         }
     }
 
@@ -351,7 +351,7 @@ public class ItemCache {
             var re = this.getItem(id);
             return (re != null) ? re : new ItemStackData.Missing(id);
         } else {
-            return ItemStackData.wrapRaw(new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.tryParse(id))));
+            return ItemStackData.wrapRaw(ItemStackUtils.safeItemStack(BuiltInRegistries.ITEM.getValue(Identifier.tryParse(id))));
         }
     }
 
