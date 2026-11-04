@@ -99,19 +99,39 @@ public final class ItemStackTemplate implements NBTParsable<ItemStackTemplate> {
         return MC.getConnection() == null ? null : MC.getConnection().registryAccess();
     }
 
+    /**
+     * 配置界面里的图标预览。
+     *
+     * <p>没有连接（主菜单开 ClickGui）时解不了 NBT：模板解码要并入数据包的注册表，那时手上只有
+     * 内置注册表。于是改拿物品本身建栈 —— 与本类 NBT 只写 {@code id} 的表示等价（{@code count}
+     * 缺省 1、{@code components} 缺省空 patch）。
+     *
+     * <p>但 26.2 起 {@code ItemStack(Holder)} 会读 {@code Holder.Reference#components()}，物品的数据
+     * 组件由 {@code DataComponentInitializers} 在加载数据包时统一绑定（集成服务端
+     * {@code ReloadableServerResources#updateComponentsAndStaticRegistryTags}、客户端
+     * {@code RegistryDataCollector#updateComponents}）——本次启动还没进过世界时它仍是 null，
+     * 构造会抛 {@code NullPointerException: Components not bound yet}。未绑定时只给空槽；组件绑定后
+     * 不再清空，进过一次世界再回主菜单图标就回来了。
+     */
     private ItemStack previewStack() {
-        return getDynamicRegistryManager() == null ? new ItemStack(BuiltInRegistries.ITEM.getValue(itemId())) : itemStack();
+        if (getDynamicRegistryManager() != null) {
+            return itemStack();
+        }
+        Item item = BuiltInRegistries.ITEM.getValue(itemId());
+        return BuiltInRegistries.ITEM.wrapAsHolder(item).areComponentsBound() ? new ItemStack(item) : ItemStack.EMPTY;
     }
 
     public ItemStack itemStack() {
         RegistryAccess registry = ItemStackUtils.registry();
         if (cachedItemStack == null || cachedRegistry != registry) {
+            ItemStack decoded = null;
             try {
-                ItemStack decoded = VItem.getInstance().fromNbt(nbt, registry);
-                cachedItemStack = decoded == null || decoded.isEmpty() ? new ItemStack(Items.AIR) : decoded;
+                decoded = VItem.getInstance().fromNbt(nbt, registry);
             } catch (Throwable ignored) {
-                cachedItemStack = new ItemStack(Items.AIR);
+                // 组件未绑定时解码必然失败（构造 ItemStack 要读 holder.components()）。
+                // 解码不出来只能算空槽，不能退回 new ItemStack(Items.AIR)：那同样会抛。
             }
+            cachedItemStack = decoded == null || decoded.isEmpty() ? ItemStack.EMPTY : decoded;
             cachedRegistry = registry;
         }
         return cachedItemStack;
