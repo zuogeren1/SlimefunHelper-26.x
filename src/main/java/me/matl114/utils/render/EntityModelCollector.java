@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import me.matl114.events.RenderListener;
 import me.matl114.utils.Debug;
 import me.matl114.utils.RenderUtils;
 import me.matl114.utils.collections.IndexEntry;
@@ -18,23 +19,37 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
 
 /**
  * 实体模型几何收集器：把实体身上的每一个面截下来，交给子类决定怎么重画
- * （描边、单线框、贴图重绘）。
+ * （3D 贴图重绘、屏幕空间掩膜）。
  *
- * <p>26.2 的实体渲染已改为 {@code EntityRenderDispatcher#submit(..., SubmitNodeCollector, ...)}，
- * 提交阶段不再经过可替换的 {@code VertexConsumer}，所以{@link #capture} 改成「自建捕获式 collector」：
+ * <p>实体渲染在两个版本都走 {@code EntityRenderDispatcher#submit(..., SubmitNodeCollector, ...)}，
+ * 提交阶段不再经过可替换的 {@code VertexConsumer}，所以{@link #capture} 用「自建捕获式 collector」：
  * 对每个待画实体先 {@code createRenderState}，再把 {@link CapturingSubmitNodeCollector} 当作提交目标
- * 喂给 dispatcher，由它把模型顶点交回 {@link CapturingVertexConsumer} 还原成面。
+ * 喂给 dispatcher，由它把模型顶点交回 {@link CapturingVertexConsumer} 还原成面
+ * （{@code OrderedSubmitNodeCollector} 的成员集两版本不同，该 collector 因此各有一份实现）。
  * 抓到的顶点是相机相对坐标（与 {@code LevelRenderer} 提交实体时用的坐标系一致），
  * 与其余 {@link RenderCollector} 实现的画法对得上。
+ *
+ * <p>掩膜路径（{@link #renderQuads2D}）只在 2D 阶段算数据：真正写显存要等 GUI 画完之后，
+ * 由 {@link MaskPostRenderer#flush()} 统一执行，所以这里只把面与相机矩阵交给消费方。
  */
 public class EntityModelCollector extends RenderCollector.Impl<Entity> {
     /** 抓面失败计数：前几次留痕，之后静默（避免每帧刷屏）。 */
     private static final AtomicInteger CAPTURE_FAILURES = new AtomicInteger();
 
     protected final List<IndexEntry<Entity>> entities = new ArrayList<>();
+
+    /** 本帧抓到的全部面（{@link #renderQuads2D} 按实体清空重抓）。 */
+    private final List<IndexEntry<CapturedQuad>> capturedQuads = new ArrayList<>();
+
+    /** 掩膜消费方：拿到一个实体的全部面 + 该帧的世界相机矩阵 + 该实体的颜色。 */
+    @FunctionalInterface
+    protected interface MaskConsumer {
+        void accept(List<MaskPostRenderer.Quad> quads, Matrix4f camera, Matrix4f projection, int color);
+    }
 
     /** 抓到的单个面：四个顶点 + uv + 来源贴图（纯色面 texture 为 null）。 */
     public record CapturedQuad(Vec3[] vertices, UV uv, Identifier texture) {
@@ -56,6 +71,7 @@ public class EntityModelCollector extends RenderCollector.Impl<Entity> {
     public void clear() {
         super.clear();
         entities.clear();
+        capturedQuads.clear();
         clearCollected();
     }
 
@@ -65,24 +81,55 @@ public class EntityModelCollector extends RenderCollector.Impl<Entity> {
         if (entities.isEmpty()) {
             return;
         }
-        capture(matrices, partialTick);
+        capturedQuads.clear();
+        capture(entities, matrices, partialTick);
         renderCollected(matrices);
         clearCollected();
+        capturedQuads.clear();
     }
 
     @Override
     public void render2D(VDrawContext vDrawContext, float partialTick) {}
 
+    /**
+     * 按实体逐个抓面并交给 {@code consumer}：一个实体的掩膜只服务它自己的颜色，
+     * 所以不能把所有实体合并成一批。
+     */
+    protected final void renderQuads2D(float partialTick, MaskConsumer consumer) {
+        if (entities.isEmpty()) return;
+        Matrix4f camera = RenderListener.getWorldModelViewMatrix();
+        Matrix4f projection = RenderListener.getWorldBasicProjectionMatrix();
+        if (camera == null || projection == null) return;
+        Matrix4f cameraCopy = new Matrix4f(camera);
+        Matrix4f projectionCopy = new Matrix4f(projection);
+        PoseStack identity = new PoseStack();
+        for (IndexEntry<Entity> entry : entities) {
+            Entity entity = entry.val();
+            if (entity == null || entity.isRemoved()) continue;
+            capturedQuads.clear();
+            capture(List.of(entry), identity, partialTick);
+            if (capturedQuads.isEmpty()) continue;
+            List<MaskPostRenderer.Quad> quads = new ArrayList<>(capturedQuads.size());
+            for (IndexEntry<CapturedQuad> captured : capturedQuads) {
+                quads.add(toMaskQuad(captured.val()));
+            }
+            consumer.accept(quads, cameraCopy, projectionCopy, entry.index());
+        }
+        capturedQuads.clear();
+    }
+
     /** 抓取实体模型几何：逐个实体走一遍提交，但提交目标换成捕获式的 collector。 */
-    protected void capture(PoseStack matrices, float partialTick) {
-        //#if MC >= 260200
-        CapturingSubmitNodeCollector collector = new CapturingSubmitNodeCollector(this::collectQuad);
+    private void capture(List<IndexEntry<Entity>> batch, PoseStack matrices, float partialTick) {
+        CapturingSubmitNodeCollector collector = new CapturingSubmitNodeCollector((quad, color) -> {
+            capturedQuads.add(new IndexEntry<>(color, quad));
+            collectQuad(quad, color);
+        });
         Minecraft minecraft = Minecraft.getInstance();
         EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
         Vec3 cameraPos = RenderUtils.getCameraPos();
         CameraRenderState cameraState = new CameraRenderState();
         cameraState.pos = cameraPos;
-        for (IndexEntry<Entity> entry : entities) {
+        for (IndexEntry<Entity> entry : batch) {
             Entity entity = entry.val();
             if (entity == null || entity.isRemoved()) {
                 continue;
@@ -111,14 +158,23 @@ public class EntityModelCollector extends RenderCollector.Impl<Entity> {
                 // 单个实体没有渲染器 / 渲染器自己抛错，都不该把调试功能升级成崩溃：跳过它，继续抓别的实体。
                 // 但前几次失败要留痕，否则抓面失败会表现成「什么都没画」，无从定位。
                 if (CAPTURE_FAILURES.getAndIncrement() < 3) {
-                    Debug.info(
-                            "capture failed for %s".formatted(entity.getType()), failure);
+                    Debug.info("capture failed for %s".formatted(entity.getType()), failure);
                 }
             }
         }
-        //#else
-        //$$ // 26.1.2 的提交节点接口形态不同（submitModelPart / submitParticleGroup 签名都不一样），抓面只在 26.2 可用。
-        //#endif
+    }
+
+    /** 抓到的面 → 掩膜面：顶点保持原样，uv 按四角展开成逐顶点数组。 */
+    private static MaskPostRenderer.Quad toMaskQuad(CapturedQuad captured) {
+        Vec3[] vertices = captured.vertices();
+        float[] u = new float[vertices.length];
+        float[] v = new float[vertices.length];
+        UV uv = captured.uv();
+        for (int i = 0; i < vertices.length; i++) {
+            u[i] = uv.getU(i);
+            v[i] = uv.getV(i);
+        }
+        return new MaskPostRenderer.Quad(vertices, u, v, captured.texture());
     }
 
     /** 实体本体的贴图；船、画、展示框这类非生物实体没有统一贴图，返回 null 表示按纯色面处理。 */

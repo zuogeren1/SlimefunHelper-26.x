@@ -25,7 +25,6 @@ import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
-import net.minecraft.client.renderer.rendertype.LayeringTransform;
 import net.minecraft.client.renderer.rendertype.OutputTarget;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
@@ -104,19 +103,68 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     public static final RenderPipeline DEBUG_LINES =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
                     .withLocation(Identifier.tryParse("slimefunhelper:pipeline/debug_lines"))
+                    // 线层必须留着 LINES 拓扑：LINES 不是 GL_LINES，而是把每条线段的两个顶点
+                    // 各自复制一份（BufferBuilder#endLastVertex），再按 4 顶点 → 2 三角形展开
+                    // （indexCount = n/4*6）；rendertype_lines 的顶点着色器正是用 gl_VertexID 的奇偶
+                    // 决定该顶点落在细长四边形的哪一侧。DEBUG_LINES 是真 GL_LINES、不复制顶点，
+                    // 每对顶点只能画出线段的端帽，视觉上等于没有线。
+                    //#if MC >= 260200
+                    .withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH)
+                    .withPrimitiveTopology(PrimitiveTopology.LINES)
+                    //#else
+                    //$$ .withVertexFormat(
+                    //$$         DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH, VertexFormat.Mode.LINES)
+                    //#endif
                     .withDepthStencilState(NO_DEPTH_TEST_STATE)
                     .build());
 
     public static final RenderType LINES = RenderType.create(
             "slimefunhelper:debug_lines",
             RenderSetup.builder(DEBUG_LINES)
-                    .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
+                    // 不做 layering 偏移：这一层已经关掉深度测试，分层偏移没有意义，
+                    // 只会在 RenderType#prepare 里额外乘一个与当前投影类型相关的矩阵。
                     // 26.2: 世界里的线框要画到主帧缓冲；之前设成 ITEM_ENTITY_TARGET
                     // 会被提交到物品/实体目标，导致世界中的方框完全不可见
                     .setOutputTarget(OutputTarget.MAIN_TARGET)
                     // 注意：LINES / LINE_STRIP 拓扑不能开 sortOnUpload ——
                     // 26.2 的 StagedVertexBuffer.appendDraw 会直接抛
                     // IllegalArgumentException: Cannot sort draw with LINES
+                    .createRenderSetup());
+
+    /**
+     * 穿墙线层：与 {@link #DEBUG_LINES} 同源（都从 {@code RenderPipelines.LINES_SNIPPET} 派生），
+     * 差别只在显式关掉背面剔除。
+     *
+     * <p>{@code LINES_SNIPPET} 带 ModelViewMat，世界坐标能被正确变换到相机空间；自建四边形层用的
+     * {@code DEBUG_FILLED_SNIPPET} 只吃投影矩阵，那是那一类层在 3D 里出不了像素的原因。
+     *
+     * <p>剔除必须关：线的屏幕宽度由顶点着色器按顶点序号展开成细长四边形，朝向随线段方向变化，
+     * 开剔除会让其中一半随视角消失。
+     */
+    public static final RenderPipeline ESP_TRACE_LINES_PIPELINE =
+            RenderPipelines.register(RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
+                    .withLocation(Identifier.tryParse("slimefunhelper:pipeline/esp_trace_lines"))
+                    .withDepthStencilState(NO_DEPTH_TEST_STATE)
+                    .withCull(false)
+                    //#if MC >= 260200
+                    .withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH)
+                    .withPrimitiveTopology(PrimitiveTopology.LINES)
+                    //#else
+                    //$$ .withVertexFormat(
+                    //$$         DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH, VertexFormat.Mode.LINES)
+                    //#endif
+                    .build());
+
+    /**
+     * 追踪线的渲染层：没有深度测试，线才穿得过方块。
+     *
+     * <p>不做 layering 偏移（这一层没有深度可比），也不能开 sortOnUpload ——
+     * LINES 拓扑的排序会直接抛 {@code Cannot sort draw with LINES}。
+     */
+    public static final RenderType ESP_TRACE_LINES = RenderType.create(
+            "slimefunhelper:esp_trace_lines",
+            RenderSetup.builder(ESP_TRACE_LINES_PIPELINE)
+                    .setOutputTarget(OutputTarget.MAIN_TARGET)
                     .createRenderSetup());
 
     public static final RenderPipeline DEBUG_LINES_STRIP =
@@ -137,7 +185,7 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     public static final RenderType LINES_STRIP = RenderType.create(
             "slimefunhelper:debug_lines_strip",
             RenderSetup.builder(DEBUG_LINES_STRIP)
-                    .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
+                    // 不做 layering 偏移：这一层已经关掉深度测试，分层偏移没有意义。
                     // 26.2: 世界里的线框要画到主帧缓冲；之前设成 ITEM_ENTITY_TARGET
                     // 会被提交到物品/实体目标，导致世界中的方框完全不可见
                     .setOutputTarget(OutputTarget.MAIN_TARGET)
@@ -166,7 +214,7 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
 
     public static final RenderType RECTS = RenderType.create(
             "slimefunhelper:debug_rects",
-            RenderSetup.builder(DEBUG_RECTS).sortOnUpload().createRenderSetup());
+            RenderSetup.builder(DEBUG_RECTS).createRenderSetup());
 
     public static final RenderPipeline DEBUG_RECTS_STRIP =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
@@ -182,11 +230,11 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
 
     public static final RenderType RECTS_STRIP = RenderType.create(
             "slimefunhelper:debug_rects",
-            RenderSetup.builder(DEBUG_RECTS_STRIP).sortOnUpload().createRenderSetup());
+            RenderSetup.builder(DEBUG_RECTS_STRIP).createRenderSetup());
 
     public static final RenderType QUADS = RenderType.create(
             "slimefunhelper:debug_quads",
-            RenderSetup.builder(DEBUG_QUADS).sortOnUpload().createRenderSetup());
+            RenderSetup.builder(DEBUG_QUADS).createRenderSetup());
 
     public static final RenderPipeline DEBUG_QUADS_NO_CULL =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
@@ -197,7 +245,7 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
 
     public static final RenderType QUADS_NO_CULL = RenderType.create(
             "slimefunhelper:debug_quads",
-            RenderSetup.builder(DEBUG_QUADS_NO_CULL).sortOnUpload().createRenderSetup());
+            RenderSetup.builder(DEBUG_QUADS_NO_CULL).createRenderSetup());
 
     public static final RenderPipeline DEBUG_GUI_3D =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.GUI_SNIPPET)
@@ -232,14 +280,17 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     }));
 
     /**
-     * 实体高亮管线：拿实体贴图铺在模型面上，不做深度测试。
-     * 片元着色器见 {@code assets/slimefunhelper/shaders/core/entity_highlight.fsh}。
+     * 实体高亮管线：拿实体贴图做遮罩、输出纯色（片元着色器见
+     * {@code assets/slimefunhelper/shaders/core/entity_highlight.fsh}）。
+     *
+     * <p>必须保留深度测试：一个实体的所有面（含背面与内部）都写进来，关掉深度后几十层半透明
+     * 叠加会变成不透明的一块，把实体整个糊住。</p>
      */
     public static final RenderPipeline ENTITY_HIGHLIGHT =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.OUTLINE_SNIPPET)
                     .withLocation(MainPlugin.identifier("pipeline/entity_highlight"))
                     .withFragmentShader(MainPlugin.identifier("core/entity_highlight"))
-                    .withDepthStencilState(NO_DEPTH_TEST_STATE)
+                    .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
                     .withCull(false)
                     .build());
 
@@ -273,7 +324,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     }
 
     public void createLinesLayer(RenderCallback callback) {
-        createLayer(LINES, callback);
+        // 本层只收四边形：26.2 里 LINES / DEBUG_LINES / DEBUG_LINE_STRIP 实测画不出像素，
+        // 而 QUADS 管线（同一批调用方的实心剪影）已验证能画，所以「线」改由四边形拼，
+        // 顶点格式随之退回 POSITION_COLOR（见 drawSegmentQuads）。
+        createLayer(QUADS_NO_CULL, callback);
     }
 
     @Override
@@ -315,37 +369,68 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     // 顶点绘制（VertexConsumer 在 26.2 中仍存在，逻辑保持不变）
     // ------------------------------------------------------------------
 
+    /**
+     * 线的总厚度（世界单位，格）。按「20 格距离、70° 视场、1080p 下仍有 1~2 像素」取 0.03：
+     * 再薄远处就掉到亚像素、闪成断线；再厚贴脸的线框会糊成实心块。世界空间厚度会随距离自然收细，
+     * 这正是线的观感，所以不做屏幕空间缩放。
+     */
+    private static final float LINE_THICKNESS = 0.03f;
+
+    /**
+     * 一段线段 → 两片互相垂直、都含线段轴的薄四边形（十字双片）。单片薄片正对相机时投影会退化成
+     * 零宽，此时另一片恰是正面，所以任何视角至少有一片有宽度；顶点只写 POSITION_COLOR，
+     * 与 {@link #drawSolidBoxQuad} 走同一条路径（QUADS 管线在本仓库已验证可出图），
+     * 不再依赖 LINES 拓扑的 gl_VertexID 展开与线宽。
+     */
+    private void drawSegmentQuads(Matrix4f pose, VertexConsumer consumer, Vector3f from, Vector3f to, int color) {
+        Vector3f axis = new Vector3f(to).sub(from);
+        float length = axis.length();
+        if (length < 1.0E-6f) {
+            // 零长线段没有方向，算不出垂直分量；强行 normalize 会写出 NaN 顶点，整批几何都画不出来
+            return;
+        }
+        axis.div(length);
+        // 参考轴取与该轴夹角较大的世界轴，cross 才不会退化成零向量
+        Vector3f ref = Math.abs(axis.y) < 0.9f ? new Vector3f(0.0f, 1.0f, 0.0f) : new Vector3f(1.0f, 0.0f, 0.0f);
+        Vector3f side = new Vector3f(axis).cross(ref).normalize();
+        Vector3f up = new Vector3f(axis).cross(side).normalize();
+        emitSegmentBlade(pose, consumer, from, to, side, color);
+        emitSegmentBlade(pose, consumer, from, to, up, color);
+    }
+
+    /** 以 {@code widthDir} 为宽度方向，把一段线段写成一片四边形。 */
+    private void emitSegmentBlade(
+            Matrix4f pose, VertexConsumer consumer, Vector3f from, Vector3f to, Vector3f widthDir, int color) {
+        float half = LINE_THICKNESS * 0.5f;
+        float ox = widthDir.x * half;
+        float oy = widthDir.y * half;
+        float oz = widthDir.z * half;
+        consumer.addVertex(pose, from.x - ox, from.y - oy, from.z - oz).setColor(color);
+        consumer.addVertex(pose, to.x - ox, to.y - oy, to.z - oz).setColor(color);
+        consumer.addVertex(pose, to.x + ox, to.y + oy, to.z + oz).setColor(color);
+        consumer.addVertex(pose, from.x + ox, from.y + oy, from.z + oz).setColor(color);
+    }
+
     public void drawLines(PoseStack matrixStack, VertexConsumer consumer, List<Vec3> points, int color) {
-        Matrix4f entry = matrixStack.last().pose();
-        for (var i = 1; i < points.size(); i++) {
-            Vector3f prev = points.get(i - 1).toVector3f();
-            Vector3f next = points.get(i).toVector3f();
-            Vector3f normal = new Vector3f(next).sub(prev).normalize();
-            consumer.addVertex(entry, prev.x, prev.y, prev.z)
-                    .setColor(color)
-                    .setNormal(normal.x, normal.y, normal.z)
-                    .setLineWidth(2);
-            consumer.addVertex(entry, next.x, next.y, next.z)
-                    .setColor(color)
-                    .setNormal(normal.x, normal.y, normal.z)
-                    .setLineWidth(2);
+        Matrix4f pose = matrixStack.last().pose();
+        for (int i = 1; i < points.size(); i++) {
+            drawSegmentQuads(pose, consumer, points.get(i - 1).toVector3f(), points.get(i).toVector3f(), color);
         }
     }
 
     public void drawLine(PoseStack matrixStack, VertexConsumer consumer, Vec3 prevV, Vec3 nextV, int color) {
-        Vector3f prev = prevV.toVector3f();
-        Vector3f next = nextV.toVector3f();
-        Matrix4f entry = matrixStack.last().pose();
-        Vector3f normal = new Vector3f(next).sub(prev).normalize();
-        consumer.addVertex(entry, prev.x, prev.y, prev.z)
-                .setColor(color)
-                .setNormal(normal.x, normal.y, normal.z)
-                .setLineWidth(1);
-        consumer.addVertex(entry, next.x, next.y, next.z)
-                .setColor(color)
-                .setNormal(normal.x, normal.y, normal.z)
-                .setLineWidth(1);
+        drawSegmentQuads(matrixStack.last().pose(), consumer, prevV.toVector3f(), nextV.toVector3f(), color);
     }
+
+    /**
+     * 立方体 12 条棱的角点索引对。角点按 {@code (x ? 1 : 0) | (y ? 2 : 0) | (z ? 4 : 0)} 编号，
+     * 每条棱的两端只差一个坐标轴。
+     */
+    private static final int[] BOX_EDGES = {
+        0, 1, 2, 3, 4, 5, 6, 7, // 沿 X 的四条
+        0, 2, 1, 3, 4, 6, 5, 7, // 沿 Y 的四条
+        0, 4, 1, 5, 2, 6, 3, 7, // 沿 Z 的四条
+    };
 
     public void drawOutlinedBox(
             PoseStack matrix4fStack, VertexConsumer bufferBuilder, Vec3 from, Vec3 to, int cachedRenderColor) {
@@ -357,137 +442,20 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
         float maxY = (float) to.y();
         float maxZ = (float) to.z();
 
-        bufferBuilder
-                .addVertex(matrix4f, minX, minY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, minY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, maxX, minY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, minY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, minX, minY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, minY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, minX, minY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, minX, minY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, minX, minY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, minX, maxY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, maxX, minY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, maxY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, maxX, minY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, maxY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, minX, minY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, minX, maxY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 1, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, minX, maxY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, maxY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, maxX, maxY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, maxY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, minX, maxY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, maxX, maxY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(1, 0, 0)
-                .setLineWidth(2);
-
-        bufferBuilder
-                .addVertex(matrix4f, minX, maxY, minZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
-        bufferBuilder
-                .addVertex(matrix4f, minX, maxY, maxZ)
-                .setColor(cachedRenderColor)
-                .setNormal(0, 0, 1)
-                .setLineWidth(2);
+        Vector3f[] corners = {
+            new Vector3f(minX, minY, minZ),
+            new Vector3f(maxX, minY, minZ),
+            new Vector3f(minX, maxY, minZ),
+            new Vector3f(maxX, maxY, minZ),
+            new Vector3f(minX, minY, maxZ),
+            new Vector3f(maxX, minY, maxZ),
+            new Vector3f(minX, maxY, maxZ),
+            new Vector3f(maxX, maxY, maxZ),
+        };
+        for (int i = 0; i < BOX_EDGES.length; i += 2) {
+            drawSegmentQuads(
+                    matrix4f, bufferBuilder, corners[BOX_EDGES[i]], corners[BOX_EDGES[i + 1]], cachedRenderColor);
+        }
     }
 
     public void drawSolidBoxQuad(
