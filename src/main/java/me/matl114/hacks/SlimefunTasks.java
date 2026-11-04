@@ -136,14 +136,10 @@ public class SlimefunTasks {
     private static ItemStack vtypeIcon;
     private static ItemStack savedIcon;
 
-    /** 组件绑定前不能构造 ItemStack；未绑定时退回空图标而不是抛异常。 */
-    private static boolean itemComponentsBound() {
-        return Items.ENCHANTED_BOOK.builtInRegistryHolder().areComponentsBound();
-    }
 
     public static ItemStack guideIcon() {
         if (guideIcon == null) {
-            if (!itemComponentsBound()) {
+            if (!ItemStackUtils.itemComponentsBound()) {
                 return ItemStack.EMPTY;
             }
             ItemStack icon = new ItemStack(Items.ENCHANTED_BOOK);
@@ -155,7 +151,7 @@ public class SlimefunTasks {
 
     public static ItemStack rtypeIcon() {
         if (rtypeIcon == null) {
-            if (!itemComponentsBound()) {
+            if (!ItemStackUtils.itemComponentsBound()) {
                 return ItemStack.EMPTY;
             }
             rtypeIcon = new ItemStack(Items.KNOWLEDGE_BOOK);
@@ -165,7 +161,7 @@ public class SlimefunTasks {
 
     public static ItemStack vtypeIcon() {
         if (vtypeIcon == null) {
-            if (!itemComponentsBound()) {
+            if (!ItemStackUtils.itemComponentsBound()) {
                 return ItemStack.EMPTY;
             }
             vtypeIcon = new ItemStack(Items.CRAFTING_TABLE);
@@ -175,7 +171,7 @@ public class SlimefunTasks {
 
     public static ItemStack savedIcon() {
         if (savedIcon == null) {
-            if (!itemComponentsBound()) {
+            if (!ItemStackUtils.itemComponentsBound()) {
                 return ItemStack.EMPTY;
             }
             savedIcon = new ItemStack(Items.CHAIN_COMMAND_BLOCK);

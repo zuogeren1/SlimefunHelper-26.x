@@ -110,15 +110,14 @@ public final class ItemStackTemplate implements NBTParsable<ItemStackTemplate> {
      * 组件由 {@code DataComponentInitializers} 在加载数据包时统一绑定（集成服务端
      * {@code ReloadableServerResources#updateComponentsAndStaticRegistryTags}、客户端
      * {@code RegistryDataCollector#updateComponents}）——本次启动还没进过世界时它仍是 null，
-     * 构造会抛 {@code NullPointerException: Components not bound yet}。未绑定时只给空槽；组件绑定后
-     * 不再清空，进过一次世界再回主菜单图标就回来了。
+     * 构造会抛 {@code NullPointerException: Components not bound yet}。未绑定时只给空槽，同时由
+     * {@link ItemStackUtils#safeItemStack} 触发一次预绑定，绑好之后下一帧就有图标。
      */
     private ItemStack previewStack() {
         if (getDynamicRegistryManager() != null) {
             return itemStack();
         }
-        Item item = BuiltInRegistries.ITEM.getValue(itemId());
-        return BuiltInRegistries.ITEM.wrapAsHolder(item).areComponentsBound() ? new ItemStack(item) : ItemStack.EMPTY;
+        return ItemStackUtils.safeItemStack(BuiltInRegistries.ITEM.getValue(itemId()));
     }
 
     public ItemStack itemStack() {

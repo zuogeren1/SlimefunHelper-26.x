@@ -31,6 +31,7 @@ public final class ItemComponentsBootstrap {
         if (!STARTED.compareAndSet(false, true)) {
             return;
         }
+        Debug.info("item components prebind: triggered");
         ThreadUtils.daemonThreadFactory("sfh-item-components")
                 .newThread(ItemComponentsBootstrap::load)
                 .start();
