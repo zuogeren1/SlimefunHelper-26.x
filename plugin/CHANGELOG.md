@@ -1,3 +1,7 @@
+# 📦 UPDATE 0.1.1
+
+- 🛠️ 适配 SlimeFunHelper 1.2.1.3（无功能变化）
+
 # 📦 UPDATE 0.1.0
 
 - ✨ 首个版本：SlimeFunHelper 的独立插件工程（`slimefunhelper-plus`），宿主通过 `slimefunhelper` entrypoint 发现
