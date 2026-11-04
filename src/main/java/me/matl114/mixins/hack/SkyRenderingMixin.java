@@ -1,15 +1,6 @@
 package me.matl114.mixins.hack;
 
-import net.minecraft.client.renderer.SkyRenderer;
-import org.spongepowered.asm.mixin.Mixin;
-
-//#if MC >= 260200
-import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
-import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -22,20 +13,37 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.DynamicUniforms;
+import net.minecraft.client.renderer.SkyRenderer;
 import net.minecraft.client.renderer.state.level.SkyRenderState;
 import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.util.ARGB;
 import org.joml.Matrix4f;
+import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+//#if MC >= 260200
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.mojang.blaze3d.PrimitiveTopology;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import net.minecraft.client.renderer.DynamicUniforms;
+//#else
+//$$ import com.mojang.blaze3d.textures.GpuSampler;
+//$$ import com.mojang.blaze3d.textures.GpuTextureView;
+//$$ import com.mojang.blaze3d.vertex.VertexFormat;
+//$$ import org.joml.Vector4fc;
+//#endif
 
-// 26.2 版：天空渲染已迁到 SkyRenderer（原 SkyRendering），状态对象为 state.level.SkyRenderState，
-// 顶点构建改用 ByteBufferBuilder/BufferBuilder + PrimitiveTopology，末地天空用 GpuBufferSlice 绑定。
+// 自定义天空贴图分两半接入：一半把贴图与顶点缓冲接到天空 pass 上（版本差异全集中在这里），
+// 一半负责从配置装载纹理、构建顶点缓冲（两版共用同一份）。
+// 两版都是 SkyRenderer + state.level.SkyRenderState；差别只在渲染后端的接法：
+// 26.2 用 PrimitiveTopology 建顶点、GpuBufferSlice 绑定顶点缓冲，贴图靠改 endSkyTexture 的字段读；
+// 26.1.2 用 VertexFormat.Mode 建顶点、GpuBuffer 直接绑定，贴图视图/采样器/顶点各走一处改参。
 @Environment(EnvType.CLIENT)
 @Mixin(SkyRenderer.class)
 public abstract class SkyRenderingMixin {
@@ -57,6 +65,8 @@ public abstract class SkyRenderingMixin {
     @Unique
     private int skyRender$backgroundHeight;
 
+    // ==================== 绘制：把自定义贴图/顶点接进天空 pass ====================
+    //#if MC >= 260200
     @ModifyExpressionValue(
             method = "renderEndSky",
             at =
@@ -83,7 +93,7 @@ public abstract class SkyRenderingMixin {
     }
 
     // 26.2 的 renderEndSky 只调 1 参 writeTransform（ColorModulator 恒为白），自定义颜色没地方传；
-    // 改调 2 参重载把颜色写进 uniform，语义与 26.1.2 / 上游的「贴图 × 顶点色 × ColorModulator」一致。
+    // 改调 2 参重载把颜色写进 uniform，语义与上游的「贴图 × 顶点色 × ColorModulator」一致。
     @WrapOperation(
             method = "renderEndSky",
             at =
@@ -99,7 +109,80 @@ public abstract class SkyRenderingMixin {
         }
         return original.call(instance, modelView);
     }
+    //#else
+//$$     // 26.1.2 的 renderEndSky 直接调 4 参 writeTransform，第 2 参就是 ColorModulator（与上游同款改法）
+//$$     @ModifyArg(
+//$$             method = "renderEndSky",
+//$$             at =
+//$$                     @At(
+//$$                             value = "INVOKE",
+//$$                             target =
+//$$                                     "Lnet/minecraft/client/renderer/DynamicUniforms;writeTransform(Lorg/joml/Matrix4fc;Lorg/joml/Vector4fc;Lorg/joml/Vector3fc;Lorg/joml/Matrix4fc;)Lcom/mojang/blaze3d/buffers/GpuBufferSlice;"),
+//$$             index = 1)
+//$$     private Vector4fc skyRender$tintEndSky(Vector4fc original) {
+//$$         var module = SkyRender.INSTANCE;
+//$$         return module != null && module.hasCustomColor()
+//$$                 ? ARGB.vector4fFromARGB32(module.color.get().withAlpha(255))
+//$$                 : original;
+//$$     }
+//$$
+//$$     // 26.1.2 把贴图视图、采样器与顶点缓冲分三处交给 RenderPass，三处都要换成自定义贴图。
+//$$     // 顶点缓冲非空即代表贴图已可读（只在能读到 GpuTexture 时才建），拿它当就绪信号，
+//$$     // 免得在纹理视图还没生成时取 getTextureView() 抛异常。
+//$$     @ModifyArg(
+//$$             method = "renderEndSky",
+//$$             at =
+//$$                     @At(
+//$$                             value = "INVOKE",
+//$$                             target =
+//$$                                     "Lcom/mojang/blaze3d/systems/RenderPass;bindTexture(Ljava/lang/String;Lcom/mojang/blaze3d/textures/GpuTextureView;Lcom/mojang/blaze3d/textures/GpuSampler;)V"),
+//$$             index = 1)
+//$$     private GpuTextureView skyRender$selectBackgroundTextureView(GpuTextureView original) {
+//$$         return skyRender$loadedBackgroundTexture != null && skyRender$backgroundVertices != null
+//$$                 ? skyRender$loadedBackgroundTexture.getTextureView()
+//$$                 : original;
+//$$     }
+//$$
+//$$     @ModifyArg(
+//$$             method = "renderEndSky",
+//$$             at =
+//$$                     @At(
+//$$                             value = "INVOKE",
+//$$                             target =
+//$$                                     "Lcom/mojang/blaze3d/systems/RenderPass;bindTexture(Ljava/lang/String;Lcom/mojang/blaze3d/textures/GpuTextureView;Lcom/mojang/blaze3d/textures/GpuSampler;)V"),
+//$$             index = 2)
+//$$     private GpuSampler skyRender$selectBackgroundSampler(GpuSampler original) {
+//$$         return skyRender$loadedBackgroundTexture != null && skyRender$backgroundVertices != null
+//$$                 ? skyRender$loadedBackgroundTexture.getSampler()
+//$$                 : original;
+//$$     }
+//$$
+//$$     @ModifyArg(
+//$$             method = "renderEndSky",
+//$$             at =
+//$$                     @At(
+//$$                             value = "INVOKE",
+//$$                             target =
+//$$                                     "Lcom/mojang/blaze3d/systems/RenderPass;setVertexBuffer(ILcom/mojang/blaze3d/buffers/GpuBuffer;)V"),
+//$$             index = 1)
+//$$     private GpuBuffer skyRender$selectBackgroundVertices(GpuBuffer original) {
+//$$         return skyRender$loadedBackgroundTexture != null && skyRender$backgroundVertices != null
+//$$                 ? skyRender$backgroundVertices
+//$$                 : original;
+//$$     }
+    //#endif
 
+    // renderSkyDisc 只画主世界天穹，自定义贴图要在它之后整块重画；renderEndSky 是唯一能复用
+    // END_SKY 管线的出口，上面的钩子在那条路径上把贴图与顶点换掉。
+    // 顶点缓冲就绪才重画：没有它就只能拿 vanilla 的 16 格 UV 配自定义贴图，盖出来是一片黑。
+    @Inject(method = "renderSkyDisc", at = @At("TAIL"))
+    private void renderCustomBackground(int color, CallbackInfo ci) {
+        if (skyRender$loadedBackgroundTexture != null && skyRender$backgroundVertices != null) {
+            renderEndSky();
+        }
+    }
+
+    // ==================== 装载：配置 → 纹理 + 顶点缓冲 ====================
     @Inject(method = "extractRenderState", at = @At("RETURN"))
     private void updateCustomSky(
             ClientLevel level, float partialTicks, Camera camera, SkyRenderState state, CallbackInfo ci) {
@@ -142,21 +225,20 @@ public abstract class SkyRenderingMixin {
         }
     }
 
-    @Inject(method = "renderSkyDisc", at = @At("TAIL"))
-    private void renderCustomBackground(int color, CallbackInfo ci) {
-        if (skyRender$loadedBackgroundTexture != null) {
-            renderEndSky();
-        }
-    }
-
     @Unique
     private GpuBuffer skyRender$createBackgroundVertices(int textureWidth, int textureHeight) {
         boolean sixTileAtlas = textureWidth % 3 == 0 && textureHeight % 2 == 0 && textureWidth / 3 == textureHeight / 2;
         // 顶点色恢复 -1（与上游一致），末地染色统一交给 ColorModulator（见 skyRender$tintEndSky）
         try (ByteBufferBuilder allocator = ByteBufferBuilder.exactlySized(
                 skyRender$FACE_COUNT * 4 * DefaultVertexFormat.POSITION_TEX_COLOR.getVertexSize())) {
-            BufferBuilder builder =
-                    new BufferBuilder(allocator, PrimitiveTopology.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+            BufferBuilder builder = new BufferBuilder(
+                    allocator,
+                    //#if MC >= 260200
+                    PrimitiveTopology.QUADS,
+                    //#else
+//$$                     VertexFormat.Mode.QUADS,
+                    //#endif
+                    DefaultVertexFormat.POSITION_TEX_COLOR);
             for (int face = 0; face < skyRender$FACE_COUNT; face++) {
                 int tile =
                         switch (face) {
@@ -202,49 +284,3 @@ public abstract class SkyRenderingMixin {
         skyRender$backgroundHeight = 0;
     }
 }
-//#else
-//$$ import me.matl114.hacks.modules.render.SkyRender;
-//$$ import net.minecraft.client.Camera;
-//$$ import net.minecraft.client.multiplayer.ClientLevel;
-//$$ import net.minecraft.client.renderer.state.level.SkyRenderState;
-//$$ import net.minecraft.util.ARGB;
-//$$ import org.joml.Vector4fc;
-//$$ import org.spongepowered.asm.mixin.injection.At;
-//$$ import org.spongepowered.asm.mixin.injection.Inject;
-//$$ import org.spongepowered.asm.mixin.injection.ModifyArg;
-//$$ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-//$$
-//$$ @Mixin(SkyRenderer.class)
-//$$ public abstract class SkyRenderingMixin {
-//$$     // 26.1.2 的 renderEndSky 直接调 4 参 writeTransform，第 2 参就是 ColorModulator（与上游同款改法）
-//$$     @ModifyArg(
-//$$             method = "renderEndSky",
-//$$             at =
-//$$                     @At(
-//$$                             value = "INVOKE",
-//$$                             target =
-//$$                                     "Lnet/minecraft/client/renderer/DynamicUniforms;writeTransform(Lorg/joml/Matrix4fc;Lorg/joml/Vector4fc;Lorg/joml/Vector3fc;Lorg/joml/Matrix4fc;)Lcom/mojang/blaze3d/buffers/GpuBufferSlice;"),
-//$$             index = 1)
-//$$     private Vector4fc skyRender$tintEndSky(Vector4fc original) {
-//$$         var module = SkyRender.INSTANCE;
-//$$         return module != null && module.hasCustomColor()
-//$$                 ? ARGB.vector4fFromARGB32(module.color.get().withAlpha(255))
-//$$                 : original;
-//$$     }
-//$$
-//$$     // 主世界天空唯一的染色出口是 state.skyColor（core/sky 直接把它当 ColorModulator 输出），
-//$$     // SkyRenderer 自己没有颜色来源，自定义色必须写进渲染状态。
-//$$     @Inject(method = "extractRenderState", at = @At("RETURN"))
-//$$     private void updateCustomSky(
-//$$             ClientLevel level, float partialTicks, Camera camera, SkyRenderState state, CallbackInfo ci) {
-//$$         var module = SkyRender.INSTANCE;
-//$$         if (module == null || !module.hasCustomColor()) {
-//$$             return;
-//$$         }
-//$$         state.skyColor = module.color.get().withAlpha(255);
-//$$         // 平铺纯色时不能再叠日出日落渐变与暗面圆盘，否则会把自定义色盖掉
-//$$         state.sunriseAndSunsetColor = 0;
-//$$         state.shouldRenderDarkDisc = false;
-//$$     }
-//$$ }
-//#endif
