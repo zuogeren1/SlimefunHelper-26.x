@@ -100,8 +100,15 @@ public class ConfluxMapHooks implements IHooks {
             requireMethod(screen, problems, "keyPressed", "boolean", "net.minecraft.client.input.KeyEvent");
             requireMethod(screen, problems, "viewSession", SESSION_CLASS);
             requireMethod(screen, problems, "viewingLiveSession", "boolean");
+
+            Class<?> controller = Class.forName(CONTROLLER_CLASS);
+            requireField(controller, problems, "locationMenuBounds", MENU_CLASS + "$Bounds");
+            requireField(controller, problems, "locationMenuTarget", MENU_CLASS + "$Target");
+            requireMethod(controller, problems, "drawLocationMenu", "void", GUI_DRAW_CLASS);
+            requireMethod(controller, problems, "dismissLocationMenu", "void");
+            // 0.1.16 的 addLocationMenuButtons() 读的是控制器自己的这一份，屏幕上的同名方法只是转发
             requireMethod(
-                    screen,
+                    controller,
                     problems,
                     "locationMenuButtonSpecs",
                     "java.util.List",
@@ -109,12 +116,6 @@ public class ConfluxMapHooks implements IHooks {
                     "cn.net.rms.confluxmap.core.waypoint.WaypointRenderEntry",
                     "java.util.UUID",
                     "boolean");
-
-            Class<?> controller = Class.forName(CONTROLLER_CLASS);
-            requireField(controller, problems, "locationMenuBounds", MENU_CLASS + "$Bounds");
-            requireField(controller, problems, "locationMenuTarget", MENU_CLASS + "$Target");
-            requireMethod(controller, problems, "drawLocationMenu", "void", GUI_DRAW_CLASS);
-            requireMethod(controller, problems, "dismissLocationMenu", "void");
 
             if (!problems.isEmpty()) {
                 unsupportedReason = "conflux-map structure changed: " + String.join("; ", problems);

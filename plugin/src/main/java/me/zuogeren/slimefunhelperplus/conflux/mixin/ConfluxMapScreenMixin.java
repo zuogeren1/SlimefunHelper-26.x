@@ -15,6 +15,7 @@ import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMapOverlay;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuButtonSpec;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuContext;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuOverlay;
+import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuRowHost;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuTarget;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxStateAccess;
 import me.matl114.utils.Debug;
@@ -93,7 +94,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Pseudo
 @Environment(EnvType.CLIENT)
 @Mixin(FullscreenMapScreen.class)
-public abstract class ConfluxMapScreenMixin {
+public abstract class ConfluxMapScreenMixin implements ConfluxMenuRowHost {
     /**
      * 位置菜单的面板矩形（{@code FullscreenMapLocationMenu$Bounds}），菜单没开时为 {@code null}。
      *
@@ -198,25 +199,23 @@ public abstract class ConfluxMapScreenMixin {
     }
 
     /**
-     * 把我们的条目并进 conflux 自己的按钮列表。
+     * 把我们的条目并进 conflux 自己的按钮列表（由 {@code ConfluxMenuControllerMixin} 调用）。
      *
-     * <p>时序：
-     * {@code openLocationMenu()} → {@code captureLocationMenu()}（用原生条目数算面板高）→
-     * {@code rebuildWaypointControls()} → {@code addLocationMenuButtons()}（读本方法返回的列表造按钮）。
-     * 所以在本方法返回处追加，按钮控件、面板高度之外的所有东西（行位置、0.1.9 的热键提示）
-     * 都自动按“列表的一部分”处理。
+     * <p>时序：{@code openLocationMenu()} → {@code captureLocationMenu()}（用原生条目数算面板高）→
+     * {@code rebuildWaypointControls()} → {@code addLocationMenuButtons()}（遍历
+     * <b>控制器自己的</b> {@code locationMenuButtonSpecs(...)} 返回值造按钮）。
+     * 0.1.16 里屏幕上的同名方法只是转发，所以追加发生在控制器那一次调用之后，
+     * 通过 {@link ConfluxMenuRowHost} 回到这里 —— 此刻 {@code locationMenuBounds} 已经就位，
+     * 标签按面板宽度截断才有据可依。
+     *
+     * <p>追加进去之后，行位置、按钮背景与热键数字都按「他们列表的一部分」自动处理，
+     * 不需要我们再补画。
      */
-    @SuppressWarnings("rawtypes")
-    @Inject(method = "locationMenuButtonSpecs", at = @At("RETURN"), require = 1)
-    private void slimefunhelper$appendLocationMenuSpecs(
-            FullscreenMapLocationMenu.Target target,
-            cn.net.rms.confluxmap.core.waypoint.WaypointRenderEntry waypoint,
-            java.util.UUID playerId,
-            boolean deletePending,
-            CallbackInfoReturnable<List> cir) {
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    @Override
+    public void slimefunhelper$appendMenuRows(List<?> specs, int nativeCount) {
         try {
-            List specs = cir == null ? null : cir.getReturnValue();
-            // 返回 null 或空列表说明不是我们盯的那个调用点（该方法在别的版本里可能还有别的用途），不要动
+            // 返回 null 或空列表说明不是我们盯的那个调用点，不要动
             if (specs == null || specs.isEmpty()) {
                 return;
             }
@@ -230,12 +229,11 @@ public abstract class ConfluxMapScreenMixin {
             if (sample == null || action == null) {
                 return;
             }
-            // 追加之前先记下原生条目数：面板几何、命中判定、日志都以它为准。
-            // 这样就不必去碰他们自己的 locationMenuSpecs 字段（那是控制器上的私有状态，我们一句都不碰）。
-            int nativeCount = specs.size();
+            // 原生条目数决定面板几何、命中判定与日志口径，先记下来
             this.slimefunhelper$nativeSpecCount = nativeCount;
             int lines = Math.min(options.size(), ConfluxMenuOverlay.MAX_ENTRIES);
             Font font = slimefunhelper$menuFont();
+            List raw = specs;
             for (int i = 0; i < lines; ++i) {
                 ConfluxMenuContext option = options.get(i);
                 // label 是交给他们的 labelKey：原生按钮会用 Texts.translatable(labelKey) 自己把文字
@@ -251,7 +249,7 @@ public abstract class ConfluxMapScreenMixin {
                 if (spec == null) {
                     return;
                 }
-                specs.add(spec);
+                raw.add(spec);
             }
         } catch (Throwable e) {
             slimefunhelper$warnOnce("join the location menu button list", e);
