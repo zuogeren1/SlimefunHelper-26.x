@@ -16,18 +16,16 @@ import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuButtonSpec;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuContext;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuOverlay;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuTarget;
+import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxStateAccess;
 import me.matl114.utils.Debug;
-import me.zuogeren.slimefunhelperplus.conflux.LoadedChunkEdgeCache;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -43,7 +41,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *       {@code ButtonSpec} 追加进<b>他们返回的那个 List</b>。他们随后在
  *       {@code addLocationMenuButtons()} 里遍历这个列表造原版 {@code Button}，
  *       于是我们这几行拿到的是与他们完全相同的控件、间距（{@code buttonY(i) = y + 3 + 22*i}）
- *       与热键提示（0.1.9 的 {@code drawHotkeyHints} 按列表下标画数字）。
+ *       与热键提示（conflux 的 {@code drawHotkeyHints} 按列表下标画数字）。
  *       label 是交给他们的 {@code labelKey}（{@code Texts.translatable(labelKey)} → 未知 key
  *       回落成字面量），<b>文字由原生按钮自己居中画</b>，所以我们只负责在追加时按像素截断
  *       （{@link ConfluxMenuOverlay#labelMaxWidth}）；tooltipKey 给的是我们自己的语言 key
@@ -54,10 +52,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *       在原版控件之前），见 {@link ConfluxMenuOverlay#drawPanelExtension}；</li>
  *   <li>数字提示（<b>只有数字</b>）画在 {@code renderAfterWidgets} 的 RETURN —— 必须在原版控件
  *       <b>之后</b>，否则会被他们按钮的背景盖住；文字不在这里画（原生按钮画过了，再画就是重影）。
- *       0.1.9 的 {@code drawHotkeyHints} 会自己给列表下标 < 5 的槽位画数字，所以那几行必须让给他们
+ *       conflux 的 {@code drawHotkeyHints} 会自己给列表下标 < 5 的槽位画数字，所以那几行必须让给他们
  *       （判据 {@link ConfluxMenuOverlay#shouldDrawHotkeyDigit}，槽位数由反射探测一次后缓存）；</li>
  *   <li>点击与数字键仍然由 {@code mouseClicked} / {@code keyPressed} 的 HEAD 注入先手接管，
- *       拦下就 {@code setReturnValue(true)}；0.1.9 还多一道
+ *       拦下就 {@code setReturnValue(true)}；嵌入模式还多一道
  *       {@code embeddedMenuHotkeyPressed} 的 HEAD 注入（嵌入模式走的是这条捷径），
  *       三处都拦下之后原生按钮的 onPress 才会带着我们的占位 {@code Action} 落到
  *       {@code runLocationAction}（见 {@link #slimefunhelper$placeholderAction}）。</li>
@@ -73,7 +71,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * （实测：拿真 jar 做 classpath，该类型的局部变量直接用不了）。Mixin 只能把代码合并进目标类，
  * 不能让我们的普通类进到那个包里，所以凡是“包级私有类型”的<b>实例</b>都只能用反射经手，
  * 而 {@code Bounds.buttonX()/buttonY(int)/buttonWidth()} 这类成员则是按字节码公式在
- * {@link ConfluxMenuOverlay} 里重算 —— 三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2）
+ * {@link ConfluxMenuOverlay} 里重算 —— conflux 0.1.16（26.1.2 与 26.2 两份 jar）
  * 里这些方法体逐条一致。
  *
  * <p>所有注入体内部一律 {@code try/catch (Throwable)}：我们出问题最多不显示这几行，
@@ -82,11 +80,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /*
  * 隐式契约（动这块之前先读完，别再往包外搬）：
  * 本 mixin 里对 FullscreenMapLocationMenu 及其包级私有嵌套类型 Bounds / Target 的**任何**调用，
- * 都只能留在这个文件内。javap 实测（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 一致）：
+ * 都只能留在这个文件内。javap 实测（conflux 0.1.16，26.1.2 与 26.2 两份 jar 一致）：
  *   final class FullscreenMapLocationMenu$Bounds extends java.lang.Record   // 包级私有
  *   final class FullscreenMapLocationMenu$Target extends java.lang.Record   // 包级私有
  *   Bounds: public x()/y()/width()/height()，包私有 buttonX()/buttonY(int)/buttonWidth()/contains(double,double)
- *   Target: public blockX()/blockZ()，包私有 blockY()（返回 OptionalInt，0.1.7 与 0.1.9 都在）
+ *   Target: public blockX()/blockZ()，包私有 blockY()（返回 OptionalInt）
  * 只有本 mixin 被合并进目标类（cn.net.rms.confluxmap.mc.ui.screen.FullscreenMapScreen）之后，
  * 我们才以「同包」身份拿到这些包级私有类型/成员的访问权；一旦把这段逻辑抽到 me.matl114.* 的普通类里，
  * 字节码里就出现跨包访问包级私有类型/成员，运行期立刻 IllegalAccessError（验收方已用包外探针实测复现）。
@@ -96,102 +94,45 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Environment(EnvType.CLIENT)
 @Mixin(FullscreenMapScreen.class)
 public abstract class ConfluxMapScreenMixin {
-    @Shadow
-    private FullscreenMapLocationMenu.Bounds locationMenuBounds;
-
-    @Shadow
-    private FullscreenMapLocationMenu.Target locationMenuTarget;
-
     /**
-     * 全屏地图视口的三个几何字段（世界 -> 屏幕投影用）。
+     * 位置菜单的面板矩形（{@code FullscreenMapLocationMenu$Bounds}），菜单没开时为 {@code null}。
      *
-     * <p>javap 实测（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 的 {@code FullscreenMapScreen}）：
-     * {@code private double centerX;} / {@code private double centerZ;} / {@code private double scale;}
-     * 都是<b>声明在目标类自己身上</b>的实例字段（不是从父类继承来的），名字与描述符三份一致，
-     * 所以 @Shadow 是安全的。语义与投影式见 {@link ConfluxMapOverlay.Viewport}。
+     * <p>0.1.16 起这块状态挂在屏幕的 {@code locationMenu}（{@code MapLocationMenuController}）上，
+     * 更早的版本挂在屏幕自己身上 —— 两种布局的字段名一样，统一由
+     * {@link ConfluxStateAccess#bounds(Object)} 定位。这里拿到 {@code Object} 之后转成桩类型：
+     * 转换与后续的成员调用都发生在<b>被合并进 {@code FullscreenMapScreen} 的这个类</b>里，
+     * 所以对包级私有类型 / 成员是按「同包」访问的，运行期不会 IllegalAccessError。
+     *
+     * <p>不使用 {@code @Shadow} 的原因见 {@link ConfluxStateAccess} 的类注释：成员搬家之后
+     * shadow 找不到就是 apply 阶段失败（整局起不来），而我们的硬约束是「结构不认识就整块不生效」。
      */
-    @Shadow
-    private double centerX;
-
-    @Shadow
-    private double centerZ;
-
-    @Shadow
-    private double scale;
-
-    /**
-     * 他们的绘制入口（真类里声明在 {@code ConfluxScreen} 上，protected；本类是子类所以影得到）。
-     * 我们只在它的 {@code RETURN} 上补画面板尾部 —— 那时他们的 {@code drawLocationMenu(draw)}
-     * 已经画完面板背景，而原版控件（他们造的按钮）还没画（见 {@code ConfluxScreen.extractRenderState}）。
-     */
-    @Shadow
-    protected void renderContents(GuiDraw draw, int mouseX, int mouseY, float tickDelta) {
-        throw new AssertionError();
+    @Unique
+    private FullscreenMapLocationMenu.Bounds slimefunhelper$bounds() {
+        Object value = ConfluxStateAccess.bounds(this);
+        return value instanceof FullscreenMapLocationMenu.Bounds bounds ? bounds : null;
     }
 
-    /** 注入没跑到（列表为空提前返回）时的兜底：位置菜单最常见的四条目 */
+    /** 当前位置菜单指向的目标（{@code FullscreenMapLocationMenu$Target}），菜单没开时为 {@code null} */
+    @Unique
+    private FullscreenMapLocationMenu.Target slimefunhelper$target() {
+        Object value = ConfluxStateAccess.target(this);
+        return value instanceof FullscreenMapLocationMenu.Target target ? target : null;
+    }
+
+    /**
+     * 注入没跑到（列表为空提前返回）时的兜底：位置菜单最常见的四条目。
+     *
+     * <p>面板补齐与命中判定都以「原生条目数」为基准，量不到时不能塌成 0，否则我们的行会画到
+     * 面板标题上、点击判定也会整体上移。
+     */
     @Unique
     private static final int slimefunhelper$FALLBACK_NATIVE_COUNT = 4;
 
-    @Shadow
-    private SessionGuard.Session viewSession() {
-        throw new AssertionError();
-    }
-
-    /**
-     * 视口是不是「当前存档 + 当前维度」的实时会话。
-     *
-     * <p>他们的实现就是 {@code viewSession().world()/dimension() 与 gameBridge.session() 的同两项比较}；
-     * 浏览别的存档 / 别的维度时为 false —— 那一刻屏幕上的瓦片与实际世界坐标不是一回事，
-     * 我们那两层覆盖必须整层不画，否则就是错位的线（同 {@code drawPlayerTrail} 等原生覆盖的判据）。
-     * 三份 jar 里签名都是 {@code ()Z}。
-     */
-    @Shadow
-    private boolean viewingLiveSession() {
-        throw new AssertionError();
-    }
-
-    /**
-     * 关掉位置菜单（他们自己的那个 private 方法）。
-     *
-     * <p>自从条目并进他们的列表之后，“点了我们的行”就是“点了他们面板里的一行”，
-     * 于是必须连菜单一起收掉 —— 否则用户看到的还是“动作执行了、菜单悬在那儿”。
-     *
-     * <p>@Shadow 影 private 成员在本仓库是现成可行的：本类影的 {@code locationMenuBounds} /
-     * {@code locationMenuTarget} 两个字段、{@code viewSession()} / {@code locationMenuButtonSpecs(...)}
-     * 两个方法在真类里同样是 private（javap 实测），而且它们已经在<b>实机跑通</b>
-     * （{@code viewSession()} 每次 {@code renderContents} 返回都被调用、{@code locationMenuButtonSpecs}
-     * 每次开菜单都被注入，验收方已见到条目真的并进列表）。
-     *
-     * <p>注意 {@code shadow-check.py} <b>不管</b>这里：它只校验 target 以 {@code net.minecraft}
-     * 开头的 mixin（非 MC 目标显式 continue，见该脚本 main()），conflux 这个 mixin 它根本不看。
-     * 所以本方法的复核只能靠 javap（见下）+ 实机，别拿“脚本报 0 条”当证据。
-     *
-     * <p>方法体照抄本文件既有约定：影子方法体写 {@code throw new AssertionError()}。
-     * 唯一的分歧点是 {@code locationMenuSpecs}（0.1.9 有、0.1.7 没有）—— 那个<b>不能</b>影，
-     * 相关逻辑全部留在 {@code dismissLocationMenu() 里面}，我们一句都不碰。
-     * 本方法名与描述符 {@code ()V} 在三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2）里完全一致。
-     */
-    @Shadow
-    private void dismissLocationMenu() {
-        throw new AssertionError();
-    }
-
-    /**
-     * 他们造原生按钮的那个方法，返回 {@code List<…$ButtonSpec>}。
-     *
-     * <p>返回类型故意写成 raw {@code List}：{@code ButtonSpec} 是包级私有类型，签名里点名它 javac 就报错；
-     * 泛型在字节码里被擦成 {@code Ljava/util/List;}，所以 raw 签名与真方法描述符完全一致。
-     * 参数里的 {@code WaypointRenderEntry} 同理用桩（桩只影响编译，不进产物）。
-     */
-    @SuppressWarnings("rawtypes")
-    @Shadow
-    private List locationMenuButtonSpecs(
-            FullscreenMapLocationMenu.Target target,
-            cn.net.rms.confluxmap.core.waypoint.WaypointRenderEntry waypoint,
-            java.util.UUID playerId,
-            boolean deletePending) {
-        throw new AssertionError();
+    /** 当前视口的会话（{@code SessionGuard$Session}），拿不到返回 {@code null} */
+    @Unique
+    private SessionGuard.Session slimefunhelper$viewSession() {
+        Object value = ConfluxStateAccess.viewSession(this);
+        return value instanceof SessionGuard.Session session ? session : null;
     }
 
     /**
@@ -223,7 +164,7 @@ public abstract class ConfluxMapScreenMixin {
     @Unique
     private static Class<?> slimefunhelper$ACTION_CLASS;
 
-    /** 探测 hotkeyLabel(int) 时最多试到第几个下标（0.1.9 只有 5 个） */
+    /** 探测 hotkeyLabel(int) 时最多试到第几个下标（conflux 只有 5 个） */
     @Unique
     private static final int slimefunhelper$HOTKEY_PROBE_LIMIT = 16;
 
@@ -238,8 +179,8 @@ public abstract class ConfluxMapScreenMixin {
     private static boolean slimefunhelper$hotkeySlotsProbed;
 
     /**
-     * conflux 自己会画数字提示的槽位数（探测一次后缓存）：0.1.9 = {@code HOTKEY_KEYS.length} = 5，
-     * 0.1.7 = 0（他们根本没有这套提示）。我们的行落在这些槽位里时数字由他们画，之外才由我们补。
+     * conflux 自己会画数字提示的槽位数（探测一次后缓存）：新版 = {@code HOTKEY_KEYS.length} = 5，
+     * 没有这套提示的老版本 = 0。我们的行落在这些槽位里时数字由他们画，之外才由我们补。
      */
     @Unique
     private static volatile int slimefunhelper$confluxHotkeySlotCount;
@@ -259,7 +200,7 @@ public abstract class ConfluxMapScreenMixin {
     /**
      * 把我们的条目并进 conflux 自己的按钮列表。
      *
-     * <p>时序（0.1.9 与 0.1.7 相同）：
+     * <p>时序：
      * {@code openLocationMenu()} → {@code captureLocationMenu()}（用原生条目数算面板高）→
      * {@code rebuildWaypointControls()} → {@code addLocationMenuButtons()}（读本方法返回的列表造按钮）。
      * 所以在本方法返回处追加，按钮控件、面板高度之外的所有东西（行位置、0.1.9 的热键提示）
@@ -290,7 +231,7 @@ public abstract class ConfluxMapScreenMixin {
                 return;
             }
             // 追加之前先记下原生条目数：面板几何、命中判定、日志都以它为准。
-            // 这样就不必去碰 0.1.9 独有的 locationMenuSpecs 字段（0.1.7 没有，@Shadow 会直接挂）。
+            // 这样就不必去碰他们自己的 locationMenuSpecs 字段（那是控制器上的私有状态，我们一句都不碰）。
             int nativeCount = specs.size();
             this.slimefunhelper$nativeSpecCount = nativeCount;
             int lines = Math.min(options.size(), ConfluxMenuOverlay.MAX_ENTRIES);
@@ -356,7 +297,7 @@ public abstract class ConfluxMapScreenMixin {
     @Unique
     private String slimefunhelper$buttonLabel(String label, int nativeCount, int index, Font font) {
         String text = label == null ? "" : label;
-        FullscreenMapLocationMenu.Bounds bounds = this.locationMenuBounds;
+        FullscreenMapLocationMenu.Bounds bounds = slimefunhelper$bounds();
         if (bounds == null) {
             // 没有面板几何就算不出可用宽度；这时他们的 addLocationMenuButtons 本来就取不到
             // buttonX()，这一行根本画不出来，原样交出去即可
@@ -370,7 +311,7 @@ public abstract class ConfluxMapScreenMixin {
      * 第一段绘制：在他们 {@code drawLocationMenu(draw)} 之后（{@code renderContents} 的 RETURN）
      * 把面板向下补齐到能装下我们那几行。
      *
-     * <p>顺序依据（{@code ConfluxScreen.extractRenderState} 的字节码，0.1.7 / 0.1.9 相同）：
+     * <p>顺序依据（{@code ConfluxScreen#extractRenderState} 的字节码，0.1.16）：
      * <pre>
      *   renderContents(draw, ...)        // 他们的 drawLocationMenu(draw) 在里面，画面板背景
      *   Screen.extractRenderState(...)   // 原版控件：他们造的按钮在这里画
@@ -384,7 +325,7 @@ public abstract class ConfluxMapScreenMixin {
             GuiDraw draw, int mouseX, int mouseY, float tickDelta, CallbackInfo ci) {
         try {
             this.slimefunhelper$extraRowsShown = 0;
-            if (this.locationMenuBounds == null || draw == null) {
+            if (slimefunhelper$bounds() == null || draw == null) {
                 slimefunhelper$clearLocationMenuState();
                 return;
             }
@@ -397,7 +338,7 @@ public abstract class ConfluxMapScreenMixin {
             this.slimefunhelper$locationMenuClickTarget = target;
             slimefunhelper$syncLocationMenuOptions(options);
 
-            FullscreenMapLocationMenu.Bounds bounds = this.locationMenuBounds;
+            FullscreenMapLocationMenu.Bounds bounds = slimefunhelper$bounds();
             int boundsX = bounds.x();
             int boundsY = bounds.y();
             int width = bounds.width();
@@ -420,15 +361,15 @@ public abstract class ConfluxMapScreenMixin {
      * 第二段绘制：与原版控件同一批画完之后，补上 conflux <b>没画</b>的那几行数字提示。
      *
      * <p>文字<b>不在这里画</b>：原生按钮已经按我们传进去的 {@code labelKey} 居中画过一遍了，
-     * 这里再画一遍就是用户看到的重影。0.1.9 的 {@code drawHotkeyHints} 会自己给列表下标 < 5 的槽位
-     * 画绿色数字（他们画在前面），所以我们只补他们画不到的那些槽位；0.1.7 没有那套提示
-     * （探测出的 {@code confluxHotkeySlots} = 0），所有数字都由我们画。
+     * 这里再画一遍就是用户看到的重影。conflux 的 {@code drawHotkeyHints} 会自己给列表下标 < 5 的槽位
+     * 画绿色数字（他们画在前面），所以我们只补他们画不到的那些槽位；没有那套提示的版本
+     * （探测出的 {@code confluxHotkeySlots} = 0）里所有数字都由我们画。
      */
     @Inject(method = "renderAfterWidgets", at = @At("RETURN"), require = 1)
     private void slimefunhelper$onRenderAfterWidgets(GuiDraw draw, int mouseX, int mouseY, float tickDelta, CallbackInfo ci) {
         try {
             int rows = this.slimefunhelper$extraRowsShown;
-            FullscreenMapLocationMenu.Bounds bounds = this.locationMenuBounds;
+            FullscreenMapLocationMenu.Bounds bounds = slimefunhelper$bounds();
             if (rows <= 0 || bounds == null || draw == null) {
                 return;
             }
@@ -450,7 +391,7 @@ public abstract class ConfluxMapScreenMixin {
             MouseButtonEvent event, boolean doubleClick, CallbackInfoReturnable<Boolean> cir) {
         try {
             int rows = this.slimefunhelper$extraRowsShown;
-            FullscreenMapLocationMenu.Bounds bounds = this.locationMenuBounds;
+            FullscreenMapLocationMenu.Bounds bounds = slimefunhelper$bounds();
             if (rows <= 0 || bounds == null || event == null || event.button() != 0) {
                 return;
             }
@@ -481,7 +422,7 @@ public abstract class ConfluxMapScreenMixin {
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true, require = 1)
     private void slimefunhelper$onLocationMenuKeyPressed(KeyEvent event, CallbackInfoReturnable<Boolean> cir) {
         try {
-            if (this.slimefunhelper$extraRowsShown <= 0 || this.locationMenuBounds == null || event == null) {
+            if (this.slimefunhelper$extraRowsShown <= 0 || slimefunhelper$bounds() == null || event == null) {
                 return;
             }
             int index = ConfluxMenuOverlay.hotkeyIndex(slimefunhelper$nativeButtonCount(), event.key());
@@ -502,13 +443,13 @@ public abstract class ConfluxMapScreenMixin {
     }
 
     /**
-     * 第三道保险：0.1.9 的嵌入模式（小地图 / 分屏里那块地图）由 {@code ConfluxScreen.keyPressed}
+     * 第三道保险：嵌入模式（小地图 / 分屏里那块地图）由 {@code ConfluxScreen.keyPressed}
      * 直接调 {@code embeddedMenuHotkeyPressed(keyCode)}，是条不完全经过
      * {@code FullscreenMapScreen.keyPressed} 的捷径；万一将来多出别的调用点绕过上面那个 HEAD 注入，
      * 这里再拦一次，让我们的行在任何路径下都跑我们自己的动作。
      *
-     * <p>必须 {@code require = 0}：0.1.7 根本没有这个方法（javap 实测），require = 1 会让整个 mixin
-     * 在 0.1.7 上 apply 失败，连带地图界面一起坏掉。
+     * <p>必须 {@code require = 0}：这个方法是较新的 conflux 才有的，（javap 实测老版本没有；将来改签名也一样），
+     * require = 1 会让整个 mixin 在这些版本上 apply 失败，连带地图界面一起坏掉。
      *
      * <p>命中我们的槽位就 {@code setReturnValue(true)}，并走与另外两处完全相同的
      * {@code slimefunhelper$dismissLocationMenuThenRunAction(index)}（先 dismiss 再跑动作）；
@@ -517,14 +458,14 @@ public abstract class ConfluxMapScreenMixin {
     @Inject(method = "embeddedMenuHotkeyPressed", at = @At("HEAD"), cancellable = true, require = 0)
     private void slimefunhelper$onEmbeddedMenuHotkeyPressed(int keyCode, CallbackInfoReturnable<Boolean> cir) {
         try {
-            if (this.slimefunhelper$extraRowsShown <= 0 || this.locationMenuBounds == null) {
+            if (this.slimefunhelper$extraRowsShown <= 0 || slimefunhelper$bounds() == null) {
                 return;
             }
             int index = ConfluxMenuOverlay.hotkeyIndex(slimefunhelper$nativeButtonCount(), keyCode);
             if (index < 0 || index >= this.slimefunhelper$extraRowsShown) {
                 return;
             }
-            // 0.1.9 原生这条捷径同样是 pendingLocationAction -> performPendingLocationAction()（dismiss 再 run），
+            // conflux 原生这条捷径同样是 pendingLocationAction -> performPendingLocationAction()（dismiss 再 run），
             // 我们的行并进他们列表之后也吃同一套语义：先关菜单，再跑我们的动作。
             slimefunhelper$dismissLocationMenuThenRunAction(index);
             cir.setReturnValue(true);
@@ -538,6 +479,10 @@ public abstract class ConfluxMapScreenMixin {
     @Unique
     private List<ConfluxMenuContext> slimefunhelper$collectLocationMenuOptions() {
         ArrayList<ConfluxMenuContext> options = new ArrayList<>();
+        if (!ConfluxMapHooks.getInstance().isEnabled()) {
+            // conflux 没装、或版本结构与适配目标不符：整块不产出条目（覆盖层那边同样有门禁）
+            return options;
+        }
         try {
             ConfluxMapHooks.getLocationMenuOption().broadcast(options, slimefunhelper$currentLocationTarget());
         } catch (Throwable e) {
@@ -550,14 +495,14 @@ public abstract class ConfluxMapScreenMixin {
     /** 把 conflux 侧的类型全部收在这个方法里，外面只见我们自己的类型 */
     @Unique
     private ConfluxMenuTarget slimefunhelper$currentLocationTarget() {
-        FullscreenMapLocationMenu.Target target = this.locationMenuTarget;
+        FullscreenMapLocationMenu.Target target = slimefunhelper$target();
         if (target == null) {
             return null;
         }
         String dimensionId = "minecraft:overworld";
         String worldPath = "overworld";
         try {
-            SessionGuard.Session session = this.viewSession();
+            SessionGuard.Session session = slimefunhelper$viewSession();
             if (session != null && session.dimension() != null) {
                 dimensionId = session.dimension().namespace() + ":" + session.dimension().path();
                 worldPath = session.dimension().path();
@@ -587,7 +532,7 @@ public abstract class ConfluxMapScreenMixin {
             }
         } catch (Throwable ignored) {
         }
-        FullscreenMapLocationMenu.Bounds bounds = this.locationMenuBounds;
+        FullscreenMapLocationMenu.Bounds bounds = slimefunhelper$bounds();
         return bounds == null ? 0 : bounds.y();
     }
 
@@ -617,11 +562,11 @@ public abstract class ConfluxMapScreenMixin {
     /**
      * conflux 自己会画数字提示的槽位数；整个进程只探测一次，之后走缓存。
      *
-     * <p>0.1.9 有 {@code drawHotkeyHints} + {@code hotkeyLabel(int)} + {@code HOTKEY_KEYS}；
-     * 0.1.7 这三样都不存在（javap 实测），于是槽位数 = 0、我们那几行的数字全部由我们画。
+     * <p>较新的 conflux 有 {@code drawHotkeyHints} + {@code hotkeyLabel(int)} + {@code HOTKEY_KEYS}；
+     * 没有这套提示的老版本里槽位数 = 0，我们那几行的数字全部由我们画。
      *
      * <p>全部走反射：{@code FullscreenMapLocationMenu} 及其成员是包级私有 / private 的，
-     * 而且 0.1.7 上压根没有这些成员 —— 任何 {@code @Shadow} 或 require = 1 的注入都会直接挂。
+     * 而且老版本上压根没有这些成员 —— 任何 {@code @Shadow} 或 require = 1 的注入都会直接挂。
      */
     @Unique
     private static int slimefunhelper$confluxHotkeySlots() {
@@ -685,7 +630,7 @@ public abstract class ConfluxMapScreenMixin {
      *       teleportLocationButton}），{@code CLEAR_HIGHLIGHT} 落在那个空的 fall-through 分支里。
      *       之前借的 {@code TELEPORT} 会把他们那个 {@code teleportLocationButton} 覆盖成我们最后一行，
      *       连「传送目标不可用」的提示分支都会被带偏；</li>
-     *   <li><b>两版都有</b>：javap 实测 0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 的
+     *   <li><b>0.1.16 两份 jar 都有</b>：javap 实测 26.1.2 / 26.2 的
      *       {@code Action} 都是同样这 11 个常量（含 {@code CLEAR_HIGHLIGHT}）。</li>
      * </ul>
      *
@@ -753,7 +698,7 @@ public abstract class ConfluxMapScreenMixin {
 
     @Unique
     private int slimefunhelper$locationMenuIndexAt(double mouseX, double mouseY) {
-        FullscreenMapLocationMenu.Bounds bounds = this.locationMenuBounds;
+        FullscreenMapLocationMenu.Bounds bounds = slimefunhelper$bounds();
         int rows = this.slimefunhelper$extraRowsShown;
         if (bounds == null || rows <= 0) {
             return -1;
@@ -771,7 +716,7 @@ public abstract class ConfluxMapScreenMixin {
     /** 鼠标是否落在「我们补出来的那块面板区域」里 */
     @Unique
     private boolean slimefunhelper$isOverExtraRows(double mouseX, double mouseY) {
-        FullscreenMapLocationMenu.Bounds bounds = this.locationMenuBounds;
+        FullscreenMapLocationMenu.Bounds bounds = slimefunhelper$bounds();
         int rows = this.slimefunhelper$extraRowsShown;
         if (bounds == null || rows <= 0) {
             return false;
@@ -786,9 +731,9 @@ public abstract class ConfluxMapScreenMixin {
      * 跑我们的动作，并<b>对齐原生</b>地收起位置菜单。
      *
      * <p>为什么必须收：我们的行已经并进他们的列表，点它 == 点他们面板里的一行。
-     * 原生顺序是（0.1.9 反编译 {@code FullscreenMapScreen#performPendingLocationAction()}）：
+     * 原生顺序是（{@code MapLocationMenuController#performPendingLocationAction()}，0.1.16 反编译）：
      * <pre>
-     *   this.dismissLocationMenu();                                   // 1876-1885
+     *   ConfluxStateAccess.dismiss(this);                                   // 1876-1885
      *   this.runLocationAction(action, target, waypoint, playerId, this);
      * </pre>
      * 先关菜单再执行 —— 因为动作里可能打开聊天界面 / 别的 Screen（例如他们的 SHARE_LOCATION），
@@ -801,7 +746,7 @@ public abstract class ConfluxMapScreenMixin {
      *
      * <p>{@code clearLocationMenuState()} 紧跟在 dismiss 后面、动作之前：这一步不能省，
      * 否则同一帧 / 下一帧还可能用同一批过期条目再命中一次。它同时把我们的行数归零，
-     * 于是 {@code embeddedMenuHotkeyPressed}（0.1.9 的嵌入模式捷径）也拦不下任何东西了。
+     * 于是 {@code embeddedMenuHotkeyPressed}（嵌入模式的捷径）也拦不下任何东西了。
      *
      * <p>dismiss 抛异常时仍然执行动作并清掉我们自己的状态（用户已经点了，功能不该跟着陪葬），
      * 但绝不在“菜单还开着”的前提下留下可命中的状态 —— 否则下一次点击会再跑一遍同一个动作。
@@ -817,7 +762,7 @@ public abstract class ConfluxMapScreenMixin {
         ConfluxMenuContext option = index >= 0 && index < options.size() ? options.get(index) : null;
         ConfluxMenuTarget target = this.slimefunhelper$locationMenuClickTarget;
         try {
-            this.dismissLocationMenu();
+            ConfluxStateAccess.dismiss(this);
         } catch (Exception e) {
             slimefunhelper$warnDismissOnce(e);
         }
@@ -875,127 +820,4 @@ public abstract class ConfluxMapScreenMixin {
     @Unique
     private static int slimefunhelper$lastLoggedSignature = -1;
 
-    /**
-     * 全屏地图上的两层覆盖：<b>客户端已加载区块的边界线</b>与<b>当前旅行目标的临时标记</b>。
-     *
-     * <h2>为什么注入在 {@code drawLocationMenu} 的 HEAD</h2>
-     * 时序（{@code ConfluxScreen.extractRenderState} 的字节码，0.1.7 / 0.1.9 相同）：
-     * <pre>
-     *   renderContents(draw, ...)        // 背景 / 瓦片 / 网格 / 路径点 / 各种标签 …… drawLocationMenu(draw) 是最后一句
-     *   Screen.extractRenderState(...)   // 原版控件：他们的按钮、位置菜单按钮在这里画
-     *   renderAfterWidgets(draw, ...)    // 他们的热键提示
-     * </pre>
-     * 于是 HEAD 上正好是「地图内容已画完、他们的面板与所有控件还没画」：
-     * 我们的线落在地图上，他们的面板 / 按钮一定盖在我们上面 —— 既不糊掉他们，也不被他们的面板压住。
-     *
-     * <p>{@code drawLocationMenu} 每帧都会被调用（并不像名字那样只在菜单打开时调用，见
-     * {@code renderContents} 的最后一行），所以这就是「每帧、地图内容之后」的钩子。
-     * 三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2）都有
-     * {@code private void drawLocationMenu(GuiDraw)}，所以 {@code require = 1} 是安全的。
-     *
-     * <h2>画什么</h2>
-     * <ul>
-     *   <li>区块边界：数据来自 {@link ConfluxMapHelper#loadedChunkEdges()}（模块在 post-game-tick 里刷新），
-     *       每条都是轴对齐的 1px 线，几何 / 裁剪 / 性能护栏全在 {@link ConfluxMapOverlay#renderChunkEdges}；</li>
-     *   <li>旅行目标：{@link ConfluxMapHelper#currentTravelTarget()}。conflux 的路径点 API 可用时
-     *       这一层<b>不画</b> —— 目标已经由 {@code travel-goal-sync} 建出来的真路径点负责，
-     *       两处同时画就是同一个目标两份（见 {@link ConfluxMapHelper#shouldDrawTravelMarker()}）；
-     *       拿不到 API（老版本 conflux）时才由这一层顶上。</li>
-     * </ul>
-     * 两层都只在 {@link #viewingLiveSession()} 为真（当前存档 + 当前维度）时才画。
-     *
-     * <p>整段 {@code try/catch(Throwable)} + 只 warn 一次：我们出问题最多这两层不显示，
-     * 绝不允许影响到他们的地图界面。
-     */
-    @Inject(method = "drawLocationMenu", at = @At("HEAD"), require = 1)
-    private void slimefunhelper$drawMapOverlay(GuiDraw draw, CallbackInfo ci) {
-        try {
-            ConfluxMapHelper module = ConfluxMapHelper.INSTANCE;
-            if (module == null || draw == null) {
-                return;
-            }
-            boolean chunkEdges = module.loadedChunkRender.get();
-            boolean travelGoal = module.travelGoalSync.get();
-            if (!chunkEdges && !travelGoal) {
-                slimefunhelper$logOverlayState(0, "off (loaded-chunk-render=false, travel-goal-sync=false)");
-                return;
-            }
-            if (!this.viewingLiveSession()) {
-                slimefunhelper$logOverlayState(1, "skipped: the map is browsing another world or dimension");
-                return;
-            }
-            Minecraft mc = Minecraft.getInstance();
-            if (mc == null || mc.level == null || mc.font == null) {
-                return;
-            }
-            ConfluxMapOverlay.Viewport view = ConfluxMapOverlay.viewport(
-                    this.centerX,
-                    this.centerZ,
-                    this.scale,
-                    mc.getWindow().getGuiScaledWidth(),
-                    mc.getWindow().getGuiScaledHeight(),
-                    mc.font.lineHeight);
-            if (view == null) {
-                slimefunhelper$logOverlayState(2, "skipped: the viewport geometry is unusable");
-                return;
-            }
-            int drawnEdges = 0;
-            if (chunkEdges) {
-                drawnEdges = ConfluxMapOverlay.renderChunkEdges(
-                        view,
-                        module.loadedChunkEdges(),
-                        module.loadedChunkColor.get().withAlpha(255),
-                        draw::fill);
-            }
-            boolean drawnMarker = false;
-            boolean markerSuppressed = false;
-            // API 可用且路径点已建好时不再画我们自己那份（同一个目标只能出现一份）
-            if (travelGoal && module.shouldDrawTravelMarker()) {
-                Vec3 target = module.currentTravelTarget();
-                if (target != null) {
-                    drawnMarker = ConfluxMapOverlay.renderTravelMarker(
-                            view,
-                            target.x,
-                            target.z,
-                            ConfluxMapOverlay.TRAVEL_MARKER_COLOR,
-                            ConfluxMapOverlay.TRAVEL_MARKER_LABEL,
-                            ConfluxMapOverlay.TRAVEL_MARKER_COLOR,
-                            draw::fill,
-                            (text, x, y, color) -> draw.drawTextWithShadow(mc.font, text, x, y, color));
-                }
-            } else {
-                // 这里有两种情况：开关本来就是关的（那没什么好说），或者开关开着、但目标已经由
-                // conflux 的路径点表示（{@code shouldDrawTravelMarker()} 为假）。日志里分开报，
-                // 实机验收时一眼能看出「没画」到底是哪一种。
-                markerSuppressed = travelGoal;
-            }
-            int state = 4 | (drawnEdges > 0 ? 1 : 0) | (drawnMarker ? 2 : 0);
-            slimefunhelper$logOverlayState(
-                    state,
-                    "drawn: chunkSegments=" + module.loadedChunkEdges().segmentCount() + " chunkLines=" + drawnEdges
-                            + " chunkPixelsPerChunk=" + view.chunkPixels() + " travelMarker=" + drawnMarker
-                            + (markerSuppressed ? " (suppressed: the travel goal is drawn as a conflux waypoint)" : ""));
-        } catch (Throwable e) {
-            slimefunhelper$warnOnce("draw the conflux map overlay", e);
-        }
-    }
-
-    /** 覆盖层日志的去重签名（沿用 {@link #slimefunhelper$lastLoggedSignature} 的写法；-1 = 还没打过） */
-    @Unique
-    private static int slimefunhelper$lastOverlayLogState = -1;
-
-    /**
-     * 覆盖层的状态日志：<b>只在状态真的变了</b>的时候打一行，实机验收按这一行判断两层各自的死活。
-     *
-     * <p>状态位（{@code 0/1/2} 是「没画」的三种原因，{@code 4|1} 是区块线、{@code 4|2} 是旅行标记、
-     * {@code 4|3} 是两层都画了）。数值本身不进日志，日志里给的是可读的那串明细。
-     */
-    @Unique
-    private static void slimefunhelper$logOverlayState(int state, String message) {
-        if (state == slimefunhelper$lastOverlayLogState) {
-            return;
-        }
-        slimefunhelper$lastOverlayLogState = state;
-        Debug.getLogger().info("[ConfluxMapHelper] map overlay: {}", message);
-    }
 }

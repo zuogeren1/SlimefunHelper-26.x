@@ -5,7 +5,9 @@
 	"compatibilityLevel": "JAVA_21",
 	"client": [
 		"ConfluxMapScreenMixin",
-		"ConfluxMinimapHudMixin"
+		"ConfluxMenuControllerMixin",
+		"ConfluxMinimapHudMixin",
+		"ConfluxMinimapRadarMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

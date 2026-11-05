@@ -14,15 +14,15 @@ import me.zuogeren.slimefunhelperplus.conflux.LoadedChunkEdgeCache;
  *
  * <p>同一套几何被两处使用：
  * <ul>
- *   <li><b>全屏地图</b>：注入 {@code FullscreenMapScreen#drawLocationMenu} 的 HEAD，
+ *   <li><b>全屏地图</b>：注入 {@code MapLocationMenuController#drawLocationMenu} 的 HEAD，
  *       视口由 {@link #viewport} 造（地图区域 = 整个屏幕，正北朝上，无圆盘裁剪）；</li>
- *   <li><b>HUD 小地图</b>：注入 {@code MinimapHudRenderer#drawRadar} 的 HEAD，
+ *   <li><b>HUD 小地图</b>：注入 {@code MinimapRadarPainter#drawRadar} 的 HEAD，
  *       视口由 {@link #minimapViewport} 造（内容矩形 = {@code MinimapContentViewport}，
- *       中心 = 玩家位置，缩放 = {@code BLOCKS_PER_PIXEL[config.minimapZoomIndex]}，
+ *       中心 = 玩家位置，缩放 = 本帧生效的 {@code blocksPerPixel}，
  *       可旋转、圆形时按圆盘裁剪）。</li>
  * </ul>
  *
- * <h2>投影（来自 conflux 0.1.9 反编译源码，0.1.7 逐条一致）</h2>
+ * <h2>投影（来自 conflux 0.1.16 反编译源码）</h2>
  * 全屏地图是<b>正北朝上</b>的正交投影，地图区域就是整个屏幕，投影式在他们自己的代码里到处都是：
  * <pre>
  *   FullscreenMapScreen#drawExportSelection      : screenX = width  / 2.0 + (worldX - centerX) / scale
@@ -39,16 +39,16 @@ import me.zuogeren.slimefunhelperplus.conflux.LoadedChunkEdgeCache;
  * 所以他们自己的按钮 / 面板一定盖在我们上面；需要主动避开的只有<b>先于我们绘制</b>的那几行常驻文字
  * （左上角维度 / 层 / 预测，右上角缩放，底部光标坐标与更新徽标）。
  *
- * <h2>小地图的投影（来自 {@code MinimapHudRenderer} 0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份反编译源码）</h2>
+ * <h2>小地图的投影（来自 conflux 0.1.16 的 {@code MinimapTilePainter} / {@code MinimapHudRenderer} 反编译源码）</h2>
  * <pre>
  *   MinimapContentViewport.resolve(x0, y0, size, inset)  : 内容矩形 (x, y, size)，centerX = x + size/2.0F
  *   BLOCKS_PER_PIXEL = {0.5F, 1.0F, 2.0F, 4.0F}          : 每像素多少格（与全屏的 scale 同一语义）
- *   MinimapHudRenderer#drawTiles                         : 屏幕 = 玩家位置 + (世界 - 玩家) / blocksPerPixel
+ *   MinimapTilePainter#drawTiles                         : 屏幕 = 玩家位置 + (世界 - 玩家) / blocksPerPixel
  *   MinimapHudRenderer#waypointMarkerOffset              : screenOffX = rawX*cos - rawY*sin（mapAngle 旋转）
  *   mapAngle = config.minimapRotate ? 180 - player.yawDegrees() : 0
  * </pre>
  * 所以小地图的视口中心恒为<b>玩家位置</b>（{@code PlayerView#x()/#z()}，就是 {@code drawTiles} 用的那个），
- * 而 {@code drawRadar(draw, centerX, centerY, size, mapAngle, player, tickDelta)} 的参数
+ * 而 {@code drawRadar(draw, centerX, centerY, size, mapAngle, player, tickDelta, blocksPerPixel, fadeAlpha)} 的参数
  * 恰好把 centerX / centerY / size / mapAngle / player 一次给全 —— 不需要再去读 {@code MinimapPlacement}
  * 或 {@code contentInset}（内容矩形可以从 centerX / centerY / size 无损反推）。
  *
@@ -267,7 +267,7 @@ public final class ConfluxMapOverlay {
     /**
      * 按 conflux <b>HUD 小地图</b>那一帧的参数算出视口；几何不合法时返回 {@code null}。
      *
-     * <p>参数就是 {@code MinimapHudRenderer#drawRadar(GuiDraw, float, float, int, float, PlayerView, float)}
+     * <p>参数就是 {@code MinimapRadarPainter#drawRadar(GuiDraw, float, float, int, float, PlayerView, float, float, float)}
      * 的入参（{@code size} 是内容区边长，{@code centerX / centerY} 是内容区中心的屏幕坐标）。
      * 内容矩形由中心与边长无损反推：
      * <pre>

@@ -17,7 +17,7 @@ import me.matl114.utils.Debug;
  *   <li>{@code ConfluxMinimapHudMixin} 的 {@code @ModifyExpressionValue}：把 conflux 每帧读的那张
  *       {@code BLOCKS_PER_PIXEL} 表换成我们的副本，于是<b>他们的</b>瓦片、传送门区块高亮、轨迹、
  *       方位 / 路径点 / 自定义标记、雷达点、玩家箭头全都跟着缩放；</li>
- *   <li>{@code ConfluxMinimapHudMixin} 里<b>我们自己的</b>覆盖层（已加载区块边界 / 旅行目标标记）。</li>
+ *   <li>{@code ConfluxMinimapRadarMixin} 里<b>我们自己的</b>覆盖层（已加载区块边界 / 旅行目标标记）。</li>
  * </ul>
  * 两边只要有一边绕过它，覆盖层就会与他们的瓦片 / 标记错位，所以取值的逻辑只写在这一处。
  *
@@ -36,8 +36,8 @@ import me.matl114.utils.Debug;
  * 所有入口都 {@code try/catch(Throwable)}：模块还没建好、配置读不到时一律退化成“不覆盖”，
  * 异常绝不外抛到 conflux 的渲染路径里。
  *
- * <p>本类只在客户端渲染线程上被调用（conflux 的 {@code MinimapHudRenderer#render} 与我们的
- * {@code drawRadar} HEAD 注入），因此 {@link #substitute} 的缓存不加同步。
+ * <p>本类只在客户端渲染线程上被调用（conflux 的 {@code MinimapHudRenderer#render} 与
+ * {@code MinimapRadarPainter#drawRadar} 的 HEAD 注入），因此 {@link #substitute} 的缓存不加同步。
  */
 public final class ConfluxMinimapZoom {
     /** 有效区间下界：0.1 = 放到最大 */
