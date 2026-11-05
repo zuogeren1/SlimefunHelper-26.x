@@ -27,9 +27,9 @@ import net.minecraft.world.phys.Vec3;
  * 0.1.16 的 {@code api/} 包是 37 个类、{@code WaypointApi} 六个方法逐字一致
  * （javap 实测 26.1.2 / 26.2 两份 jar），但将来多一个参数就会在
  * <b>调用点</b>才炸 —— 那时机是「玩家刚开始旅行」，不如启动时一次性判掉。
- * 判失败 = 退回老路（只在我们自己的覆盖层上画标记），并在日志里留一行原因。
+ * 判失败 = 退回老路（只在我们自己的覆盖层上画标记），原因记进 {@link #UNAVAILABLE_REASON}。
  *
- * <p>探测在 {@code <clinit>} 里做第一次（这样那行 WARN 能落在<b>启动日志</b>里），
+ * <p>探测在 {@code <clinit>} 里做第一次（状态在启动期就定下来，绘制侧不必等第一个 tick），
  * 但<b>不只有一次</b>：探不到时会在 {@link #tick} 里<b>有界地</b>补探（见 {@link #retryProbe()}）。
  * 因为 {@code ConfluxMapApi.install(...)} 是 conflux 在<b>它自己的</b>客户端初始化里做的，
  * 而我们模块的构造发生在<b>我们的</b>入口点里 —— 两个 mod 的入口点顺序 Fabric 并不保证。
@@ -190,11 +190,12 @@ public final class ConfluxTravelWaypointSyncHolder {
     static {
         String reason = probeOnce();
         if (reason != null) {
+            // 启动期这次几乎必然早于 conflux 自己的 install（两个 mod 的入口点顺序不保证），
+            // 按 WARN 报只会让每次启动都出现一条几秒后自动消失的警报。
             Debug.getLogger()
-                    .warn("ConfluxMapHelper: the travel-goal-sync waypoint is not available yet (" + reason
-                            + "), falling back to the overlay marker for now; will keep probing every "
-                            + RETRY_INTERVAL_TICKS + " ticks for " + (RETRY_BUDGET_TICKS / TICKS_PER_SECOND)
-                            + "s");
+                    .debug("ConfluxMapHelper: the conflux waypoint API is not installed yet (" + reason
+                            + "); will keep probing every " + RETRY_INTERVAL_TICKS + " ticks for "
+                            + (RETRY_BUDGET_TICKS / TICKS_PER_SECOND) + "s after joining a world");
         }
     }
 
@@ -229,8 +230,9 @@ public final class ConfluxTravelWaypointSyncHolder {
      * （≈ 30 秒）的预算：成功一次就永远不再进来（{@code tick} 只在 {@link #IMPL} 还是 null 时调它），
      * 预算耗尽则彻底停手 —— 不再探测、也不再打日志。
      *
-     * <p>失败<b>不</b>打日志：原因已经在 {@code <clinit>} 那一行 WARN 里了。只有「补探成功」和
-     * 「预算用尽仍不行」这两个转折点各补一行 info。
+     * <p>失败<b>不</b>逐次打日志：启动期已经记过原因，中间每次失败都是同一件事。只有
+     * 「补探成功」和「预算用尽仍不行」这两个转折点各补一行 —— 后者才是真告警（那时进世界已满
+     * {@link #RETRY_BUDGET_TICKS} tick，conflux 的 install 早该做完了）。
      */
     private static void retryProbe() {
         if (retryTicksLeft <= 0) {
@@ -247,9 +249,10 @@ public final class ConfluxTravelWaypointSyncHolder {
                     .info("ConfluxMapHelper: the conflux waypoint API became available, travel waypoint enabled");
         } else if (last) {
             Debug.getLogger()
-                    .info("ConfluxMapHelper: the conflux waypoint API is still unavailable after "
+                    .warn("ConfluxMapHelper: the conflux waypoint API is still unavailable after "
                             + (RETRY_BUDGET_TICKS / TICKS_PER_SECOND)
-                            + "s, travel-goal-sync keeps using the overlay marker");
+                            + "s in world (" + UNAVAILABLE_REASON
+                            + "), travel-goal-sync keeps using the overlay marker");
         }
     }
 
@@ -257,9 +260,9 @@ public final class ConfluxTravelWaypointSyncHolder {
      * 唯一的作用是「碰一下这个类、触发它的 {@code <clinit>} 探测」，本身不持有任何状态。
      *
      * <p>没有把它做成「一个工具类 + 全静态调用」是因为：那样模块里就没有任何一个<b>类的引用</b>，
-     * 第一次调用发生在 {@code onPostGameTick} 里，探测失败的 WARN 会晚到几十秒。
-     * 写成字段（在模块构造期 new 一下）能让这行 WARN 出现在启动日志里，
-     * 与 {@code ConfluxMapHooks} 的自检同节奏，实机验收时一眼能看到。
+     * 类要等到第一次 {@code onPostGameTick} 才初始化，进世界之前 {@link #shouldHideOwnMarker()}
+     * 读到的永远是默认值。写成字段（模块构造期 new 一下）能让首次探测落在启动期，
+     * 与 {@code ConfluxMapHooks} 的自检同一节奏。
      */
     public ConfluxTravelWaypointSyncHolder() {}
 
