@@ -151,9 +151,14 @@ shadowJar {
 // 显式把 shadowJar 接回构建流程，并给普通 jar 加 classifier 避免同名互相覆盖。
 tasks.named('assemble') { dependsOn tasks.named('shadowJar') }
 
+// expand(...) 的实参在**执行期**才被读。闭包里再碰 project 会被 Gradle 9 的配置缓存判为
+// 「引用脚本对象」并直接让 processResources 失败（第二次 runClient 才会炸，因为第一次是存条目）。
+def jarVersion = project.mod_version
+def jarMinecraftVersion = project.minecraft_version
+
 processResources {
-	inputs.property "version", project.mod_version
-	inputs.property "minecraft_version", project.minecraft_version
+	inputs.property "version", jarVersion
+	inputs.property "minecraft_version", jarMinecraftVersion
 
 	// access widener 每版本一份放在 versions/<mc版本>/ 下（Loom 编译期用 loom.accessWidenerPath 读它），
 	// 这里再把它放进 jar 根目录 —— fabric.mod.json 的 accessWidener 字段指的就是这个名字，
@@ -162,15 +167,15 @@ processResources {
 
 	filesMatching("fabric.mod.json") {
 		expand(
-				"version": project.mod_version,
-				"minecraft_version": project.minecraft_version
+				"version": jarVersion,
+				"minecraft_version": jarMinecraftVersion
 		)
 	}
 
 	// 插件 API 的默认最低宿主版本：写进 jar，运行期由 SlimefunHelperPlugin 读取，
 	// 这样它永远等于本次构建的 mod_version，不会和 gradle.properties 脱钩。
 	filesMatching("slimefunhelper-plugin-api.txt") {
-		expand("version": project.mod_version)
+		expand("version": jarVersion)
 	}
 }
 
