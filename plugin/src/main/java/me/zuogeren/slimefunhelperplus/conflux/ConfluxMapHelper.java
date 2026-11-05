@@ -18,6 +18,7 @@ import me.zuogeren.slimefunhelperplus.conflux.ConfluxMapHooks;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuContext;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuTarget;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxTravelWaypointSyncHolder;
+import me.zuogeren.slimefunhelperplus.conflux.markers.ConfluxMarkerSource;
 import me.zuogeren.slimefunhelperplus.conflux.probe.WaypointCaptureProbe;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.DoubleRef;
@@ -168,8 +169,27 @@ public class ConfluxMapHelper extends BaseModule {
      */
     public final FlagRef waypointCapture = flagBuilder(root.add("xaero-waypoint-capture")).build();
 
+    /**
+     * 把宿主那批临时点（结构 / 区块记录 / 传送点 / 玩家离开点）画到 conflux 的地图上。
+     *
+     * <p>形态是 conflux 的「自定义标记」：拉取式、不落盘、进不了它的路点列表，也不能点击 ——
+     * 与宿主给 Xaero 的那批 {@code temp=true} 临时点语义正好一一对应。
+     * 开关打开时同时启用捕获（{@link WaypointCaptureProbe}），日志那部分仍归
+     * {@code xaero-waypoint-capture} 管。
+     */
+    public final FlagRef waypointMarkers = flagBuilder(root.add("waypoint-markers")).build();
+
     /** 只读捕获器：开关关掉时立即还原 hooks 并清空已捕获的点 */
     private final WaypointCaptureProbe waypointProbe = new WaypointCaptureProbe();
+
+    /** 标记取样源；{@code null} = 还没接上（conflux 未就绪或开关没开） */
+    private ConfluxMarkerSource markerSource;
+
+    /** 接不上时的重试间隔（tick）：conflux 的 API 在它自己的客户端初始化里才 install，晚几秒是常态 */
+    private int markerAttachCooldown;
+
+    /** 接不上的原因只打一次，避免每 2 秒一条 */
+    private boolean markerAttachWarned;
 
     /** 已加载区块的边界边缓存：数据在这里按 tick 刷新，绘制在 ConfluxMapScreenMixin 里读 */
     private final LoadedChunkEdgeCache loadedChunkEdges = new LoadedChunkEdgeCache();
@@ -194,6 +214,7 @@ public class ConfluxMapHelper extends BaseModule {
     public void onDisableModule() {
         super.onDisableModule();
         travelWaypointSync.removeNow();
+        detachMarkers();
         waypointProbe.uninstall();
     }
 
@@ -202,6 +223,7 @@ public class ConfluxMapHelper extends BaseModule {
         super.unregisterAll();
         loadedChunkEdges.clear();
         travelWaypointSync.removeNow();
+        detachMarkers();
         waypointProbe.uninstall();
     }
 
@@ -249,13 +271,18 @@ public class ConfluxMapHelper extends BaseModule {
      * 迭代器一构造就解引用 {@code mc.level}，不挡会直接 NPE。
      */
     public void onPostGameTick(Event<LocalPlayer> event) {
-        // 探针与 loadedChunkRender 无关，但必须放在它那个提前返回之前，否则关掉区块渲染就收不到样本
-        if (waypointCapture.get()) {
+        // 探针与 loadedChunkRender 无关，但必须放在它那个提前返回之前，否则关掉区块渲染就收不到样本。
+        // 捕获是两个开关共用的底座：只要有一个要，就得装。
+        boolean wantCapture = waypointCapture.get() || waypointMarkers.get();
+        if (wantCapture) {
             waypointProbe.install();
         } else {
+            detachMarkers();
             waypointProbe.uninstall();
         }
-        waypointProbe.tick();
+        // 日志只归「捕获开关」管：只想看地图点的人不该被每 10 秒六行样本刷屏
+        waypointProbe.tick(waypointCapture.get());
+        syncMarkers();
         syncTravelWaypoint();
         if (!loadedChunkRender.get()) {
             return;
@@ -269,6 +296,52 @@ public class ConfluxMapHelper extends BaseModule {
         } catch (Throwable ignored) {
             // 换世界的那一瞬间区块存储可能已经在换引用：跳过这一次即可，下一 tick 会重来
         }
+    }
+
+    /** 标记源接不上时的重试间隔：40 tick ≈ 2 秒，够盖住 conflux 的 install 比我们晚的那几秒 */
+    private static final int MARKER_ATTACH_RETRY_TICKS = 40;
+
+    /**
+     * 按需接上 conflux 的标记取样源。
+     *
+     * <p>接不上基本只有一个原因：conflux 还没把它自己的 API install 上（它的客户端初始化在我们之后）。
+     * 所以按 tick 重试、带冷却，日志只留一次 —— 与旅行点那条路径的取舍一致。
+     */
+    private void syncMarkers() {
+        if (!waypointMarkers.get() || !ConfluxMapHooks.getInstance().isEnabled()) {
+            // conflux 不在（或结构与适配目标不符）时连尝试都不做：否则每 2 秒一次 NoClassDefFoundError
+            detachMarkers();
+            return;
+        }
+        if (markerSource != null) {
+            return;
+        }
+        if (markerAttachCooldown > 0) {
+            --markerAttachCooldown;
+            return;
+        }
+        markerAttachCooldown = MARKER_ATTACH_RETRY_TICKS;
+        try {
+            markerSource = ConfluxMarkerSource.create(waypointProbe);
+            markerAttachWarned = false;
+            Debug.getLogger().info("[ConfluxMapHelper] conflux markers attached: the SFH points now show on the conflux map");
+        } catch (Throwable e) {
+            if (!markerAttachWarned) {
+                markerAttachWarned = true;
+                Debug.getLogger().debug("[ConfluxMapHelper] conflux markers are not available yet", e);
+            }
+        }
+    }
+
+    /** 摘下标记源：conflux 会在调用线程上重建一次快照，所以关掉之后点会立刻消失 */
+    private void detachMarkers() {
+        if (markerSource == null) {
+            return;
+        }
+        markerSource.close();
+        markerSource = null;
+        markerAttachCooldown = 0;
+        Debug.getLogger().info("[ConfluxMapHelper] conflux markers detached");
     }
 
     /**

@@ -186,8 +186,54 @@ public final class WaypointCaptureProbe {
         }
     }
 
-    /** 每个客户端 tick 调一次：计数并按节奏打汇总 */
-    public void tick() {
+    /**
+     * 给渲染侧的一次性快照。
+     *
+     * <p>交出去的是「已经脱下 {@code IXWaypoint}」的值对象：conflux 的取样在自己节奏上跑，
+     * 不能让它拿着内部对象去做类型判断，也不该让它看见宿主接口。
+     */
+    public List<CapturedPoint> capture() {
+        synchronized (lock) {
+            List<CapturedPoint> points = new ArrayList<>(order.size());
+            for (IXWaypoint waypoint : order) {
+                if (waypoint instanceof ProbeWaypoint point) {
+                    points.add(new CapturedPoint(
+                            point.uid(),
+                            point.dimension(),
+                            point.getX(),
+                            point.getY(),
+                            point.getZ(),
+                            point.getName(),
+                            point.getInitials(),
+                            point.getColor(),
+                            point.preScaled(),
+                            point.coordinateScale()));
+                }
+            }
+            return points;
+        }
+    }
+
+    /** 一个捕获到的点的值视图（见 {@link #capture()}） */
+    public record CapturedPoint(
+            long uid,
+            ResourceKey<Level> dimension,
+            double x,
+            double y,
+            double z,
+            String name,
+            String initials,
+            int color,
+            boolean preScaled,
+            double coordinateScale) {}
+
+    /**
+     * 每个客户端 tick 调一次。
+     *
+     * @param verbose 是否按节奏打汇总。控制台探针与「真正渲染」共用这套捕获，
+     *                渲染时不需要那六行样本，日志交给 {@code verbose} 决定
+     */
+    public void tick(boolean verbose) {
         if (!installed) {
             return;
         }
@@ -195,7 +241,7 @@ public final class WaypointCaptureProbe {
         synchronized (lock) {
             current = ++ticks;
         }
-        if (current - lastLoggedTick < LOG_INTERVAL_TICKS) {
+        if (!verbose || current - lastLoggedTick < LOG_INTERVAL_TICKS) {
             return;
         }
         lastLoggedTick = current;
@@ -362,6 +408,19 @@ public final class WaypointCaptureProbe {
         return "other";
     }
 
+    /**
+     * 这个来源提交前是否乘过 {@code coordinateScale}。
+     *
+     * <p>依据是四个模块的现有写法：StructureLabel（{@code createWaypointSpec}）、SearchLabel
+     * （{@code createWaypoint}）、Warps（{@code addCurrentWaypoint}）都乘了
+     * {@code dimensionType().coordinateScale()}；EntityLog 与 XaeroHelper 的旅行点没有乘。
+     * 未知来源按「没乘」处理 —— 除错一次会同时错掉位置和后续的跨维度换算，宁可不除。
+     */
+    static boolean isPreScaled(String name) {
+        String kind = classify(name);
+        return kind.startsWith("StructureLabel") || "SearchLabel".equals(kind) || "Warps".equals(kind);
+    }
+
     private void onAdd(IXWaypoint waypoint) {
         if (waypoint == null) {
             return;
@@ -422,10 +481,25 @@ public final class WaypointCaptureProbe {
         @Override
         public IXWaypoint createWaypoint(
                 int x, int y, int z, String name, String initials, int color, int type, boolean temp, boolean yIncluded) {
+            long uid;
             synchronized (lock) {
-                ++created;
+                uid = ++created;
             }
-            return new ProbeWaypoint(x, y, z, name, initials, color, type, temp, yIncluded);
+            Level level = Minecraft.getInstance().level;
+            return new ProbeWaypoint(
+                    level == null ? null : level.dimension(),
+                    uid,
+                    isPreScaled(name),
+                    level == null ? 1.0 : level.dimensionType().coordinateScale(),
+                    x,
+                    y,
+                    z,
+                    name,
+                    initials,
+                    color,
+                    type,
+                    temp,
+                    yIncluded);
         }
 
         @Override
@@ -603,6 +677,33 @@ public final class WaypointCaptureProbe {
 
     /** 宿主这边只读写不生成产物的临时点；字段就是 {@code IXWaypoint} 的全套形态 */
     static final class ProbeWaypoint implements IXWaypoint {
+        /**
+         * 建点那一刻的维度。
+         *
+         * <p>宿主接口不发维度参数（Xaero 的路径点本身就属于「当前世界」），但 conflux 的标记是
+         * 带 {@code dimensionId} 的扁平列表，所以只能在这里按创建时机记下来；
+         * 跨维度残留由宿主自己的世界切换清理负责。
+         */
+        private final ResourceKey<Level> dimension;
+        /**
+         * 进程内唯一且终生不变的序号，用来做 conflux 标记的 {@code id}。
+         *
+         * <p>conflux 只要求 id 非空白，同维度同 id 会派生出同一个 UUID，但它<b>不去重</b>
+         * （两个点都画）；反过来同一个点每次取样必须给同一个 id。用自增序号两条都满足，
+         * 也不依赖名字/坐标的哈希（那两样都会在 {@code updateWaypoint} 里变）。
+         */
+        private final long uid;
+        /**
+         * 这个点在提交前有没有被宿主乘过 {@link #coordinateScale}。
+         *
+         * <p>宿主四个来源口径不统一：StructureLabel / SearchLabel / Warps 会乘
+         * {@code dimensionType().coordinateScale()}（沿用 Xaero 的「主世界尺度」写法），
+         * EntityLog 与 XaeroHelper 的旅行点则是原始坐标。conflux 要的是**该维度的原始坐标**，
+         * 所以只有乘过的那批要在渲染前除回去 —— 判断在建点时就做掉，别等到渲染时猜。
+         */
+        private final boolean preScaled;
+        /** 建点时的 {@code coordinateScale}（主世界/末地 1.0，下界 8.0） */
+        private final double coordinateScale;
         private int x;
         private int y;
         private int z;
@@ -615,7 +716,23 @@ public final class WaypointCaptureProbe {
         private final long createdAt = System.currentTimeMillis();
 
         ProbeWaypoint(
-                int x, int y, int z, String name, String initials, int color, int purpose, boolean temp, boolean yIncluded) {
+                ResourceKey<Level> dimension,
+                long uid,
+                boolean preScaled,
+                double coordinateScale,
+                int x,
+                int y,
+                int z,
+                String name,
+                String initials,
+                int color,
+                int purpose,
+                boolean temp,
+                boolean yIncluded) {
+            this.dimension = dimension;
+            this.uid = uid;
+            this.preScaled = preScaled;
+            this.coordinateScale = coordinateScale;
             this.x = x;
             this.y = y;
             this.z = z;
@@ -705,6 +822,24 @@ public final class WaypointCaptureProbe {
         @Override
         public long getCreatedAt() {
             return createdAt;
+        }
+
+        /** conflux 标记要的维度；建点时不在世界则为 {@code null} */
+        ResourceKey<Level> dimension() {
+            return dimension;
+        }
+
+        /** 见字段注释：conflux 标记的 {@code id} 用它 */
+        long uid() {
+            return uid;
+        }
+
+        boolean preScaled() {
+            return preScaled;
+        }
+
+        double coordinateScale() {
+            return coordinateScale;
         }
     }
 }

@@ -275,5 +275,6 @@
 	"conflux-map-extra.conflux-map-helper.minimap-blocks-per-pixel":"小地图缩放(每像素格数, 0=跟随conflux, 0.1~8)",
 	"conflux-map-extra.conflux-map-helper.add-chat-input-in-gui-map":"在全屏地图中添加聊天输入框",
 	"conflux-map-extra.conflux-map-helper.xaero-waypoint-capture":"捕获Xaero路径点(实验, 仅日志)",
+	"conflux-map-extra.conflux-map-helper.waypoint-markers":"在Conflux地图上显示SFH的点(结构/记录/传送点)",
 	"message.viafabric.dup-rot-required": "此功能需要 ViaFabricPlus 连接到 1.20.7 或更低版本。"
 }

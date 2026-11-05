@@ -31,4 +31,7 @@ public interface ConfluxMapApi {
     }
 
     WaypointApi waypoints();
+
+    /** 见 {@link MarkerApi}：拉取式自定义标记 */
+    MarkerApi markers();
 }
