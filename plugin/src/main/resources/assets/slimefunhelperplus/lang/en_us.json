@@ -1,6 +1,14 @@
 {
+	"config.index.friend-wine": "Friend's Wine",
 	"config.index.locator-bar": "Locator Bar",
 	"config.index.sfhelperplus": "SlimeFunHelper+",
+	"friend-wine.enable": "Friend's Wine",
+	"friend-wine.entity-list": "Entity List",
+	"friend-wine.entity-white-list": "List Mode: Whitelist",
+	"friend-wine.music-path": "Music File (bundled resource or local path)",
+	"friend-wine.play-music": "Play Music",
+	"friend-wine.spin-speed": "Spin Speed (deg/s)",
+	"friend-wine.stretch-amplitude": "Stretch Amplitude",
 	"locator-bar.enable": "Locator Bar Position Estimate",
 	"locator-bar.locator-track": "Enable Estimate",
 	"locator-bar.locator-track-debug": "Debug Log",
@@ -8,6 +16,8 @@
 	"locator-bar.locator-track-min-baseline": "Min Baseline",
 	"locator-bar.locator-track-min-span": "Min Azimuth Span",
 	"widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
+	"widget.click-gui.module-name.Render.FriendWine": "Friend's Wine",
+	"widget.click-gui.module-name.Render.FriendWine.tooltips": "Meme: every living entity wobbles like jelly and spins in place",
 	"widget.click-gui.module-name.Render.LocatorTrack": "Locator Track",
 	"widget.click-gui.module-name.Render.LocatorTrack.tooltips": "Estimate hidden player positions from the locator bar"
 }
