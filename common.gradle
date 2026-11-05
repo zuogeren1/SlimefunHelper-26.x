@@ -200,8 +200,9 @@ jar {
 	// 正式产物是 shadowJar 打出的 fat jar（同名），普通 jar 改名为 -thin 避免覆盖
 	archiveClassifier = 'thin'
 
+	def licenseSuffix = project.base.archivesName.get()
 	from(rootProject.file("LICENSE")) {
-		rename { "${it}_${project.base.archivesName.get()}" }
+		rename { "${it}_${licenseSuffix}" }
 	}
 }
 
@@ -226,11 +227,13 @@ def syncPluginJar = tasks.register('syncPluginJar', Copy) {
 
 	doFirst {
 		// 插件升版本号后旧包会和新包一起留在 mods 里，Fabric 会直接报 duplicate mod id
-		delete fileTree(pluginModsDir) { include 'SlimeFunHelper+*.jar' }
+		// 用 File API 删除：配置缓存下执行期不能访问 project
+		pluginModsDir.listFiles()?.findAll { it.name.startsWith('SlimeFunHelper+') && it.name.endsWith('.jar') }?.each { it.delete() }
 	}
 
 	if (includedPlugin != null) {
-		dependsOn includedPlugin.task(":${project.minecraft_version}:build")
+		// 启动只需要可运行的插件 jar；build 里的 test/check / gatherJars 不参与加载
+		dependsOn includedPlugin.task(":${project.minecraft_version}:jar")
 	}
 }
 

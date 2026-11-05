@@ -41,23 +41,25 @@ gradle.projectsEvaluated {
 	}
 }
 
+// 同宿主：PreprocessTask 持有 Project 引用，标记为不兼容；含它的构建退回无配置缓存。
+subprojects {
+	tasks.matching { it.name.startsWith('preprocess') }.configureEach {
+		notCompatibleWithConfigurationCache("preprocess plugin holds a Project reference")
+	}
+}
+
 // 把各版本 build/libs 下最终的 mod jar 汇总到 plugin/build/libs。
 // 规则与宿主一致：先清空再全量拷贝，所以 build/libs 的 mtime 不能用来判断新旧。
-def gatherJars = tasks.register('gatherJars') {
-	doFirst {
-		println 'Gathering SlimeFunHelper+ builds'
-		def rootLibs = layout.buildDirectory.dir('libs').get().asFile
-		// 不先清空：只构建单个版本时，另一版本的 jar 要保留（README/发布靠这份汇总）
-		subprojects {
-			copy {
-				from layout.buildDirectory.dir('libs')
-				include '*.jar'
-				exclude '*-dev.jar', '*-sources.jar', '*-thin.jar'
-				into rootLibs
-				duplicatesStrategy = DuplicatesStrategy.INCLUDE
-			}
+def gatherJars = tasks.register('gatherJars', Copy) {
+	subprojects.each { p ->
+		from(p.layout.buildDirectory.dir('libs')) {
+			include '*.jar'
+			exclude '*-dev.jar', '*-sources.jar', '*-thin.jar'
 		}
 	}
+	into(layout.buildDirectory.dir('libs'))
+	duplicatesStrategy = DuplicatesStrategy.INCLUDE
+	doFirst { println 'Gathering SlimeFunHelper+ builds' }
 }
 
 // 宿主里 buildAndGather 靠根 build 触发；这里额外让每个版本的 build 收尾时汇总一次，

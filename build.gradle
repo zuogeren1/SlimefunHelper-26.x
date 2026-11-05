@@ -54,6 +54,16 @@ gradle.projectsEvaluated {
 }
 
 // 一次性构建所有版本并把 jar 汇总到根 build/libs
+
+// preprocess 的 PreprocessTask 会持有 Project 引用，配置缓存无法序列化；
+// 标记为不兼容后，含它的构建（26.1.2 编译 / 发版）自动退回无配置缓存，
+// 而 :26.2:runClient 的任务图里没有它，仍然走配置缓存。
+subprojects {
+	tasks.matching { it.name.startsWith('preprocess') }.configureEach {
+		notCompatibleWithConfigurationCache("preprocess plugin holds a Project reference")
+	}
+}
+
 repositories {
 	mavenCentral()
 	maven {
@@ -77,24 +87,23 @@ tasks.register('build') {
 	dependsOn 'buildAndGather'
 }
 
-tasks.register('buildAndGather') {
+def rootLibsDir = layout.buildDirectory.dir('libs').get().asFile
 
-	subprojects {
-		dependsOn project.tasks.named('build').get()
+tasks.register('buildAndGather', Copy) {
+
+	subprojects.each { p ->
+		dependsOn p.tasks.named('build')
+		from(p.layout.buildDirectory.dir('libs')) {
+			include '*.jar'
+			exclude '*-dev.jar', '*-sources.jar', '*-thin.jar'
+		}
 	}
+	into rootLibsDir
+	duplicatesStrategy = DuplicatesStrategy.INCLUDE
+	// 先清空根 build/libs，避免版本改名后残留旧包
+	outputs.upToDateWhen { false }
 	doFirst {
 		println 'Gathering builds'
-		def buildLibs = { p -> p.buildDir.toPath().resolve('libs') }
-		delete fileTree(buildLibs(rootProject)) { include '*' }
-		subprojects {
-			copy {
-				from(buildLibs(project)) {
-					include '*.jar'
-					exclude '*-dev.jar', '*-sources.jar', '*-thin.jar'
-				}
-				into buildLibs(rootProject)
-				duplicatesStrategy = DuplicatesStrategy.INCLUDE
-			}
-		}
+		rootLibsDir.listFiles()?.each { it.isDirectory() ? it.deleteDir() : it.delete() }
 	}
 }

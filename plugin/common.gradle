@@ -118,9 +118,10 @@ java {
 jar {
 	// 与宿主一致地带上 LICENSE 的副本（没有该文件时 Gradle 会跳过）
 	def license = rootProject.file('../LICENSE')
+	def licenseSuffix = project.base.archivesName.get()
 	if (license.isFile()) {
 		from(license) {
-			rename { "${it}_${project.base.archivesName.get()}" }
+			rename { "${it}_${licenseSuffix}" }
 		}
 	}
 }
