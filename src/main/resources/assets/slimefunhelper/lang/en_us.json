@@ -4498,6 +4498,8 @@
 	"conflux-map-extra.conflux-map-helper.loaded-chunk-render-color":"已加载区块颜色",
 	"conflux-map-extra.conflux-map-helper.travel-goal-sync":"同步旅行目标",
 	"conflux-map-extra.conflux-map-helper.minimap-blocks-per-pixel":"小地图缩放(每像素格数, 0=跟随conflux, 0.1~8)",
+	"conflux-map-extra.conflux-map-helper.add-chat-input-in-gui-map":"在全屏地图中添加聊天输入框",
+	"conflux-map-extra.conflux-map-helper.xaero-waypoint-capture":"捕获Xaero路径点(实验, 仅日志)",
 	"module-toggle.conflux-map-extra.conflux-map-helper.enable-right-click-command":"ConfluxMapHelper",
 	"widget.click-gui.module-name.Survival.ConfluxMapHelper":"ConfluxMapHelper",
 	"widget.chat.callback.confirm": "[确认]",

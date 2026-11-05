@@ -5,28 +5,33 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.chat.InGuiChatBox;
 import me.matl114.hacks.utils.config.*;
 import me.zuogeren.slimefunhelperplus.conflux.ConfluxMapHooks;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuContext;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuTarget;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxTravelWaypointSyncHolder;
+import me.zuogeren.slimefunhelperplus.conflux.probe.WaypointCaptureProbe;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.plugins.api.PluginHosts;
 import me.matl114.utils.ChatUtils;
+import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.conflux.LoadedChunkEdgeCache;
 import me.matl114.utils.ScreenUtils;
 import me.zuogeren.slimefunhelperplus.config.PluginConfig;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
@@ -144,6 +149,28 @@ public class ConfluxMapHelper extends BaseModule {
             .defaultValue(0.0)
             .build();
 
+    /**
+     * 在全屏地图界面里加一个聊天输入框，语义与 {@code XaeroHelper} 的同名开关完全一致：
+     * 输入框本体与样式都借宿主 {@code InGuiChatBox} 那一套，我们只负责在 conflux 的界面初始化之后
+     * 把它挂上去。
+     *
+     * <p>为什么还要判 {@code InGuiChatBox#enableOther}：那个开关打开时宿主已经把输入框加进了
+     * <b>所有</b>非容器界面（含 conflux 地图），我们再挂一个就是两个框叠在一起。
+     */
+    public final FlagRef addChatInGuiMap = flagBuilder(root.add("add-chat-input-in-gui-map")).build();
+
+    /**
+     * 捕获宿主四个模块（StructureLabel / SearchLabel / EntityLog / Warps）提交的 Xaero 路径点。
+     *
+     * <p>这一版<b>只写日志不渲染</b>：它要回答的是「这套点能不能拿来用」——有多少、什么坐标、
+     * 什么颜色、什么时候被删。实现见 {@link WaypointCaptureProbe}（反射替换 {@code XaeroHooks#minimap}，
+     * 宿主零改动）。装了真 Xaero 的玩家这里会自动跳过，不会抢走他们的路径点数据。
+     */
+    public final FlagRef waypointCapture = flagBuilder(root.add("xaero-waypoint-capture")).build();
+
+    /** 只读捕获器：开关关掉时立即还原 hooks 并清空已捕获的点 */
+    private final WaypointCaptureProbe waypointProbe = new WaypointCaptureProbe();
+
     /** 已加载区块的边界边缓存：数据在这里按 tick 刷新，绘制在 ConfluxMapScreenMixin 里读 */
     private final LoadedChunkEdgeCache loadedChunkEdges = new LoadedChunkEdgeCache();
 
@@ -158,6 +185,8 @@ public class ConfluxMapHelper extends BaseModule {
         registerListener(Listener.getPostGameTick(), this::onPostGameTick);
         // 断开连接（含进 reconfiguration）：我们的路径点属于某个存档，不能跨会话留着
         registerListener(Listener.getServerLeavePoint(), this::onServerLeave);
+        // 界面初始化之后：按开关决定要不要往 conflux 的全屏地图里挂聊天输入框
+        registerListener(Listener.getPostInitializeScreen(), this::onScreenSetup);
     }
 
     /** 模块被关（开关）时立刻收掉我们建的路径点，别让它留在地图上 */
@@ -165,6 +194,7 @@ public class ConfluxMapHelper extends BaseModule {
     public void onDisableModule() {
         super.onDisableModule();
         travelWaypointSync.removeNow();
+        waypointProbe.uninstall();
     }
 
     @Override
@@ -172,11 +202,43 @@ public class ConfluxMapHelper extends BaseModule {
         super.unregisterAll();
         loadedChunkEdges.clear();
         travelWaypointSync.removeNow();
+        waypointProbe.uninstall();
     }
 
     /** 断开连接 / 进 reconfiguration：删掉我们的路径点并清空状态 */
     public void onServerLeave(Event<Void> event) {
         travelWaypointSync.removeNow();
+    }
+
+    /**
+     * conflux 全屏地图初始化之后，按开关给它挂一个聊天输入框。
+     *
+     * <p>控件与行为全部来自宿主 {@code InGuiChatBox}（同一个 {@code ChatLikeInputWidget}、
+     * 同一份位置/宽度配置、同样是把内容交给 {@code ChatTasks.sayMessage}），我们只负责
+     * 「什么时候挂到哪个界面」——与 {@code XaeroHelper#onGuiSetup} 对 Xaero 世界地图做的事同构。
+     *
+     * <p>为什么先判 {@code enableOther}：那个开关会把输入框加进所有非容器界面，我们再挂就是两个。
+     *
+     * <p>整段 try/catch：界面初始化在启动路径上，这里出问题最多是「没有那个输入框」，
+     * 不能让它把地图界面带崩。
+     */
+    public void onScreenSetup(Event<Screen> event) {
+        if (!addChatInGuiMap.get()) {
+            return;
+        }
+        try {
+            Screen screen = event.context;
+            if (!ConfluxMapHooks.isMapScreen(screen)) {
+                return;
+            }
+            InGuiChatBox chatBox = InGuiChatBox.INSTANCE;
+            if (chatBox == null || chatBox.enableOther.get()) {
+                return;
+            }
+            ScreenAccess.of(screen).addDrawableChildTo(chatBox.createDefaultInputWidget());
+        } catch (Throwable e) {
+            Debug.getLogger().warn("[ConfluxMapHelper] could not add the chat input to the conflux map screen", e);
+        }
     }
 
     /**
@@ -187,6 +249,13 @@ public class ConfluxMapHelper extends BaseModule {
      * 迭代器一构造就解引用 {@code mc.level}，不挡会直接 NPE。
      */
     public void onPostGameTick(Event<LocalPlayer> event) {
+        // 探针与 loadedChunkRender 无关，但必须放在它那个提前返回之前，否则关掉区块渲染就收不到样本
+        if (waypointCapture.get()) {
+            waypointProbe.install();
+        } else {
+            waypointProbe.uninstall();
+        }
+        waypointProbe.tick();
         syncTravelWaypoint();
         if (!loadedChunkRender.get()) {
             return;

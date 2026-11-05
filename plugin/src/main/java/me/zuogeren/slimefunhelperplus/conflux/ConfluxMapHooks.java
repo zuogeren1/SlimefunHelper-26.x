@@ -15,6 +15,7 @@ import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuContext;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuTarget;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxTravelWaypointSyncHolder;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.gui.screens.Screen;
 
 /**
  * conflux-map 的接入点，形态照抄 {@link XaeroHooks}：
@@ -233,5 +234,24 @@ public class ConfluxMapHooks implements IHooks {
 
     public String getUnsupportedReason() {
         return unsupportedReason;
+    }
+
+    /**
+     * 这个界面是不是 conflux 的全屏地图。
+     *
+     * <p>按类名逐级比对，不写 `instanceof FullscreenMapScreen`：conflux 没装时那个类根本不在
+     * 类路径上，直接引用会让本类一初始化就抛 {@code NoClassDefFoundError}，连「没装」这条
+     * 优雅降级都走不到。
+     */
+    public static boolean isMapScreen(Screen screen) {
+        if (screen == null) {
+            return false;
+        }
+        for (Class<?> type = screen.getClass(); type != null; type = type.getSuperclass()) {
+            if (SCREEN_CLASS.equals(type.getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 }
