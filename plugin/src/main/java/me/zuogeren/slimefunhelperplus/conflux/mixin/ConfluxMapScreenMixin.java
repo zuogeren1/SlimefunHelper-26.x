@@ -536,7 +536,7 @@ public abstract class ConfluxMapScreenMixin implements ConfluxMenuRowHost {
 
     /**
      * {@code Target.blockY()} 是包私有方法，而 Target 本身也是包级私有类型，
-     * 跨包不能直接调用；这里用反射读。它在 0.1.7 与 0.1.9 里都存在（语义：地面 + 1）。
+     * 跨包不能直接调用；这里用反射读。0.1.16 里它在（语义：地面 + 1，未知则 empty）。
      */
     @Unique
     private static OptionalInt slimefunhelper$invokeBlockY(Object target) throws Exception {

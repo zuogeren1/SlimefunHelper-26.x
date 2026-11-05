@@ -5,11 +5,11 @@ import java.util.OptionalInt;
 /**
  * conflux-map 的右键位置菜单（编译期桩，不参与打包）。
  * 真实 jar 中该类及其嵌套类型是**包级私有**的，这里声明为 public 只是为了 javac；
- * 运行期由 mixin 合并进目标类后以同包身份访问，因此本模块只依赖两版都有的成员：
+ * 运行期由 mixin 合并进目标类后以同包身份访问，本模块只依赖下列成员：
  *   Bounds: public x() / y() / width() / height()，包私有 buttonX() / buttonY(int) / buttonWidth() / contains(double,double)
  *   Target: public blockX() / blockZ()，包私有 blockY()（语义：地面+1，未知则 empty）
- * 注意：0.1.7 的 Target 组件是 OptionalInt surfaceY，0.1.9 换成了 ColumnStore.SurfaceLookup ground，
- * 这里两个都不声明，避免绑定到任一版本。
+ * 注意：Target 的第二个组件是 ColumnStore.SurfaceLookup ground（0.1.16），这里不声明它，
+ * 避免绑定具体版本；blockY() 照旧走反射调用。
  */
 public class FullscreenMapLocationMenu {
     public static class Bounds {

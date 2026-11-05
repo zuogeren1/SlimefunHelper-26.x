@@ -6,8 +6,8 @@ import java.util.Optional;
  * conflux-map 的插件入口（编译期桩，不参与打包）。
  *
  * <p>真类在 conflux-map 的 JiJ 内嵌包 {@code META-INF/jars/api-x.y.z.jar} 里，**不在**工程当前的
- * 编译类路径上。签名按 javap 逐字抄自三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2，
- * 三者 {@code api/} 下同样 36 个类、本入口逐字一致）：
+ * 编译类路径上。签名按 javap 逐字抄自 0.1.16（26.1.2 / 26.2 两份 jar，
+ * {@code api/} 下 37 个类、本入口逐字一致）：
  * <pre>
  * public interface cn.net.rms.confluxmap.api.ConfluxMapApi {
  *   String version(); ConfluxMapEvents events(); WaypointApi waypoints();

@@ -19,7 +19,7 @@ import net.minecraft.client.gui.Font;
  *       在这里再画一遍就是用户看到的重影。</li>
  * </ol>
  *
- * <p>几何常量直接来自 conflux 的字节码（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2 三份 jar 完全一致）：
+ * <p>几何常量直接来自 conflux 的字节码（0.1.16，26.1.2 / 26.2 两份 jar 完全一致）：
  * <pre>
  *   FullscreenMapLocationMenu.Bounds.buttonX()     = x + 3
  *   FullscreenMapLocationMenu.Bounds.buttonY(i)    = y + 3 + 22 * i      // BUTTON_HEIGHT 20 + BUTTON_GAP 2
@@ -58,13 +58,12 @@ public class ConfluxMenuOverlay {
     /**
      * 我们的第 index 行该显示 / 该用哪个数字键。
      *
-     * <p>编号接在 conflux 自己的条目之后：0.1.9 的 {@code FullscreenMapLocationMenu.drawHotkeyHints}
+     * <p>编号接在 conflux 自己的条目之后：他们的 {@code FullscreenMapLocationMenu.drawHotkeyHints}
      * 是「第 i 个按钮画 {@code Integer.toString(i + 1)}」，我们的行是列表的第
      * {@code nativeCount + index} 个，所以这个槽位本来就该显示 {@code nativeCount + index + 1}。
-     * 这样他们的槽位、我们显示的数字、以及实际按键三者永远一致；
-     * 0.1.7 没有这套提示，这组数字只由我们自己画。
+     * 这样他们的槽位、我们显示的数字、以及实际按键三者永远一致。
      *
-     * <p>注意：0.1.9 的 {@code HOTKEY_KEYS} 只有 5 个键（1~5），所以只有列表下标 < 5 的槽位他们会画，
+     * <p>注意：{@code HOTKEY_KEYS} 只有 5 个键（1~5），所以只有列表下标 < 5 的槽位他们会画，
      * 其余由我们补 —— 判据是 {@link #shouldDrawHotkeyDigit}，同色同位置，但绝不重画他们已经画过的。
      */
     public static int hotkeyDigit(int nativeCount, int index) {
@@ -148,9 +147,9 @@ public class ConfluxMenuOverlay {
      * <ul>
      *   <li>{@code boundsY + nativeHeight} —— 他们自己算出来的面板底边；</li>
      *   <li>{@code contentBottom(boundsY, nativeCount)} —— 他们**最后一个原生按钮**的下沿 + 内边距。
-     *       0.1.9 的 {@code place(...)} 用的是「已启用 action 数」而按钮列表是「全部 action」，
-     *       两者会差 2px 左右（他们的既有现象）；不把这个缝一起盖掉，我们的行和他们的行之间就会
-     *       露出一条背景色 —— 正是用户报的「有缝隙」。</li>
+     *       他们的 {@code place(...)} 按 {@code actions(...)} 的条数算面板高，而按钮列表在
+     *       「兄弟路径点」时会从这份清单里再移除 3 条，两者于是可能差最多 3 行；不把这个缝一起
+     *       盖掉，我们的行和他们的行之间就会露出一条背景色 —— 正是用户报的「有缝隙」。</li>
      * </ul>
      */
     public static int extendedPanelBottom(int boundsY, int nativeHeight, int nativeCount, int ourRows) {
@@ -220,8 +219,8 @@ public class ConfluxMenuOverlay {
         if (rows <= 0 || panelWidth <= 0 || nativeCount <= 0) {
             return false;
         }
-        // 顶部从“他们面板底边”起算：0.1.9 的 place() 按原生条目数算高度，可能会比最后一个
-        // 原生按钮的下沿高 2px（他们自己的既有现象），所以实际可点的起点取两者较小值。
+        // 顶部从“他们面板底边”起算：他们的 place() 按 actions(...) 的条数算高度，可能比最后一个
+        // 原生按钮的下沿高（兄弟路径点会从按钮列表里再移除 3 条），所以实际可点的起点取两者较小值。
         int top = Math.min(boundsY + nativeHeight, rowY(boundsY, nativeCount));
         int bottom = extendedPanelBottom(boundsY, nativeHeight, nativeCount, rows);
         return mouseX >= boundsX && mouseX < boundsX + panelWidth && mouseY >= top && mouseY < bottom;
@@ -240,13 +239,12 @@ public class ConfluxMenuOverlay {
     /**
      * 我们第 index 行的数字，该不该由<b>我们</b>画。
      *
-     * <p>0.1.9 的 {@code drawHotkeyHints} 遍历他们的 spec 列表：对下标
+     * <p>他们的 {@code drawHotkeyHints} 遍历 spec 列表：对下标
      * {@code index < HOTKEY_KEYS.length(=5)} 的槽位画一个绿色数字，遇到第一个越界下标就直接
      * {@code return}。我们的行是列表的第 {@code nativeCount + index} 个，所以只有落在这个槽位数
      * <b>之外</b>的行才需要补画 —— 落在里面的那些他们已经画了，我们再画一遍就是同一个数字叠两次。
      *
-     * <p>0.1.7 完全没有这套提示（{@code hotkeyLabel} / {@code drawHotkeyHints} 都不存在，
-     * 探测出的 {@code nativeHotkeySlots} = 0），于是每一行都由我们画。
+     * <p>探测不出这套提示的版本里 {@code nativeHotkeySlots} = 0，于是每一行都由我们画。
      *
      * @param nativeHotkeySlots conflux 自己会画数字的槽位数（0 表示他们没有这套提示）
      */
@@ -328,7 +326,7 @@ public class ConfluxMenuOverlay {
      * 这里再画一遍就是重影。数字的位置/颜色与他们完全同式：
      * {@code x = 面板右边界 - 3 - 4 - 数字宽，y = buttonY(index) + (20 - 9) / 2，颜色 = 0xFF55FF55}。
      *
-     * @param nativeHotkeySlots conflux 自己会画数字的槽位数（0.1.9 = 5，0.1.7 = 0）
+     * @param nativeHotkeySlots conflux 自己会画数字的槽位数（0.1.16 = 5；探测不到这套提示时为 0）
      */
     public static void drawHotkeyDigits(
             int boundsX,

@@ -8,7 +8,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * conflux-map 的路径点读写入口（编译期桩，不参与打包）。
  *
- * <p>签名按 javap 逐字抄自三份 jar（0.1.7-26.2 / 0.1.9-26.2 / 0.1.9-26.1.2，三份一致）：
+ * <p>签名按 javap 逐字抄自 0.1.16（26.1.2 / 26.2 两份 jar 一致）：
  * <pre>
  * public interface cn.net.rms.confluxmap.api.WaypointApi {
  *   List&lt;WaypointApi$ApiWaypoint&gt; list();
