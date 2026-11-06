@@ -94,8 +94,13 @@ public final class ConfluxWaypointManager {
         return new ConfluxWaypointManager(waypoints, probe);
     }
 
-    /** 等 store 就绪的最长等待：100 tick（5 秒），过了就认为这个会话本来就没有可清的残留 */
-    private static final int SWEEP_WAIT_TICKS = 100;
+    /**
+     * 等 store 就绪的最长等待：20 tick（1 秒），过了就认为这个会话本来就没有可清的残留。
+     *
+     * <p>落盘已经被 {@code ConfluxWaypointSaveMixin} 过滤掉 SFH 组，所以这个清扫现在只处理
+     * **老版本留下的残留**；窗口不必再留那么长，否则每次进世界都要晚一秒才看到点。
+     */
+    private static final int SWEEP_WAIT_TICKS = 20;
 
     /**
      * 每个客户端 tick 调一次（主线程）：把捕获集合同步成路径点集合。
