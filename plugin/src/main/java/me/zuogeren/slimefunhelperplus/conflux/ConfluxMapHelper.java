@@ -19,6 +19,7 @@ import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuContext;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxMenuTarget;
 import me.zuogeren.slimefunhelperplus.conflux.hooks.ConfluxTravelWaypointSyncHolder;
 import me.zuogeren.slimefunhelperplus.conflux.markers.ConfluxMarkerSource;
+import me.zuogeren.slimefunhelperplus.conflux.waypoints.ConfluxWaypointManager;
 import me.zuogeren.slimefunhelperplus.conflux.probe.WaypointCaptureProbe;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.DoubleRef;
@@ -179,6 +180,31 @@ public class ConfluxMapHelper extends BaseModule {
      */
     public final FlagRef waypointMarkers = flagBuilder(root.add("waypoint-markers")).build();
 
+    /**
+     * 把 SFH 的点写成 conflux 的**真路径点**（进路径点列表、可编辑、可传送、显示距离）。
+     *
+     * <p>与 {@link #waypointMarkers} 二选一：标记只是画点，路径点还能被玩家管理；同时开会画两份。
+     * 所有由我们写的点都归在 {@link ConfluxWaypointManager#GROUP} 组里，清理以组为边界。
+     */
+    public final FlagRef waypointMode = flagBuilder(root.add("waypoint-mode")).build();
+
+    /**
+     * 临时：这些路径点只在本次世界会话里存在 —— 离开世界 / 关开关 / 下次启动都会把
+     * {@link ConfluxWaypointManager#GROUP} 整组清空。对齐 Xaero 的 {@code temp} 语义
+     * （那边是「不写盘 + 重进世界即消失」），区别只在于 conflux 的写入一定会落盘，
+     * 所以这里靠清理把事情拉回同样的可观察结果。
+     */
+    public final FlagRef waypointTemp = flagBuilder(root.add("waypoint-temp"), true).build();
+
+    /** 路径点写入器；{@code null} = 还没接上 */
+    private ConfluxWaypointManager waypointManager;
+
+    /** 写路径点的重试冷却（tick） */
+    private int waypointAttachCooldown;
+
+    /** 写路径点接不上的原因只打一次 */
+    private boolean waypointAttachWarned;
+
     /** 只读捕获器：开关关掉时立即还原 hooks 并清空已捕获的点 */
     private final WaypointCaptureProbe waypointProbe = new WaypointCaptureProbe();
 
@@ -214,6 +240,7 @@ public class ConfluxMapHelper extends BaseModule {
     public void onDisableModule() {
         super.onDisableModule();
         travelWaypointSync.removeNow();
+        detachWaypointWriter();
         detachMarkers();
         waypointProbe.uninstall();
     }
@@ -223,13 +250,24 @@ public class ConfluxMapHelper extends BaseModule {
         super.unregisterAll();
         loadedChunkEdges.clear();
         travelWaypointSync.removeNow();
+        detachWaypointWriter();
         detachMarkers();
         waypointProbe.uninstall();
     }
 
-    /** 断开连接 / 进 reconfiguration：删掉我们的路径点并清空状态 */
+    /**
+     * 断开连接 / 进 reconfiguration：删掉我们的路径点并清空状态。
+     *
+     * <p>「临时」开着时也试着清 {@code SFH} 组，但**不能指望它**：conflux 自己的
+     * {@code onSessionChanged} 先于插件收到 sessionEnded（它的注释写着 last in the listener chain），
+     * 那时 store 已经 flush 并置空，我们的 remove 只会拿到 NO_SESSION / NOT_FOUND。
+     * 真正的兜底是下次会话开头的启动清扫（{@code syncWaypointWriter} 里那一次 clearGroup）。
+     */
     public void onServerLeave(Event<Void> event) {
         travelWaypointSync.removeNow();
+        if (waypointManager != null && waypointTemp.get()) {
+            waypointManager.clearGroup();
+        }
     }
 
     /**
@@ -282,6 +320,7 @@ public class ConfluxMapHelper extends BaseModule {
         }
         // 日志只归「捕获开关」管：只想看地图点的人不该被每 10 秒六行样本刷屏
         waypointProbe.tick(waypointCapture.get());
+        syncWaypointWriter();
         syncMarkers();
         syncTravelWaypoint();
         if (!loadedChunkRender.get()) {
@@ -308,7 +347,7 @@ public class ConfluxMapHelper extends BaseModule {
      * 所以按 tick 重试、带冷却，日志只留一次 —— 与旅行点那条路径的取舍一致。
      */
     private void syncMarkers() {
-        if (!waypointMarkers.get() || !ConfluxMapHooks.getInstance().isEnabled()) {
+        if (!waypointMarkers.get() || waypointMode.get() || !ConfluxMapHooks.getInstance().isEnabled()) {
             // conflux 不在（或结构与适配目标不符）时连尝试都不做：否则每 2 秒一次 NoClassDefFoundError
             detachMarkers();
             return;
@@ -331,6 +370,55 @@ public class ConfluxMapHelper extends BaseModule {
                 Debug.getLogger().debug("[ConfluxMapHelper] conflux markers are not available yet", e);
             }
         }
+    }
+
+    /**
+     * 按需接上路径点写入器。
+     *
+     * <p>接上时如果「临时」是开的，先做一次启动清扫：上一次会话（含崩溃）留下的 {@code SFH} 组
+     * 会被整组删掉 —— 这正是 Xaero 那边「temp 不落盘、重进世界就没有」的可观察结果。
+     */
+    private void syncWaypointWriter() {
+        if (!waypointMode.get() || !ConfluxMapHooks.getInstance().isEnabled()) {
+            detachWaypointWriter();
+            return;
+        }
+        if (waypointManager != null) {
+            waypointManager.sync(waypointTemp.get());
+            return;
+        }
+        if (waypointAttachCooldown > 0) {
+            --waypointAttachCooldown;
+            return;
+        }
+        waypointAttachCooldown = MARKER_ATTACH_RETRY_TICKS;
+        try {
+            // 启动清扫不在这里做：接上的那一 tick conflux 的 store 可能还没读盘，
+            // 由 manager 自己在 sync 里等就绪（见 ConfluxWaypointManager#sweepIfReady）
+            ConfluxWaypointManager manager = ConfluxWaypointManager.create(waypointProbe);
+            waypointManager = manager;
+            waypointAttachWarned = false;
+            Debug.getLogger().info("[ConfluxMapHelper] conflux waypoint writer attached, group="
+                    + ConfluxWaypointManager.GROUP + " temporary=" + waypointTemp.get());
+        } catch (Throwable e) {
+            if (!waypointAttachWarned) {
+                waypointAttachWarned = true;
+                Debug.getLogger().debug("[ConfluxMapHelper] conflux waypoint writer is not available yet", e);
+            }
+        }
+    }
+
+    /** 摘下写入器；「临时」开着时把整组删掉，否则留着让玩家自己管 */
+    private void detachWaypointWriter() {
+        if (waypointManager == null) {
+            return;
+        }
+        if (waypointTemp.get()) {
+            waypointManager.clearGroup();
+        }
+        waypointManager = null;
+        waypointAttachCooldown = 0;
+        Debug.getLogger().info("[ConfluxMapHelper] conflux waypoint writer detached");
     }
 
     /** 摘下标记源：conflux 会在调用线程上重建一次快照，所以关掉之后点会立刻消失 */

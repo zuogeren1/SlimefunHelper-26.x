@@ -4501,6 +4501,8 @@
 	"conflux-map-extra.conflux-map-helper.add-chat-input-in-gui-map":"在全屏地图中添加聊天输入框",
 	"conflux-map-extra.conflux-map-helper.xaero-waypoint-capture":"捕获Xaero路径点(实验, 仅日志)",
 	"conflux-map-extra.conflux-map-helper.waypoint-markers":"在Conflux地图上显示SFH的点(结构/记录/传送点)",
+	"conflux-map-extra.conflux-map-helper.waypoint-mode":"把SFH的点写成Conflux路径点(可编辑/可传送)",
+	"conflux-map-extra.conflux-map-helper.waypoint-temp":"临时:离开世界即清空(对齐Xaero临时点)",
 	"module-toggle.conflux-map-extra.conflux-map-helper.enable-right-click-command":"ConfluxMapHelper",
 	"widget.click-gui.module-name.Survival.ConfluxMapHelper":"ConfluxMapHelper",
 	"widget.chat.callback.confirm": "[确认]",

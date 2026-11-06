@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import me.matl114.utils.Debug;
+import me.zuogeren.slimefunhelperplus.conflux.SfPointStyle;
 import me.zuogeren.slimefunhelperplus.conflux.probe.WaypointCaptureProbe;
 import me.zuogeren.slimefunhelperplus.conflux.probe.WaypointCaptureProbe.CapturedPoint;
 import net.minecraft.client.Minecraft;
@@ -52,29 +53,6 @@ public final class ConfluxMarkerSource implements MarkerApi.CustomMarkerProvider
      * 再多只是拖帧率。
      */
     private static final int MAX_MARKERS = 400;
-
-    /** 全屏地图会把 label 原样单行画出来，太长会横穿屏幕 */
-    private static final int MAX_LABEL_LENGTH = 24;
-
-    /** conflux 对空 label 画的是问号；我们也用同一个兜底，免得出现空方块 */
-    private static final String UNKNOWN_LABEL = "?";
-
-    /**
-     * Xaero {@code WaypointColor} 的十六进制值，按枚举序号排列。
-     *
-     * <p>顺序即宿主传入的 {@code color} 语义（那是 {@code WaypointColor.ordinal()}），
-     * 16 个值取自 xaerominimap 26.5.1 的 {@code WaypointColor#<clinit>}（javap 逐条核过，
-     * 包括 {@code sipush} 与 {@code iconst_m1} 的那几个）。
-     */
-    private static final int[] XAERO_COLORS = {
-        -16777216, -16777046, -16733696, -16733526,
-        -5636096, -5635926, -22016, -5592406,
-        -11184811, -11184641, -11141291, -11141121,
-        -65536, -43521, -171, -1
-    };
-
-    /** 颜色序号越界时的兜底（白色） */
-    private static final int FALLBACK_COLOR = -1;
 
     private final WaypointCaptureProbe probe;
     private final EventRegistration registration;
@@ -165,69 +143,29 @@ public final class ConfluxMarkerSource implements MarkerApi.CustomMarkerProvider
     }
 
     private static ApiMarker toMarker(CapturedPoint point, String dimensionId) {
-        double scale = coordinateScale(point);
+        double scale = SfPointStyle.coordinateScale(point);
         return new ApiMarker(
                 "sfh:" + point.uid(),
                 dimensionId,
                 point.x() / scale,
                 point.y(),
                 point.z() / scale,
-                label(point),
-                color(point.color()),
+                SfPointStyle.label(point),
+                SfPointStyle.color(point.color()),
                 null,
                 true,
                 true,
                 0);
     }
 
-    /**
-     * 宿主口径 → conflux 口径。
-     *
-     * <p>conflux 存的是「该维度的原始方块坐标」（它的跨维度换算只在显示别的东西时用，
-     * 自定义标记不走那条路）。宿主里 StructureLabel / SearchLabel / Warps 在提交前乘过
-     * {@code coordinateScale}（下界 ×8），EntityLog 与旅行点没乘 —— 所以只对乘过的那批除回去。
-     */
-    private static double coordinateScale(CapturedPoint point) {
-        return point.preScaled() && point.coordinateScale() > 0 ? point.coordinateScale() : 1.0;
-    }
-
     private static double distanceSquared(CapturedPoint point, LocalPlayer player) {
         if (player == null) {
             return 0.0;
         }
-        double scale = coordinateScale(point);
+        double scale = SfPointStyle.coordinateScale(point);
         double dx = point.x() / scale - player.getX();
         double dz = point.z() / scale - player.getZ();
         return dx * dx + dz * dz;
-    }
-
-    /**
-     * 把宿主的点名字压成一条能直接画出来的标签。
-     *
-     * <p>SearchLabel 的名字是多行的（{@code Label:\nBlock:…\nItem:…}），而 conflux 的方框
-     * 只取首字符、全屏又把整条单行画出来 —— 不压平的话方框里会出现换行符那个怪字形。
-     * 首字符正好是 {@code L}，压平后前 24 字也够读出「这个区块里有什么」。
-     */
-    private static String label(CapturedPoint point) {
-        String raw = point.name();
-        if (raw == null || raw.isEmpty()) {
-            return UNKNOWN_LABEL;
-        }
-        StringBuilder text = new StringBuilder(Math.min(raw.length(), MAX_LABEL_LENGTH));
-        for (int i = 0; i < raw.length() && text.length() < MAX_LABEL_LENGTH; ++i) {
-            char c = raw.charAt(i);
-            if (c == '\n' || c == '\r' || c == '\t') {
-                text.append(' ');
-            } else if (c >= 0x20 && c != 0x7f && c != '\u00a7') {
-                text.append(c);
-            }
-        }
-        String label = text.toString().trim();
-        return label.isEmpty() ? UNKNOWN_LABEL : label;
-    }
-
-    private static int color(int index) {
-        return index >= 0 && index < XAERO_COLORS.length ? XAERO_COLORS[index] : FALLBACK_COLOR;
     }
 
     private void warnOnce(Throwable e) {

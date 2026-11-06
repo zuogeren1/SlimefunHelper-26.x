@@ -5,6 +5,7 @@ import cn.net.rms.confluxmap.api.WaypointApi.ApiWaypoint;
 import cn.net.rms.confluxmap.api.WaypointApi.WaypointEdit;
 import cn.net.rms.confluxmap.api.WaypointApi.WaypointMutation;
 import cn.net.rms.confluxmap.api.WaypointApi.WaypointType;
+import me.zuogeren.slimefunhelperplus.conflux.waypoints.ConfluxWaypointManager;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -436,7 +437,8 @@ public final class ConfluxTravelWaypointSync {
                 .crossDimensionVisible(true)
                 .type(normalType)
                 .markerLabel(WAYPOINT_MARKER);
-        String group = liveGroup;
+        // 新建时也显式落到 SFH 组：这样「临时」清理只需要按组删，玩家自己的组不受影响
+        String group = liveGroup != null ? liveGroup : ConfluxWaypointManager.GROUP;
         if (group != null) {
             // 只看得到 ApiWaypoint#setName()，它的来源是 Waypoint#group（javap 实测 ApiMappers.toApi）。
             // 不带上它，conflux 会按 null -> "" 落到默认集合，把点从用户选中的集合里挪出去。
