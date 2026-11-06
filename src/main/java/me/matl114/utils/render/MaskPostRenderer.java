@@ -450,6 +450,8 @@ public final class MaskPostRenderer {
 //$$                .withPrimitiveTopology(PrimitiveTopology.QUADS)
 //$$                .withCull(false)
 //$$                .withDepthStencilState(Optional.empty())
+//$$                // 26.3 的 pipeline 不再默认补一个颜色目标；掩膜目标是单色 RGBA8，必须显式声明
+//$$                .withColorTargetState(ColorTargetState.DEFAULT)
 //$$                .build();
 //$$    }
 //$$
