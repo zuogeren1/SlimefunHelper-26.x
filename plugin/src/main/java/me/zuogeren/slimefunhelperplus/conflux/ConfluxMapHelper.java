@@ -186,7 +186,7 @@ public class ConfluxMapHelper extends BaseModule {
      * <p>与 {@link #waypointMarkers} 二选一：标记只是画点，路径点还能被玩家管理；同时开会画两份。
      * 所有由我们写的点都归在 {@link ConfluxWaypointManager#GROUP} 组里，清理以组为边界。
      */
-    public final FlagRef waypointMode = flagBuilder(root.add("waypoint-mode")).build();
+    public final FlagRef waypointMode = flagBuilder(root.add("waypoint-mode"), true).build();
 
     /**
      * 临时：这些路径点只在本次世界会话里存在 —— 离开世界 / 关开关 / 下次启动都会把
