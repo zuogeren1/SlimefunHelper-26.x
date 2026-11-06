@@ -240,7 +240,11 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
     }
 
     @ModifyExpressionValue(
+            //#if MC >= 260300
+            //$$ method = "sendChanges",
+            //#else
             method = "tick",
+            //#endif
             at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isPassenger()Z"))
     private boolean onTick(boolean original) {
         if (Tasks.getTick() == lastCancelTick) {
@@ -262,7 +266,11 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
     }
 
     @WrapOperation(
+            //#if MC >= 260300
+            //$$ method = "sendChanges",
+            //#else
             method = "tick",
+            //#endif
             at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Input;equals(Ljava/lang/Object;)Z"))
     private boolean onPlayerInputPackets(Input instance, Object object, Operation<Boolean> original) {
         if (resyncLastInput) {
