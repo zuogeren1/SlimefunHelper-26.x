@@ -70,12 +70,27 @@ public abstract class ConfluxWaypointSaveMixin {
     private static void slimefunhelper$skipUnchanged(
             Path file, WaypointStore.State state, CallbackInfo ci) {
         try {
-            long fingerprint = SfhWaypointPersistence.fingerprint(state);
-            Long previous = slimefunhelper$lastSaved.put(file.toString(), fingerprint);
-            if (previous != null && previous.longValue() == fingerprint) {
-                // 内容与上次写下去的完全一致（只可能是 SFH 组在变），这次重写纯属浪费
+            Long previous = slimefunhelper$lastSaved.get(file.toString());
+            if (previous != null && previous.longValue() == SfhWaypointPersistence.fingerprint(state)) {
+                // 内容与上次真正写下去的完全一致（只可能是 SFH 组在变），这次重写纯属浪费
                 ci.cancel();
             }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 写成功之后才记指纹。
+     *
+     * <p>放在 RETURN 而不是 HEAD：{@code saveChecked} 抛 {@code IOException} 时 {@code WaypointIo.save}
+     * 只记日志、不重抛，若在 HEAD 就把指纹记下，下一次同样的内容会被判成「已写过」而永远跳过 ——
+     * 一次写盘失败就变成永久丢数据。RETURN 只在正常返回时触发，失败自然不会记。
+     */
+    @Inject(method = slimefunhelper$SAVE, at = @At("RETURN"), require = 0)
+    private static void slimefunhelper$rememberSaved(
+            Path file, WaypointStore.State state, CallbackInfo ci) {
+        try {
+            slimefunhelper$lastSaved.put(file.toString(), SfhWaypointPersistence.fingerprint(state));
         } catch (Throwable ignored) {
         }
     }

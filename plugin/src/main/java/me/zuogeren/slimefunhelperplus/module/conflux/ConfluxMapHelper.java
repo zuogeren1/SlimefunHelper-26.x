@@ -384,6 +384,9 @@ public class ConfluxMapHelper extends BaseModule {
      * 会被整组删掉 —— 这正是 Xaero 那边「temp 不落盘、重进世界就没有」的可观察结果。
      */
     private void syncWaypointWriter() {
+        // 过滤只该在「临时」开着时生效；关掉之后这些点要能像普通路径点一样留下来
+        me.zuogeren.slimefunhelperplus.module.conflux.waypoints.SfhWaypointPersistence
+                .setFiltering(waypointMode.get() && waypointTemp.get());
         if (!waypointMode.get() || !ConfluxMapHooks.getInstance().isEnabled()) {
             detachWaypointWriter();
             return;

@@ -17,12 +17,25 @@ import java.util.List;
  */
 public final class SfhWaypointPersistence {
 
+    /**
+     * 是否真的摘掉 SFH 组。
+     *
+     * <p>由 {@code ConfluxMapHelper} 每个 tick 按「路径点模式 && 临时」同步过来：临时关掉时
+     * 这些点应当像普通路径点一样落盘，过滤必须让路，否则「关闭后一直保留」的说明就成了谎话。
+     * 默认 {@code false}：插件还没表态之前不要动别人的存档。
+     */
+    private static volatile boolean filtering;
+
     private SfhWaypointPersistence() {}
+
+    public static void setFiltering(boolean enabled) {
+        filtering = enabled;
+    }
 
     /** @return 去掉 SFH 组之后的新快照；没有可去掉的就原样返回（避免无意义分配） */
     public static WaypointStore.State filter(WaypointStore.State state) {
-        if (state == null) {
-            return null;
+        if (state == null || !filtering) {
+            return state;
         }
         List<Waypoint> all = state.waypoints();
         List<WaypointSet> allSets = state.sets();
