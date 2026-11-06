@@ -77,8 +77,12 @@ import net.minecraft.world.level.levelgen.WorldGenerationContext;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.feature.*;
 import net.minecraft.world.level.levelgen.feature.ScatteredOreFeature;
+//#if MC >= 260300
+//$$ import net.minecraft.world.level.levelgen.feature.AbstractOreFeature;
+//#else
 import net.minecraft.world.level.levelgen.feature.configurations.FeatureConfiguration;
 import net.minecraft.world.level.levelgen.feature.configurations.OreConfiguration;
+//#endif
 import net.minecraft.world.level.levelgen.heightproviders.HeightProvider;
 import net.minecraft.world.level.levelgen.placement.CountPlacement;
 import net.minecraft.world.level.levelgen.placement.HeightRangePlacement;
@@ -840,7 +844,11 @@ public class SeedOre extends BaseModule {
 
         public static Map<ResourceKey<Biome>, List<Ore>> getRegistry() {
 
+            //#if MC >= 260300
+            //$$ HolderLookup.Provider registry = VanillaRegistries.createWorldLookup();
+            //#else
             HolderLookup.Provider registry = VanillaRegistries.createLookup();
+            //#endif
             HolderLookup.RegistryLookup<PlacedFeature> features = registry.lookupOrThrow(Registries.PLACED_FEATURE);
             var reg = registry.lookupOrThrow(Registries.WORLD_PRESET)
                     .getOrThrow(WorldPresets.NORMAL)
@@ -1028,6 +1036,18 @@ public class SeedOre extends BaseModule {
                 }
             }
 
+            //#if MC >= 260300
+            //$$ Feature oreFeature = feature.feature().value();
+            //$$ if (oreFeature instanceof AbstractOreFeature ore) {
+            //$$     this.discardOnAirChance = ore.discardChanceOnAirExposure();
+            //$$     this.size = ore.size();
+            //$$ } else {
+            //$$     throw new IllegalStateException("config for " + feature + "is not OreFeatureConfig.class");
+            //$$ }
+            //$$ if (oreFeature instanceof ScatteredOreFeature) {
+            //$$     this.scattered = true;
+            //$$ }
+            //#else
             FeatureConfiguration featureConfig = feature.feature().value().config();
 
             if (featureConfig instanceof OreConfiguration oreFeatureConfig) {
@@ -1040,6 +1060,7 @@ public class SeedOre extends BaseModule {
             if (feature.feature().value().feature() instanceof ScatteredOreFeature) {
                 this.scattered = true;
             }
+            //#endif
         }
     }
 }

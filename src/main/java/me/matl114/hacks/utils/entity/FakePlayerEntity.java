@@ -80,7 +80,11 @@ public class FakePlayerEntity extends RemotePlayer {
     }
 
     public float applyHurtTimeDamage(float currentVal, DamageSource source) {
+        //#if MC >= 260300
+        //$$ if ((float) this.getInvulnerableTime() > 10.0F && !source.is(DamageTypeTags.BYPASSES_COOLDOWN)) {
+        //#else
         if ((float) this.invulnerableTime > 10.0F && !source.is(DamageTypeTags.BYPASSES_COOLDOWN)) {
+        //#endif
             if (currentVal <= this.lastHurt) {
                 return 0.0F;
             }
@@ -89,7 +93,11 @@ public class FakePlayerEntity extends RemotePlayer {
             return newAmount;
         } else {
             this.lastHurt = currentVal;
+            //#if MC >= 260300
+            //$$ this.setInvulnerableTime(20);
+            //#else
             this.invulnerableTime = 20;
+            //#endif
             this.hurtDuration = 10;
             this.hurtTime = this.hurtDuration;
             return currentVal;

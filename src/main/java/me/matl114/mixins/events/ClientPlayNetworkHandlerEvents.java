@@ -178,7 +178,11 @@ public abstract class ClientPlayNetworkHandlerEvents {
                     @At(
                             value = "INVOKE",
                             target =
+                                    //#if MC >= 260300
+                                    //$$ "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;createPlayer(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/stats/StatsCounter;Lnet/minecraft/client/ClientRecipeBook;Lnet/minecraft/client/player/ItemActivation;)Lnet/minecraft/client/player/LocalPlayer;",
+                                    //#else
                                     "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;createPlayer(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/stats/StatsCounter;Lnet/minecraft/client/ClientRecipeBook;)Lnet/minecraft/client/player/LocalPlayer;",
+                                    //#endif
                             shift = At.Shift.AFTER))
     private void onGameJoinCreatePlayer0(ClientboundLoginPacket packet, CallbackInfo ci) {
         playerRecreateOnJoin = true;

@@ -28,7 +28,11 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.util.GsonHelper;
 import net.minecraft.world.item.*;
 import net.minecraft.world.item.AdventureModePredicate;
+//#if MC >= 260300
+//$$ // 26.3 工具组件化删除 AxeItem，isWeapon 改判 ItemTags.AXES
+//#else
 import net.minecraft.world.item.AxeItem;
+//#endif
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.MaceItem;
@@ -78,7 +82,12 @@ public class ItemUtils_v1_21_11 implements VItem {
             return true;
         } else if (stack.has(DataComponents.TOOL)) {
             Item tool = stack.getItem();
-            if (tool instanceof AxeItem) {
+            //#if MC >= 260300
+            //$$ boolean axeTool = tool.builtInRegistryHolder().is(ItemTags.AXES);
+            //#else
+            boolean axeTool = tool instanceof AxeItem;
+            //#endif
+            if (axeTool) {
                 return true;
             } else if (isMiningPurposeWeaponWTFTool(stack)) {
                 return false;

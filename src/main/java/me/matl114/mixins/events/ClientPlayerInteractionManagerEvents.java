@@ -20,6 +20,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.multiplayer.prediction.PredictiveAction;
+//#if MC >= 260300
+//$$ import net.minecraft.client.player.ItemActivation;
+//#endif
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.stats.StatsCounter;
 import net.minecraft.world.InteractionHand;
@@ -219,6 +222,23 @@ public abstract class ClientPlayerInteractionManagerEvents {
         Listener.getPostClickSlot().broadcast(new SlotClickAction(actionType, syncId, slotId, button));
     }
 
+    //#if MC >= 260300
+    //$$ @Inject(
+    //$$         method =
+    //$$                 "createPlayer(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/stats/StatsCounter;Lnet/minecraft/client/ClientRecipeBook;Lnet/minecraft/world/entity/player/Input;ZLnet/minecraft/client/player/ItemActivation;)Lnet/minecraft/client/player/LocalPlayer;",
+    //$$         at = @At("RETURN"))
+    //$$ public void onCreatePlayer(
+    //$$         ClientLevel world,
+    //$$         StatsCounter statHandler,
+    //$$         ClientRecipeBook recipeBook,
+    //$$         Input lastPlayerInput,
+    //$$         boolean lastSprinting,
+    //$$         ItemActivation itemActivation,
+    //$$         CallbackInfoReturnable<LocalPlayer> cir) {
+    //$$     LocalPlayer player = cir.getReturnValue();
+    //$$     Listener.getPlayerInitConfiguration().broadcast(player);
+    //$$ }
+    //#else
     @Inject(
             method =
                     "createPlayer(Lnet/minecraft/client/multiplayer/ClientLevel;Lnet/minecraft/stats/StatsCounter;Lnet/minecraft/client/ClientRecipeBook;Lnet/minecraft/world/entity/player/Input;Z)Lnet/minecraft/client/player/LocalPlayer;",
@@ -233,4 +253,5 @@ public abstract class ClientPlayerInteractionManagerEvents {
         LocalPlayer player = cir.getReturnValue();
         Listener.getPlayerInitConfiguration().broadcast(player);
     }
+    //#endif
 }
