@@ -14,14 +14,26 @@ import org.spongepowered.asm.mixin.injection.At;
 /**
  * 流体推动速度事件（内层）：真正派发 {@code Event<Vec3>}。
  *
+ * <p>26.3 把"内层"从 {@code Tracker#applyCurrentTo} 挪到了
+ * {@code CurrentAccumulator#applyTo}，所以 {@code @Mixin} 目标与 {@code method} 都按版本分叉；
+ * 两版的注入点都只有一处 {@code Entity#addDeltaMovement(Vec3)}。
+ *
  * <p>只对**客户端玩家**触发 —— 与原实现里的 {@code checkClientPlayer()} 一致，
  * 否则服务端 tick 的其它实体（怪物等）也会进到这里。
  */
+//#if MC >= 260300
+//$$ @Mixin(targets = "net.minecraft.world.entity.EntityFluidInteraction$CurrentAccumulator")
+//#else
 @Mixin(targets = "net.minecraft.world.entity.EntityFluidInteraction$Tracker")
+//#endif
 public abstract class FluidTrackerMixin {
 
     @WrapOperation(
+            //#if MC >= 260300
+            //$$ method = "applyTo",
+            //#else
             method = "applyCurrentTo",
+            //#endif
             at =
                     @At(
                             value = "INVOKE",
