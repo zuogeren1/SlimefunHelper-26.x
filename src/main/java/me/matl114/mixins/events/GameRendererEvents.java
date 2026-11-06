@@ -37,20 +37,45 @@ public abstract class GameRendererEvents {
     }
 
     /**
-     * 帧末尾把这一帧攒下的 ESP 掩膜合成到主目标上。
+     * 在 GUI 之前把这一帧攒下的 ESP 掩膜合成到主目标上。
      *
-     * <p>合成必须发生在 GUI 之后：26.x 的 2D 事件在 {@code extractRenderState} 阶段广播，
-     * 那时 GUI 还没真正画，而掩膜合成是一个独立的 {@code RenderPass}，只能在这里发。
+     * <p>合成点必须落在 {@code GuiRenderer.render(...)} 之前：掩膜是世界层标注，
+     * GUI 打开时必须被 GUI 盖住；放到 {@code render()} 的 RETURN 会让描边浮在 GUI 上面。
+     * 此时世界几何已经画完、掩膜也已经采集完，不会漏帧。
      */
     //#if MC >= 260300
-    //$$ @Inject(method = "render", at = @At("RETURN"))
+    //$$ @Inject(
+    //$$         method = "render",
+    //$$         at =
+    //$$                 @At(
+    //$$                         value = "INVOKE",
+    //$$                         target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V",
+    //$$                         shift = At.Shift.BEFORE))
     //$$ private void onFrameEnd(CallbackInfo ci) {
     //$$     MaskPostRenderer.flush();
     //$$ }
-    //#else
-    @Inject(method = "render", at = @At("RETURN"))
+    //#elseif MC >= 260200
+    @Inject(
+            method = "render",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V",
+                            shift = At.Shift.BEFORE))
     private void onFrameEnd(DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
         MaskPostRenderer.flush();
     }
+    //#else
+    //$$ @Inject(
+    //$$         method = "render",
+    //$$         at =
+    //$$                 @At(
+    //$$                         value = "INVOKE",
+    //$$                         target =
+    //$$                                 "Lnet/minecraft/client/gui/render/GuiRenderer;render(Lcom/mojang/blaze3d/buffers/GpuBufferSlice;)V",
+    //$$                         shift = At.Shift.BEFORE))
+    //$$ private void onFrameEnd(DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
+    //$$     MaskPostRenderer.flush();
+    //$$ }
     //#endif
 }
