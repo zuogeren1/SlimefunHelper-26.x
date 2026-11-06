@@ -24,7 +24,11 @@ public abstract class SplashOverlayMixin {
                     @At(
                             value = "INVOKE",
                             target =
+                                    //#if MC >= 260300
+                                    //$$ "Lnet/minecraft/client/gui/GuiGraphicsExtractor;blit(Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;Lnet/minecraft/resources/Identifier;IIFFIIIIIII)V",
+                                    //#else
                                     "Lnet/minecraft/client/gui/GuiGraphicsExtractor;blit(Lcom/mojang/blaze3d/pipeline/RenderPipeline;Lnet/minecraft/resources/Identifier;IIFFIIIIIII)V",
+                                    //#endif
                             ordinal = 1,
                             shift = At.Shift.AFTER))
     private void onRenderOverlay(

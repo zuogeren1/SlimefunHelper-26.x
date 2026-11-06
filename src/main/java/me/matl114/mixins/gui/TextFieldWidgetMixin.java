@@ -2,7 +2,11 @@ package me.matl114.mixins.gui;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+//#else
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+//#endif
 import me.matl114.accessors.gui.TextFieldAccess;
 import me.matl114.gui.McWidgetHelpers;
 import me.matl114.gui.basic.ColorProvider;
@@ -75,7 +79,11 @@ public abstract class TextFieldWidgetMixin extends AbstractWidget implements Tex
                     @At(
                             value = "INVOKE",
                             target =
+                                    //#if MC >= 260300
+                                    //$$ "Lnet/minecraft/client/gui/GuiGraphicsExtractor;blitSprite(Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;Lnet/minecraft/resources/Identifier;IIII)V"))
+                                    //#else
                                     "Lnet/minecraft/client/gui/GuiGraphicsExtractor;blitSprite(Lcom/mojang/blaze3d/pipeline/RenderPipeline;Lnet/minecraft/resources/Identifier;IIII)V"))
+                                    //#endif
     public void redirectBorderBoxRender(
             GuiGraphicsExtractor instance,
             RenderPipeline pipeline,

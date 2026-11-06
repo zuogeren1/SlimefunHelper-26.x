@@ -1,6 +1,10 @@
 package me.matl114.versioned.impl;
 
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+//#else
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+//#endif
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.*;
 import me.matl114.renderer.TextRenderers;
