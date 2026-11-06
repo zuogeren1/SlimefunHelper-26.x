@@ -5,9 +5,9 @@ import me.matl114.plugins.api.PluginContext;
 import me.matl114.plugins.api.PluginHosts;
 import me.matl114.plugins.api.SlimefunHelperPlugin;
 import me.matl114.utils.Debug;
-import me.zuogeren.slimefunhelperplus.conflux.ConfluxMapHelper;
-import me.zuogeren.slimefunhelperplus.friendwine.FriendWine;
-import me.zuogeren.slimefunhelperplus.locator.LocatorTrackModule;
+import me.zuogeren.slimefunhelperplus.module.conflux.ConfluxMapHelper;
+import me.zuogeren.slimefunhelperplus.module.friendwine.FriendWine;
+import me.zuogeren.slimefunhelperplus.module.locator.LocatorTrackModule;
 import net.fabricmc.loader.api.ModContainer;
 
 /**
