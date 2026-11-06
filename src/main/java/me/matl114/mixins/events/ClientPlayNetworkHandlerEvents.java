@@ -244,12 +244,28 @@ public abstract class ClientPlayNetworkHandlerEvents {
                     @At(
                             value = "INVOKE",
                             target = "Lnet/minecraft/network/Connection;send(Lnet/minecraft/network/protocol/Packet;)V",
+                            //#if MC >= 260300
+                            //$$ ordinal = 0))
+                            //#else
                             ordinal = 1))
+                            //#endif
     private void onTeleportConfirmResponse(
             Connection instance,
             Packet<?> packet,
             Operation<Void> original,
             @Local(argsOnly = true) ClientboundPlayerPositionPacket posLook) {
+        //#if MC >= 260300
+        //$$ if (packet instanceof ServerboundAcceptTeleportationPacket acceptPacket) {
+        //$$     Listener.getTeleportationConfirm()
+        //$$             .broadcast(new Teleportation(
+        //$$                     acceptPacket.id(),
+        //$$                     acceptPacket.x(),
+        //$$                     acceptPacket.y(),
+        //$$                     acceptPacket.z(),
+        //$$                     acceptPacket.xRot(),
+        //$$                     acceptPacket.yRot()));
+        //$$ }
+        //#else
         if (packet instanceof ServerboundMovePlayerPacket.PosRot fullPacket) {
             packet = PlayerMoveC2SPacketAccess.setCause(fullPacket, PlayerMoveC2SPacketAccess.Cause.SET_BACK);
             Listener.getTeleportationConfirm()
@@ -261,6 +277,7 @@ public abstract class ClientPlayNetworkHandlerEvents {
                             fullPacket.getXRot(0.0F),
                             fullPacket.getYRot(0.0F)));
         }
+        //#endif
         original.call(instance, packet);
     }
 
@@ -398,14 +415,27 @@ public abstract class ClientPlayNetworkHandlerEvents {
 
     @Inject(
             method = "handleLevelChunkWithLight",
+            //#if MC >= 260300
+            //$$ at =
+            //$$         @At(
+            //$$                 value = "INVOKE",
+            //$$                 target =
+            //$$                         "Lnet/minecraft/client/multiplayer/ClientChunkCache;replaceWithPacketData(IILnet/minecraft/network/protocol/game/ClientboundLevelChunkPacketData;)Lnet/minecraft/world/level/chunk/LevelChunk;",
+            //$$                 shift = At.Shift.AFTER))
+            //#else
             at =
                     @At(
                             value = "INVOKE",
                             target =
                                     "Lnet/minecraft/client/multiplayer/ClientPacketListener;updateLevelChunk(IILnet/minecraft/network/protocol/game/ClientboundLevelChunkPacketData;)V",
                             shift = At.Shift.AFTER))
+            //#endif
     private void onLoadChunkPost(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
+        //#if MC >= 260300
+        //$$ ChunkPos pos = new ChunkPos(packet.x(), packet.z());
+        //#else
         ChunkPos pos = new ChunkPos(packet.getX(), packet.getZ());
+        //#endif
         Listener.getChunkUpdateListener().broadcast(pos);
     }
 

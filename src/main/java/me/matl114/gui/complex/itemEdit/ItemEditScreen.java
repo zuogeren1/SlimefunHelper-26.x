@@ -2,6 +2,9 @@ package me.matl114.gui.complex.itemEdit;
 
 import com.google.common.base.Preconditions;
 import com.mojang.authlib.properties.PropertyMap;
+//#if MC >= 260300
+//$$ import com.mojang.blaze3d.Blaze3D;
+//#endif
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.DataResult;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
@@ -932,7 +935,11 @@ public class ItemEditScreen extends ConfirmingBigScreen {
                             .setElementHandler(LabelElement.instance(wikiLink)
                                     .withInputHandler(InputHandler.run(() -> {
                                         if (urlll != null) {
+                                            //#if MC >= 260300
+                                            //$$ Blaze3D.openUri(urlll);
+                                            //#else
                                             Util.getPlatform().openUri(urlll);
+                                            //#endif
                                         }
                                     }))
                                     .withTooltips(TooltipHandler.of(
@@ -1075,9 +1082,21 @@ public class ItemEditScreen extends ConfirmingBigScreen {
             List<ItemComponent> componentList;
 
             protected void init() {
+                //#if MC >= 260300
+                //$$ var split = stackTemplate.components.asPatch().split();
+                //$$ this.componentList = new ArrayList<>();
+                //$$ for (var component : split.added()) {
+                    //$$ this.componentList
+                            //$$ .add(new ItemComponent((DataComponentType) component.type(), Optional.of(component.value())));
+                //$$ }
+                //$$ for (DataComponentType<?> removedType : split.removed()) {
+                    //$$ this.componentList.add(new ItemComponent((DataComponentType) removedType, Optional.empty()));
+                //$$ }
+                //#else
                 this.componentList = stackTemplate.components.asPatch().entrySet().stream()
                         .map(m -> new ItemComponent((DataComponentType) m.getKey(), m.getValue()))
                         .collect(Collectors.toCollection(ArrayList::new));
+                //#endif
                 new ListModifyWidget(
                                 ListEntryWidgetController.mutable(
                                         this.componentList,
@@ -1096,7 +1115,19 @@ public class ItemEditScreen extends ConfirmingBigScreen {
             protected void saveChanges() {
                 Reference2ObjectMap<DataComponentType<?>, Optional<?>> map0 = new Reference2ObjectArrayMap<>();
                 this.componentList.forEach(i -> i.applyChanges(map0));
+                //#if MC >= 260300
+                //$$ DataComponentPatch.Builder builder = DataComponentPatch.builder();
+                //$$ map0.forEach((type, value) -> {
+                    //$$ if (value != null && value.isPresent()) {
+                        //$$ builder.set((DataComponentType) type, value.get());
+                    //$$ } else {
+                        //$$ builder.remove((DataComponentType) type);
+                    //$$ }
+                //$$ });
+                //$$ stackTemplate.components.restorePatch(builder.build());
+                //#else
                 stackTemplate.components.restorePatch(new DataComponentPatch(map0));
+                //#endif
             }
 
             @Override

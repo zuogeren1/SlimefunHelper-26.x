@@ -17,7 +17,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+//#if MC >= 260300
+//#else
 import java.util.function.Predicate;
+//#endif
 import java.util.stream.Stream;
 import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.Debug;
@@ -435,18 +438,34 @@ public final class LocalFontTextDrawer extends ResourceFontTextDrawer implements
         }
 
         @Override
+//#if MC >= 260300
+//$$         public Map<Identifier, Resource> listResources(String directory, ResourceManager.Selector filter) {
+//#else
         public Map<Identifier, Resource> listResources(String directory, Predicate<Identifier> filter) {
+//#endif
             Map<Identifier, Resource> resources = new HashMap<>(this.delegate.listResources(directory, filter));
+//#if MC >= 260300
+//$$             if (this.resourceId.getPath().startsWith(directory) && filter.isIncluded(this.resourceId)) {
+//#else
             if (this.resourceId.getPath().startsWith(directory) && filter.test(this.resourceId)) {
+//#endif
                 resources.put(this.resourceId, this.resource);
             }
             return resources;
         }
 
         @Override
+//#if MC >= 260300
+//$$         public Map<Identifier, List<Resource>> listResourceStacks(String directory, ResourceManager.Selector filter) {
+//#else
         public Map<Identifier, List<Resource>> listResourceStacks(String directory, Predicate<Identifier> filter) {
+//#endif
             Map<Identifier, List<Resource>> stacks = new HashMap<>(this.delegate.listResourceStacks(directory, filter));
+//#if MC >= 260300
+//$$             if (this.resourceId.getPath().startsWith(directory) && filter.isIncluded(this.resourceId)) {
+//#else
             if (this.resourceId.getPath().startsWith(directory) && filter.test(this.resourceId)) {
+//#endif
                 List<Resource> matches = new ArrayList<>(stacks.getOrDefault(this.resourceId, List.of()));
                 matches.add(this.resource);
                 stacks.put(this.resourceId, matches);

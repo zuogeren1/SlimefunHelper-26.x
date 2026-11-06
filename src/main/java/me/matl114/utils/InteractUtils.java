@@ -241,7 +241,11 @@ public class InteractUtils {
 
         if (actionResult instanceof InteractionResult.Success) {
             InteractionResult.Success success = (InteractionResult.Success) actionResult;
+            //#if MC >= 260300
+            //$$ if (success.swingSource() == InteractionResult.SwingSource.PREDICTED) {
+            //#else
             if (success.swingSource() == InteractionResult.SwingSource.CLIENT) {
+            //#endif
                 ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
             }
         }
@@ -259,7 +263,11 @@ public class InteractUtils {
     public static void swingHandIfSuccess(InteractionResult actionResult3, InteractionHand hand) {
         if (actionResult3 instanceof InteractionResult.Success) {
             InteractionResult.Success success3 = (InteractionResult.Success) actionResult3;
+            //#if MC >= 260300
+            //$$ if (success3.swingSource() == InteractionResult.SwingSource.PREDICTED) {
+            //#else
             if (success3.swingSource() == InteractionResult.SwingSource.CLIENT) {
+            //#endif
                 ClientUtils.swing(mc.player, hand);
             }
         }
@@ -426,7 +434,11 @@ public class InteractUtils {
         }
         if (block instanceof ComposterBlock composterBlock) {
             return (state.hasProperty(ComposterBlock.LEVEL) && state.getValue(ComposterBlock.LEVEL) == 8)
+                    //#if MC >= 260300
+                    //$$ || interactStack.get(DataComponents.COMPOSTABLE) != null;
+                    //#else
                     || ComposterBlock.COMPOSTABLES.containsKey(interactStack.getItem());
+                    //#endif
         }
         if (block instanceof BeehiveBlock beehive) {
             return state.hasProperty(BeehiveBlock.HONEY_LEVEL)
@@ -472,7 +484,11 @@ public class InteractUtils {
         if (item instanceof BoneMealItem) {
             Block varBoneMealBlock = state.getBlock();
             if (varBoneMealBlock instanceof BonemealableBlock fertilizable
+                    //#if MC >= 260300
+                    //$$ && fertilizable.isValidBonemealTarget(world, pos, state, BonemealSource.INTERACTION)) {
+                    //#else
                     && fertilizable.isValidBonemealTarget(world, pos, state)) {
+                    //#endif
                 return true;
             }
             BlockPos sidePos = pos.above();
@@ -499,7 +515,11 @@ public class InteractUtils {
         if (item instanceof PotionItem) {
             PotionContents potionContents =
                     interactStack.getOrDefault(DataComponents.POTION_CONTENTS, PotionContents.EMPTY);
+            //#if MC >= 260300
+            //$$ if (potionContents.is(Potions.WATER) && state.is(BlockTags.CONVERTIBLE_TO_MUD)) {
+            //#else
             if (potionContents.is(Potions.WATER) && state.is(BlockTags.CONVERTABLE_TO_MUD)) {
+            //#endif
                 return true;
             }
         }
@@ -530,7 +550,11 @@ public class InteractUtils {
                         || entry instanceof ComparatorBlock
                         || entry instanceof RepeaterBlock
                         || entry instanceof DaylightDetectorBlock
+                        //#if MC >= 260300
+                        //$$ || entry instanceof RedstoneWireBlock
+                        //#else
                         || entry instanceof RedStoneWireBlock
+                        //#endif
                         || entry instanceof SweetBerryBushBlock
                         || entry instanceof CaveVinesBlock
                         || entry instanceof CaveVinesPlantBlock

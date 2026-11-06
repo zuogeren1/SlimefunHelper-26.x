@@ -269,7 +269,11 @@ public abstract class MinecraftClientMixin implements Cloneable, ClientAccess {
             InteractionResult actionResult3 = this.gameMode.useItem(this.player, hand);
             if (actionResult3 instanceof InteractionResult.Success) {
                 InteractionResult.Success success3 = (InteractionResult.Success) actionResult3;
+                //#if MC >= 260300
+                //$$ if (success3.swingSource() == InteractionResult.SwingSource.PREDICTED) {
+                //#else
                 if (success3.swingSource() == InteractionResult.SwingSource.CLIENT) {
+                //#endif
                     ClientUtils.swing(this.player, hand);
                 }
             }

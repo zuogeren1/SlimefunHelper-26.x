@@ -303,8 +303,13 @@ public class SeedOre extends BaseModule {
         Packet<?> packet1 = packet.context;
         if (enable.get()) {
             var dataS2CPacket = packet.context;
+            //#if MC >= 260300
+            //$$ int x = dataS2CPacket.x();
+            //$$ int z = dataS2CPacket.z();
+            //#else
             int x = dataS2CPacket.getX();
             int z = dataS2CPacket.getZ();
+            //#endif
             Tasks.scheduleDelayed(
                     () -> {
                         updateChunk(mc.level.getChunk(x, z));

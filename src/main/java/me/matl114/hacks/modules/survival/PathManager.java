@@ -628,7 +628,11 @@ public class PathManager extends BaseModule {
                 // title的高度是9 我们希望这个9在 0.75 ~ 1.0之间
                 // 我希望他看向我
                 float scaling = (float) delta.length();
+//#if MC >= 260300
+//$$                 stack.rotate(RenderUtils.getBillboardRotation(Display.BillboardConstraints.CENTER, 0, 0));
+//#else
                 stack.mulPose(RenderUtils.getBillboardRotation(Display.BillboardConstraints.CENTER, 0, 0));
+//#endif
                 stack.scale(0.002F * scaling, 0.002F * scaling, 1);
                 stack.translate(0, TextRenderers.getCompositeTextYOffset(), 0);
                 VRender.getInstance()

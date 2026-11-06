@@ -289,6 +289,14 @@ public class RenderUtils {
             return this;
         }
 
+//#if MC >= 260300
+//$$         // 26.3 的第三组 uv 是贴片/闪光用的 decal uv，不在 sprite 坐标系里，原样转发
+//$$         public VertexConsumer setUv3(float u, float v) {
+//$$             this.delegate.setUv3(u, v);
+//$$             return this;
+//$$         }
+//#endif
+
         public VertexConsumer setNormal(float x, float y, float z) {
             this.delegate.setNormal(x, y, z);
             return this;

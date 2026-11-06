@@ -344,7 +344,11 @@ public class InvTasks {
         builder.append(BuiltInRegistries.ITEM.getKey(itemStack.getItem()));
         if (ItemStackUtils.hasInPatch(itemStack)) {
             builder.append('[');
+            //#if MC >= 260300
+            //$$ Map<DataComponentType, Object> map = new HashMap<>(itemStack.components.patch);
+            //#else
             Map<DataComponentType, Optional> map = new HashMap<>(itemStack.components.patch);
+            //#endif
             int index = 0;
             for (var entry : map.entrySet()) {
                 if (index > 0) {
@@ -353,7 +357,11 @@ public class InvTasks {
                 Identifier identifier = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(entry.getKey());
                 if (identifier != null) {
                     String cmp = identifier.toString();
+                    //#if MC >= 260300
+                    //$$ Optional val = Optional.ofNullable(itemStack.components.get(entry.getKey()));
+                    //#else
                     Optional val = entry.getValue();
+                    //#endif
                     if (val.isPresent()) {
                         try {
                             String nbtSeri = entry.getKey()

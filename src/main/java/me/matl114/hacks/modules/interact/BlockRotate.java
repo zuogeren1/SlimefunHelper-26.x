@@ -164,7 +164,11 @@ public class BlockRotate extends BaseModule {
     public void onPreSendInteractBlockRotate(Event<ServerboundUseItemOnPacket> e) {
         if (e.isCancelled()) return;
         if (enableBlockRotateModify()) {
+            //#if MC >= 260300
+            //$$ if ((Object) e.context instanceof PlayerInteractBlockC2SPacketAccess paccess) {
+            //#else
             if (e.context instanceof PlayerInteractBlockC2SPacketAccess paccess) {
+            //#endif
                 //
                 Vec2 currentPy = new Vec2(PlayerStateManager.INSTANCE.lastPitch, PlayerStateManager.INSTANCE.lastYaw);
                 PitchYawDeceive deceivePy = null;

@@ -19,7 +19,11 @@ public interface PlayerInteractItemC2SPacketAccess {
     ItemStack getItemStack();
 
     static PlayerInteractItemC2SPacketAccess of(ServerboundUseItemPacket packet) {
+        //#if MC >= 260300
+        //$$ return (PlayerInteractItemC2SPacketAccess) (Object) packet;
+        //#else
         return (PlayerInteractItemC2SPacketAccess) packet;
+        //#endif
     }
 
     static ServerboundUseItemPacket setContext(LocalPlayer player, ServerboundUseItemPacket packet) {

@@ -1,13 +1,21 @@
 package me.matl114.versioned.impl;
 
-//#if MC >= 260200
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+//#elseif MC >= 260200
 import com.mojang.blaze3d.PrimitiveTopology;
 //#else
 //$$ import com.mojang.blaze3d.vertex.VertexFormat;
 //#endif
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.pipeline.CompareOp;
+//$$ import com.mojang.renderpearl.api.pipeline.DepthStencilState;
+//$$ import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+//#else
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.CompareOp;
+//#endif
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -25,7 +33,10 @@ import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
+//#if MC >= 260300
+//#else
 import net.minecraft.client.renderer.rendertype.OutputTarget;
+//#endif
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -125,7 +136,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
                     // 只会在 RenderType#prepare 里额外乘一个与当前投影类型相关的矩阵。
                     // 26.2: 世界里的线框要画到主帧缓冲；之前设成 ITEM_ENTITY_TARGET
                     // 会被提交到物品/实体目标，导致世界中的方框完全不可见
+                    //#if MC >= 260300
+                    //#else
                     .setOutputTarget(OutputTarget.MAIN_TARGET)
+                    //#endif
                     // 注意：LINES / LINE_STRIP 拓扑不能开 sortOnUpload ——
                     // 26.2 的 StagedVertexBuffer.appendDraw 会直接抛
                     // IllegalArgumentException: Cannot sort draw with LINES
@@ -164,7 +178,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     public static final RenderType ESP_TRACE_LINES = RenderType.create(
             "slimefunhelper:esp_trace_lines",
             RenderSetup.builder(ESP_TRACE_LINES_PIPELINE)
+                    //#if MC >= 260300
+                    //#else
                     .setOutputTarget(OutputTarget.MAIN_TARGET)
+                    //#endif
                     .createRenderSetup());
 
     public static final RenderPipeline DEBUG_LINES_STRIP =
@@ -188,7 +205,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
                     // 不做 layering 偏移：这一层已经关掉深度测试，分层偏移没有意义。
                     // 26.2: 世界里的线框要画到主帧缓冲；之前设成 ITEM_ENTITY_TARGET
                     // 会被提交到物品/实体目标，导致世界中的方框完全不可见
+                    //#if MC >= 260300
+                    //#else
                     .setOutputTarget(OutputTarget.MAIN_TARGET)
+                    //#endif
                     // 注意：LINES / LINE_STRIP 拓扑不能开 sortOnUpload ——
                     // 26.2 的 StagedVertexBuffer.appendDraw 会直接抛
                     // IllegalArgumentException: Cannot sort draw with LINES
@@ -290,6 +310,9 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.OUTLINE_SNIPPET)
                     .withLocation(MainPlugin.identifier("pipeline/entity_highlight"))
                     .withFragmentShader(MainPlugin.identifier("core/entity_highlight"))
+                    //#if MC >= 260300
+                    //$$ .withShaderDefine("SLF_SHADER_263")
+                    //#endif
                     .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
                     .withCull(false)
                     .build());

@@ -91,7 +91,12 @@ public class CameraEntity extends AbstractClientPlayer {
         return moveable;
     }
 
+    //#if MC >= 260300
+    //$$ // canSimulateMovement() 是 final：Player#getMoveSimulationType() 给 AUTHORITATIVE_SIDE_AND_SERVER，
+    //$$ // 于是取值是 !isClientSide() || isLocalPlayer()；本类只活在客户端世界，结果正好是 moveable。
+    //#else
     public boolean canSimulateMovement() {
         return moveable;
     }
+    //#endif
 }

@@ -277,8 +277,12 @@ public class ScreenUtils {
                 && (!(screen instanceof KeyBindsScreen)
                         || ((KeyBindsScreen) screen).lastKeySelection <= Util.getMillis() - 20L)) {
             if (mc.options.keyFullscreen.matches(keyInput)) {
+                //#if MC >= 260300
+                //$$ mc.options.fullscreen().set(!mc.options.fullscreen().get());
+                //#else
                 mc.getWindow().toggleFullScreen();
                 mc.options.fullscreen().set(mc.getWindow().isFullscreen());
+                //#endif
                 return;
             }
         }

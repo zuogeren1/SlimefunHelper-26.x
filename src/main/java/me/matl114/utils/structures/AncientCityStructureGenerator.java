@@ -11,6 +11,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.block.Rotation;
+//#if MC >= 260300
+//$$ import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
+//#endif
 import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.pieces.StructurePiecesBuilder;
@@ -49,6 +52,9 @@ public final class AncientCityStructureGenerator {
                 registries,
                 sampler.terrainGenerator(),
                 sampler.biomeSource(),
+                //#if MC >= 260300
+                //$$ sampler.randomState().createClimateSampler(SamplerContext.EMPTY_UNCACHED),
+                //#endif
                 sampler.randomState(),
                 templates,
                 seed,

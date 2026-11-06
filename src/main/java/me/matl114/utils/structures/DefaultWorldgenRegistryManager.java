@@ -34,7 +34,11 @@ public final class DefaultWorldgenRegistryManager {
             RegistryAccess.Frozen worldgen = RegistryDataLoader.load(
                             resources,
                             registryLookups,
+                            //#if MC >= 260300
+                            //$$ RegistryDataLoader.WORLD_REGISTRIES,
+                            //#else
                             RegistryDataLoader.WORLDGEN_REGISTRIES,
+                            //#endif
                             Util.backgroundExecutor())
                     .join();
             pendingTags.forEach(Registry.PendingTags::apply);

@@ -24,6 +24,9 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
+//#if MC >= 260300
+//$$ import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
+//#endif
 
 /**
  * Seeded 1.18+ Overworld biome and depth sampling following cubiomes' modern
@@ -64,11 +67,19 @@ public final class CubiomesOverworldBiomeSampler {
         }
         BiomeSource biomeSource = MultiNoiseBiomeSource.createFromPreset(biomeParameters);
         RandomState randomState = RandomState.create(
+                //#if MC >= 260300
+                //$$ registries.lookupOrThrow(Registries.NOISE), seed, generatorSettings.value());
+                //#else
                 generatorSettings.value(), registries.lookupOrThrow(Registries.NOISE), seed);
+                //#endif
         return new CubiomesOverworldBiomeSampler(
                 seed,
                 biomeSource,
+                //#if MC >= 260300
+                //$$ randomState.createClimateSampler(SamplerContext.EMPTY_UNCACHED),
+                //#else
                 randomState.sampler(),
+                //#endif
                 randomState,
                 new NoiseBasedChunkGenerator(biomeSource, generatorSettings));
     }
@@ -277,6 +288,10 @@ public final class CubiomesOverworldBiomeSampler {
     }
 
     private Holder<Biome> biomeAtQuart(int quartX, int quartY, int quartZ) {
+        //#if MC >= 260300
+        //$$ return biomeSource.createResolver(biomeNoise).getNoiseBiome(quartX, quartY, quartZ);
+        //#else
         return biomeSource.getNoiseBiome(quartX, quartY, quartZ, biomeNoise);
+        //#endif
     }
 }

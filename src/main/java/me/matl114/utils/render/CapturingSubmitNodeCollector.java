@@ -1,7 +1,11 @@
 package me.matl114.utils.render;
 
 //#if MC >= 260200
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+//#else
 import com.mojang.blaze3d.PrimitiveTopology;
+//#endif
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.List;
 import java.util.Objects;
@@ -30,6 +34,10 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Quaternionf;
 import org.joml.Vector3fc;
+//#if MC >= 260300
+//$$ import net.minecraft.client.renderer.texture.UvMapping;
+//$$ import net.minecraft.client.resources.model.geometry.ItemQuads;
+//#endif
 
 /**
  * 捕获式 {@link SubmitNodeCollector}：把实体渲染器的提交转成「面」而不是顶点缓冲。
@@ -76,6 +84,45 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
      *
      * <p>描边遍（{@code renderType.isOutline()}）是同一份几何的第二份，抓了会让描边收集器重复找边，直接丢掉。
      */
+    //#if MC >= 260300
+    //$$ @Override
+    //$$ public <S> void submitModel(
+    //$$         Model<? super S> model,
+    //$$         S state,
+    //$$         PoseStack poseStack,
+    //$$         RenderType renderType,
+    //$$         int lightCoords,
+    //$$         int overlayCoords,
+    //$$         int tintedColor,
+    //$$         UvMapping uvMapping,
+    //$$         int outlineColor) {
+    //$$     if (renderType.isOutline()) {
+    //$$         return;
+    //$$     }
+    //$$     // 只有第一个模型带贴图：LivingEntityRenderer 先提交本体（LivingEntityRenderer.java:95），
+    //$$     // 之后才是护甲/附加层；附加层的贴图与本体不同，套本体的贴图重画会糊，按纯色面处理更干净。
+    //$$     Identifier quadTexture = this.texture;
+    //$$     this.texture = null;
+    //$$     CapturingVertexConsumer consumer = new CapturingVertexConsumer(quadTexture, this::emit);
+    //$$     model.setupAnim(state);
+    //$$     model.renderToBuffer(poseStack, consumer, lightCoords, overlayCoords, tintedColor);
+    //$$     consumer.finish();
+    //$$ }
+    //$$
+    //$$ /**
+    //$$  * 崩解覆盖是同一份实体几何的第二遍，本体面已经由 {@link #submitModel} 抓过；再抓一遍只会让描边收集器重复找边。
+    //$$  */
+    //$$ @Override
+    //$$ public <S> void submitCrumblingOverlay(
+    //$$         Model<? super S> model,
+    //$$         S state,
+    //$$         PoseStack poseStack,
+    //$$         RenderType renderType,
+    //$$         int lightCoords,
+    //$$         int overlayCoords,
+    //$$         int tintedColor,
+    //$$         ModelFeatureRenderer.CrumblingOverlay crumblingOverlay) {}
+    //#else
     @Override
     public <S> void submitModel(
             Model<? super S> model,
@@ -100,6 +147,7 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
         model.renderToBuffer(poseStack, consumer, lightCoords, overlayCoords, tintedColor);
         consumer.finish();
     }
+    //#endif
 
     /**
      * 自定义几何（光束 / 闪电 / 画…）也走 {@code CustomGeometryRenderer(PoseStack.Pose, VertexConsumer)}，
@@ -146,6 +194,19 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
             int color,
             int backgroundColor,
             int outlineColor) {}
+    //#if MC >= 260300
+    //$$ /** 文本底框与「实体模型的面」无关，本类只抓模型几何，空实现。 */
+    //$$ @Override
+    //$$ public void submitTextBackground(
+    //$$         PoseStack poseStack,
+    //$$         float x0,
+    //$$         float y0,
+    //$$         float x1,
+    //$$         float y1,
+    //$$         int color,
+    //$$         Font.DisplayMode displayMode,
+    //$$         int lightCoords) {}
+    //#endif
 
     @Override
     public void submitFlame(PoseStack poseStack, EntityRenderState renderState, Quaternionf rotation) {}
@@ -166,8 +227,14 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
             int overlayCoords,
             int outlineColor) {}
 
+    //#if MC >= 260300
+    //$$ @Override
+    //$$ public void submitBreakingBlockModel(
+    //$$         PoseStack poseStack, List<BlockStateModelPart> parts, int progress, boolean isBlockTranslucent) {}
+    //#else
     @Override
     public void submitBreakingBlockModel(PoseStack poseStack, List<BlockStateModelPart> parts, int progress) {}
+    //#endif
 
     @Override
     public void submitShapeOutline(PoseStack poseStack, VoxelShape shape, RenderType renderType, int color, float width, boolean afterTerrain) {}
@@ -184,6 +251,42 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
      * <p>不按 {@code outlineColor} 过滤：{@code SubmitNodeCollection#submitItem} 只会在这一次调用里
      * 把同一份 quads 再塞进 outline 阶段，并不是第二次提交；滤掉的话发光实体手上的物品会整块消失。
      */
+    //#if MC >= 260300
+    //$$ @Override
+    //$$ public void submitItem(
+    //$$         PoseStack poseStack,
+    //$$         ItemDisplayContext displayContext,
+    //$$         int lightCoords,
+    //$$         int overlayCoords,
+    //$$         int outlineColor,
+    //$$         int[] tintLayers,
+    //$$         ItemQuads quads,
+    //$$         ItemStackRenderState.FoilType foilType) {
+    //$$     // 取 all()：solid 与 translucent 两层都在里面，只要 solid() 会让药水、玻璃这类半透明层缺面
+    //$$     List<BakedQuad> list = quads.all();
+    //$$     if (list.isEmpty()) {
+    //$$         return;
+    //$$     }
+    //$$     PoseStack.Pose pose = poseStack.last();
+    //$$     Identifier quadTexture = list.getFirst().materialInfo().sprite().atlasLocation();
+    //$$     CapturingVertexConsumer consumer = new CapturingVertexConsumer(quadTexture, this::emit);
+    //$$     for (BakedQuad quad : list) {
+    //$$         Identifier texture = quad.materialInfo().sprite().atlasLocation();
+    //$$         if (!Objects.equals(texture, quadTexture)) {
+    //$$             consumer.finish();
+    //$$             consumer = new CapturingVertexConsumer(texture, this::emit);
+    //$$             quadTexture = texture;
+    //$$         }
+    //$$         for (int vertex = 0; vertex < BakedQuad.VERTEX_COUNT; vertex++) {
+    //$$             Vector3fc position = quad.position(vertex);
+    //$$             long packedUv = quad.packedUV(vertex);
+    //$$             consumer.addVertex(pose, position.x(), position.y(), position.z())
+    //$$                     .setUv(UVPair.unpackU(packedUv), UVPair.unpackV(packedUv));
+    //$$         }
+    //$$     }
+    //$$     consumer.finish();
+    //$$ }
+    //#else
     @Override
     public void submitItem(
             PoseStack poseStack,
@@ -216,6 +319,7 @@ public final class CapturingSubmitNodeCollector implements SubmitNodeCollector {
         }
         consumer.finish();
     }
+    //#endif
 
     @Override
     public void submitQuadParticleGroup(QuadParticleRenderState particles) {}

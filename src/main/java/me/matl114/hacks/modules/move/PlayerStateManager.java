@@ -352,7 +352,11 @@ public class PlayerStateManager extends BaseModule {
 
         Entity vehicle = mc.player.getRootVehicle();
         Vec3 passengerOffset = mc.player.position().subtract(vehicle.position());
+        //#if MC >= 260300
+        //$$ Vec3 playerPosition = event.context.movingTo().position().add(passengerOffset);
+        //#else
         Vec3 playerPosition = event.context.position().add(passengerOffset);
+        //#endif
         lastX = playerPosition.x;
         lastY = playerPosition.y;
         lastZ = playerPosition.z;
@@ -604,7 +608,11 @@ public class PlayerStateManager extends BaseModule {
     private Stream<ItemStack> streamInvContent(ItemStack stack) {
         var cp = stack.get(DataComponents.CONTAINER);
         // 上游是 yarn ContainerComponent.stream()（全部槽位）→ allItemsCopyStream()，不是 nonEmptyItemCopyStream()
+        //#if MC >= 260300
+        //$$ return cp == null ? Stream.empty() : cp.itemCopies();
+        //#else
         return cp == null ? Stream.empty() : cp.allItemsCopyStream();
+        //#endif
     }
 
     private Stream<ItemStack> streamItems(ItemStack stack) {

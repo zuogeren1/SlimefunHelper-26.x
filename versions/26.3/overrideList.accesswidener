@@ -106,3 +106,4 @@ accessible	field	net/minecraft/client/renderer/rendertype/RenderSetup	textures	L
 accessible	class	net/minecraft/client/renderer/rendertype/RenderSetup$TextureBinding
 accessible	field	net/minecraft/client/Minecraft	fontManager	Lnet/minecraft/client/gui/font/FontManager;
 accessible	method	net/minecraft/client/gui/font/FontManager	getFontSetRaw	(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/gui/font/FontSet;
+accessible	field	net/minecraft/world/level/storage/loot/predicates/CompositeLootItemCondition	terms	Lnet/minecraft/core/HolderSet;

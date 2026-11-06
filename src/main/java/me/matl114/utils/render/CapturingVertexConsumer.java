@@ -87,6 +87,14 @@ public final class CapturingVertexConsumer implements VertexConsumer {
         return this;
     }
 
+//#if MC >= 260300
+//$$     /** 26.3 新增的第三组 uv（贴片/闪光用的 decal uv）同样不参与「面」的定义，跟 setUv1/setUv2 一样丢弃。 */
+//$$     @Override
+//$$     public VertexConsumer setUv3(float u, float v) {
+//$$         return this;
+//$$     }
+//#endif
+
     @Override
     public VertexConsumer setNormal(float x, float y, float z) {
         return this;

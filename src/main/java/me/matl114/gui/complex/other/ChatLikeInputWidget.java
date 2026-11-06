@@ -2,6 +2,7 @@ package me.matl114.gui.complex.other;
 
 import java.util.function.Consumer;
 import me.matl114.gui.basic.RenderHandler;
+import me.matl114.managers.input.KeyCode;
 import me.matl114.utils.ClientUtils;
 import me.matl114.utils.config.ValueAccessor;
 import me.matl114.versioned.api.VDrawContext;
@@ -77,17 +78,21 @@ public class ChatLikeInputWidget extends EditBox {
     }
 
     public boolean keyPressed(KeyEvent input) {
+//#if MC >= 260300
+//$$         return super.keyPressed(input) || keyPressed(input.key(), input.keycode(), input.modifiers());
+//#else
         return super.keyPressed(input) || keyPressed(input.key(), input.scancode(), input.modifiers());
+//#endif
     }
 
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
 
         if (this.isFocused()) {
-            if (keyCode != 257 && keyCode != 335) {
-                if (keyCode == 265) {
+            if (keyCode != KeyCode.KEY_ENTER && keyCode != KeyCode.KEY_KP_ENTER) {
+                if (keyCode == KeyCode.KEY_UP) {
                     this.setChatFromHistory(-1);
                     return true;
-                } else if (keyCode == 264) {
+                } else if (keyCode == KeyCode.KEY_DOWN) {
                     this.setChatFromHistory(1);
                     return true;
                 } else {
@@ -99,7 +104,7 @@ public class ChatLikeInputWidget extends EditBox {
                 return true;
             }
         } else {
-            if (keyCode == 265) {
+            if (keyCode == KeyCode.KEY_UP) {
                 this.setFocused(true);
                 return true;
             }

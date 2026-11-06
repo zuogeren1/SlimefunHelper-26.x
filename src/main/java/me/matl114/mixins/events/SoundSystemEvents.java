@@ -38,8 +38,12 @@ public abstract class SoundSystemEvents {
     private SoundManager soundManager;
 
     @WrapOperation(
+            //#if MC >= 260300
+            //$$ method = "notifyListeners(Lnet/minecraft/client/resources/sounds/SoundInstance;Lnet/minecraft/client/sounds/WeighedSoundEvents;F)V",
+            //#else
             method =
                     "play(Lnet/minecraft/client/resources/sounds/SoundInstance;)Lnet/minecraft/client/sounds/SoundEngine$PlayResult;",
+            //#endif
             at =
                     @At(
                             value = "INVOKE",
@@ -88,7 +92,11 @@ public abstract class SoundSystemEvents {
     @Unique
     private void onSoundPlayed(SoundInstance sound) {
         // need getSoundSet to initialize getSound , wtf mojang pieces of shit
+        //#if MC >= 260300
+        //$$ WeighedSoundEvents weightedSoundSet = sound.getOrResolve(this.soundManager);
+        //#else
         WeighedSoundEvents weightedSoundSet = sound.resolve(this.soundManager);
+        //#endif
         if (weightedSoundSet == null) {
             return;
         }

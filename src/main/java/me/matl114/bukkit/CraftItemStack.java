@@ -72,7 +72,19 @@ public final class CraftItemStack extends BukkitItemStack {
                                     }
                                 }
                             }
+                            //#if MC >= 260300
+                            //$$ DataComponentPatch.Builder builder = DataComponentPatch.builder();
+                            //$$ reference2ObjectMap.forEach((type, value) -> {
+                                //$$ if (value != null && value.isPresent()) {
+                                    //$$ builder.set((DataComponentType) type, value.get());
+                                //$$ } else {
+                                    //$$ builder.remove((DataComponentType) type);
+                                //$$ }
+                            //$$ });
+                            //$$ return builder.build();
+                            //#else
                             return new DataComponentPatch(reference2ObjectMap);
+                            //#endif
                         }
                     }));
 

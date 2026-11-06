@@ -59,8 +59,13 @@ public class LegacySnapRotManager extends BaseModule {
 
     public void onInteractItem(Event<ServerboundUseItemPacket> eventInteract) {
         if (false && lastSnapPitchYaw != null) {
+            //#if MC >= 260300
+            //$$ float pitch = eventInteract.context.xRot();
+            //$$ float yaw = eventInteract.context.yRot();
+            //#else
             float pitch = eventInteract.context.getXRot();
             float yaw = eventInteract.context.getYRot();
+            //#endif
             if (EntityUtils.isRotationDifferent(lastSnapPitchYaw.x, pitch, lastSnapPitchYaw.y, yaw)
                     && PlayerStateManager.INSTANCE.isRotationDifferent(pitch, yaw)) {
                 snapAt(pitch, yaw, false);

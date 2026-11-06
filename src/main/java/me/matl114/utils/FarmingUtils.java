@@ -10,6 +10,9 @@ import java.util.function.Predicate;
 import me.matl114.utils.annotations.NeedTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+//#if MC >= 260300
+//$$ import net.minecraft.core.component.DataComponents;
+//#endif
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.Entity;
@@ -429,9 +432,13 @@ public class FarmingUtils {
 
     @NeedTest
     private static boolean canIncreaseComposterLevel(ItemStack stack) {
+        //#if MC >= 260300
+        //$$ return stack != null && stack.get(DataComponents.COMPOSTABLE) != null;
+        //#else
         return stack != null
                 && ComposterBlock.COMPOSTABLES.containsKey(stack.getItem())
                 && ComposterBlock.COMPOSTABLES.getFloat(stack.getItem()) > 0.0F;
+        //#endif
     }
 
     @NeedTest

@@ -110,10 +110,16 @@ public class ItemStackUtils {
     @SuppressWarnings("all")
     public static <T> T getInPatch(ItemStack stack, DataComponentType<T> type) {
         if (stack != null && !stack.isEmpty()) {
+            //#if MC >= 260300
+            //$$ var components = stack.components;
+            //$$ if (components.patch == null) return null;
+            //$$ return (T) (components.hasNonDefault(type) ? components.get(type) : null);
+            //#else
             var map = stack.components.patch;
             if (map == null) return null;
             var optional = map.get(type);
             return (T) (optional == null ? null : optional.orElse(null));
+            //#endif
         }
         return null;
     }
@@ -127,7 +133,11 @@ public class ItemStackUtils {
             if (map.size() >= 2) return true;
             if (map.containsKey(CUSTOM_DATA)) {
                 // check protocol item
+                //#if MC >= 260300
+                //$$ CustomData customData = (CustomData) stack.components.get(CUSTOM_DATA);
+                //#else
                 CustomData customData = (CustomData) map.get(CUSTOM_DATA).orElse(null);
+                //#endif
                 if (customData == null || customData.isEmpty()) return false;
                 var nbt = customData.tag;
                 Set<String> keys = nbt.keySet();
@@ -152,7 +162,11 @@ public class ItemStackUtils {
         if (stack != null && !stack.isEmpty()) {
             var map = stack.components.patch;
             if (map == null) return false;
+            //#if MC >= 260300
+            //$$ return getInPatch(stack, type) != null;
+            //#else
             return map.containsKey(type) && !Objects.equals(Optional.empty(), map.get(type));
+            //#endif
         }
         return false;
     }
@@ -166,8 +180,13 @@ public class ItemStackUtils {
             if (val == null) {
                 shouldChange = map.containsKey(type);
             } else {
+                //#if MC >= 260300
+                //$$ var op = map.get(type);
+                //$$ if (op != null && Objects.equals(val, op)) {
+                //#else
                 var op = map.get(type);
                 if (op != null && Objects.equals(val, op.orElse(null))) {
+                //#endif
                     shouldChange = false;
                 } else shouldChange = true;
             }
@@ -176,14 +195,22 @@ public class ItemStackUtils {
                 cpmap.ensureMapOwnership();
                 // update the map after copy
                 map = cpmap.patch;
+                //#if MC >= 260300
+                //$$ if (val == null) map.remove(type);
+                //$$ else map.put(type, val);
+                //#else
                 if (val == null) map.remove(type);
                 else map.put(type, Optional.of(val));
+                //#endif
             }
         }
     }
 
     public static <T> void markRemoveAsChange(ItemStack stack, DataComponentType<T> type) {
         if (stack != null && !stack.isEmpty()) {
+            //#if MC >= 260300
+            //$$ stack.components.remove(type);
+            //#else
             var cpmap = stack.components;
             var map = cpmap.patch;
             if (map != null) {
@@ -193,6 +220,7 @@ public class ItemStackUtils {
                 ;
                 cpmap.patch.put(type, Optional.empty());
             }
+            //#endif
         }
     }
 
@@ -440,6 +468,18 @@ public class ItemStackUtils {
         return stackCopy;
     }
 
+    //#if MC >= 260300
+    //$$ private static Map<DataComponentType, Optional> snapshotPatchValues(ItemStack stack) {
+        //$$ Map<DataComponentType, Optional> map = new HashMap<>();
+        //$$ var patch = stack.components.patch;
+        //$$ if (patch != null) {
+            //$$ for (DataComponentType<?> type : patch.keySet()) {
+                //$$ map.put((DataComponentType) type, Optional.ofNullable(stack.components.get(type)));
+            //$$ }
+        //$$ }
+        //$$ return map;
+    //$$ }
+    //#endif
     public static boolean matchItemWithout(
             ItemStack stack1, ItemStack stack2, boolean matchDur, boolean matchEnch, boolean matchLore) {
 
@@ -471,8 +511,13 @@ public class ItemStackUtils {
                 return compound1 == compound2;
             }
 
+            //#if MC >= 260300
+            //$$ Map<DataComponentType, Optional> map1 = snapshotPatchValues(stack1);
+            //$$ Map<DataComponentType, Optional> map2 = snapshotPatchValues(stack2);
+            //#else
             Map<DataComponentType, Optional> map1 = new HashMap<>(compound1);
             Map<DataComponentType, Optional> map2 = new HashMap<>(compound2);
+            //#endif
             Optional n1;
             Optional n2;
             if (!matchLore) {
@@ -514,8 +559,13 @@ public class ItemStackUtils {
             if (compound1 == null || compound2 == null) {
                 return compound1 == compound2;
             }
+            //#if MC >= 260300
+            //$$ Map<DataComponentType, Optional> map1 = snapshotPatchValues(stack1);
+            //$$ Map<DataComponentType, Optional> map2 = snapshotPatchValues(stack2);
+            //#else
             Map<DataComponentType, Optional> map1 = new HashMap<>(compound1);
             Map<DataComponentType, Optional> map2 = new HashMap<>(compound2);
+            //#endif
             var n1 = map1.remove(LORE);
             var n2 = map2.remove(LORE);
             // both having or not having lore
@@ -539,8 +589,13 @@ public class ItemStackUtils {
         } else {
             var compound1 = stack1.components.patch;
             var compound2 = stack2.components.patch;
+            //#if MC >= 260300
+            //$$ Map<DataComponentType, Optional> map1 = snapshotPatchValues(stack1);
+            //$$ Map<DataComponentType, Optional> map2 = snapshotPatchValues(stack2);
+            //#else
             Map<DataComponentType, Optional> map1 = compound1 == null ? new HashMap<>() : new HashMap<>(compound1);
             Map<DataComponentType, Optional> map2 = compound2 == null ? new HashMap<>() : new HashMap<>(compound2);
+            //#endif
             var n1 = map1.remove(CUSTOM_DATA);
             var n2 = map2.remove(CUSTOM_DATA);
             // both having or not having lore

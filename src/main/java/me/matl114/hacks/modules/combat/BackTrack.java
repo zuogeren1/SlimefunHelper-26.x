@@ -191,8 +191,12 @@ public class BackTrack extends BaseModule {
                         trackedPosition = new VecDeltaCodec();
                         trackedPosition.setBase(lastTrackingPosition);
                     }
+                    //#if MC >= 260300
+                    //$$ vec3d = entityMove.getPositionDelta().decode(trackedPosition).endPosition();
+                    //#else
                     vec3d = trackedPosition.decode(
                             (long) entityMove.getXa(), (long) entityMove.getYa(), (long) entityMove.getZa());
+                    //#endif
                     boolean lastDelay = shouldDelay;
                     handleTrackEntityPosition(vec3d);
                     lastTrackingPosition = vec3d;

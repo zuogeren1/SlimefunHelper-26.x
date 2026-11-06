@@ -1,6 +1,9 @@
 package me.matl114.hacks.modules.task;
 
 import com.google.gson.JsonElement;
+//#if MC >= 260300
+//$$ import com.mojang.blaze3d.Blaze3D;
+//#endif
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.Dynamic;
@@ -355,7 +358,11 @@ public class ConfigManager extends BaseModule {
     }
 
     public void onOpenFolder() {
+        //#if MC >= 260300
+        //$$ Blaze3D.openPath(FileManager.CONFIG_SAVE_FOLDER.toPath());
+        //#else
         Util.getPlatform().openFile(FileManager.CONFIG_SAVE_FOLDER);
+        //#endif
         Debug.chat(Component.literal("成功打开配置保存与导入文件夹").withStyle(ChatFormatting.GREEN));
     }
 

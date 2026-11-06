@@ -17,6 +17,9 @@ import net.minecraft.world.level.biome.TheEndBiomeSource;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
+//#if MC >= 260300
+//$$ import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
+//#endif
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.levelgen.structure.structures.EndCityPieces;
@@ -42,7 +45,11 @@ final class VanillaEndCityStructureGenerator {
                 .lookupOrThrow(Registries.NOISE_SETTINGS)
                 .getOrThrow(NoiseGeneratorSettings.END);
         RandomState randomState =
+                //#if MC >= 260300
+                //$$ RandomState.create(registries.lookupOrThrow(Registries.NOISE), seed, settings.value());
+                //#else
                 RandomState.create(settings.value(), registries.lookupOrThrow(Registries.NOISE), seed);
+                //#endif
         NoiseBasedChunkGenerator generator = new NoiseBasedChunkGenerator(biomeSource, settings);
         LevelHeightAccessor heightLimit = LevelHeightAccessor.create(-64, 384);
         ChunkPos chunk = new ChunkPos(Math.toIntExact(candidate.chunkX()), Math.toIntExact(candidate.chunkZ()));
@@ -52,6 +59,9 @@ final class VanillaEndCityStructureGenerator {
                 registries,
                 generator,
                 biomeSource,
+                //#if MC >= 260300
+                //$$ randomState.createClimateSampler(SamplerContext.EMPTY_UNCACHED),
+                //#endif
                 randomState,
                 DefaultStructureTemplateResources.templates(),
                 seed,

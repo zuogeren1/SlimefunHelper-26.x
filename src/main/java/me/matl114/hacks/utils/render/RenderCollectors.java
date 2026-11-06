@@ -397,7 +397,11 @@ public class RenderCollectors {
                     float scale = entry.val().scale();
                     stack.pushPose();
                     stack.translate(delta.x, delta.y, delta.z);
+//#if MC >= 260300
+//$$                     stack.rotate(RenderUtils.getBillboardRotation(Display.BillboardConstraints.CENTER, 0, 0));
+//#else
                     stack.mulPose(RenderUtils.getBillboardRotation(Display.BillboardConstraints.CENTER, 0, 0));
+//#endif
                     stack.scale(0.03125F * scale, 0.03125F * scale, 1);
                     List<Component> listText = ChatUtils.splitToMultiLineText(text, Integer.MAX_VALUE);
                     int index = 0;

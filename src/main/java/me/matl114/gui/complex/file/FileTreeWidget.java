@@ -4,6 +4,9 @@ import static me.matl114.managers.input.KeyCode.KEY_DELETE;
 import static me.matl114.managers.input.KeyCode.KEY_ENTER;
 import static me.matl114.managers.input.KeyCode.KEY_KP_ENTER;
 
+//#if MC >= 260300
+//$$ import com.mojang.blaze3d.Blaze3D;
+//#endif
 import com.mojang.blaze3d.platform.InputConstants;
 import java.io.File;
 import java.io.IOException;
@@ -57,7 +60,10 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.ChatFormatting;
 import net.minecraft.resources.Identifier;
+//#if MC >= 260300
+//#else
 import net.minecraft.util.Util;
+//#endif
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -219,7 +225,11 @@ public class FileTreeWidget extends SubScreenWidget {
     private void openInFileBrowser(@Nullable File file) {
         if (file == null) return;
         File directory = file.isDirectory() ? file : file.getParentFile();
+//#if MC >= 260300
+//$$         if (directory != null) Blaze3D.openPath(directory.toPath());
+//#else
         if (directory != null) Util.getPlatform().openPath(directory.toPath());
+//#endif
     }
 
     private void createNewFolder() {

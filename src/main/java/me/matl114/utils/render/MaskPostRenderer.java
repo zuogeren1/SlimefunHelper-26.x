@@ -1,15 +1,29 @@
 package me.matl114.utils.render;
 
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.pipeline.BlendFunction;
+//$$ import com.mojang.renderpearl.api.pipeline.ColorTargetState;
+//$$ import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+//#else
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+//#endif
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.ProjectionType;
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.commands.RenderPass;
+//#else
 import com.mojang.blaze3d.systems.RenderPass;
+//#endif
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.systems.ScissorState;
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.textures.FilterMode;
+//#else
 import com.mojang.blaze3d.textures.FilterMode;
+//#endif
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -23,7 +37,10 @@ import me.matl114.events.RenderListener;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
+//#if MC >= 260300
+//#else
 import net.minecraft.client.renderer.rendertype.OutputTarget;
+//#endif
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.resources.Identifier;
@@ -33,7 +50,13 @@ import org.joml.Matrix4f;
 import org.joml.Matrix4fStack;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
-//#if MC >= 260200
+//#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.GpuFormat;
+//$$ import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+//$$ import net.minecraft.client.renderer.BindGroupLayouts;
+//$$ import net.minecraft.client.renderer.StagedVertexBuffer;
+//$$ import net.minecraft.client.renderer.rendertype.PreparedRenderType;
+//#elseif MC >= 260200
 import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.PrimitiveTopology;
 import net.minecraft.client.renderer.BindGroupLayouts;
@@ -186,7 +209,9 @@ public final class MaskPostRenderer {
 
     private static void ensureTarget(int width, int height) {
         if (target == null) {
-//#if MC >= 260200
+//#if MC >= 260300
+//$$            target = new TextureTarget("model_mask", width, height, GpuFormat.RGBA8_UNORM, null);
+//#elseif MC >= 260200
             target = new TextureTarget("model_mask", width, height, false, GpuFormat.RGBA8_UNORM);
 //#else
 //$$            target = new TextureTarget("model_mask", width, height, false);
@@ -203,15 +228,55 @@ public final class MaskPostRenderer {
                 "slimefunhelper:model_mask/" + id,
                 RenderSetup.builder(CAPTURE)
                         .withTexture("Sampler0", id)
+                        //#if MC >= 260300
+                        //#else
                         .setOutputTarget(new OutputTarget("model_mask", MaskPostRenderer::outputTarget))
+                        //#endif
                         .createRenderSetup()));
     }
 
+//#if MC >= 260300
+//#else
     private static RenderTarget outputTarget() {
         return target;
     }
+//#endif
 
-//#if MC >= 260200
+//#if MC >= 260300
+//$$    /** 把面写进掩膜：按贴图分组建 draw，一次 upload 后在同一张 pass 里逐个执行。 */
+//$$    private static void drawMask(List<Quad> quads) {
+//$$        if (captureBuffer == null) {
+//$$            captureBuffer = new StagedVertexBuffer(() -> "Model mask", 1536);
+//$$        } else {
+//$$            // 复用上一帧的 GPU 缓冲；池子用 fence 保证不再被 GPU 引用后才回收
+//$$            captureBuffer.endFrame();
+//$$        }
+//$$
+//$$        Map<Identifier, StagedVertexBuffer.Draw> draws = new LinkedHashMap<>();
+//$$        for (Quad quad : quads) {
+//$$            Identifier texture = textureOf(quad);
+//$$            StagedVertexBuffer.Draw draw = draws.get(texture);
+//$$            if (draw == null) {
+//$$                draw = captureBuffer.appendDraw(DefaultVertexFormat.POSITION_TEX_COLOR, PrimitiveTopology.QUADS);
+//$$                draws.put(texture, draw);
+//$$            }
+//$$            VertexConsumer consumer = captureBuffer.getVertexBuilder(draw);
+//$$            emitQuad(consumer, quad);
+//$$        }
+//$$
+//$$        captureBuffer.upload();
+//$$        // 输出目标只在这一张 pass 上声明：同一个掩膜、同一批 draw，逐层各开一张 pass 会把开销翻倍
+//$$        try (RenderPass pass = RenderSystem.getDevice()
+//$$                .createCommandEncoder()
+//$$                .createRenderPass(() -> "Model mask", target.getColorTextureView(), Optional.empty())) {
+//$$            for (Map.Entry<Identifier, StagedVertexBuffer.Draw> entry : draws.entrySet()) {
+//$$                StagedVertexBuffer.ExecuteInfo info = captureBuffer.getExecuteInfo(entry.getValue());
+//$$                if (info == null) continue;
+//$$                layer(entry.getKey()).prepare().drawFromBuffer(info, pass);
+//$$            }
+//$$        }
+//$$    }
+//#elseif MC >= 260200
     /** 把面写进掩膜：按贴图分组建 draw，一次 upload 后逐个执行。 */
     private static void drawMask(List<Quad> quads) {
         if (captureBuffer == null) {
@@ -297,13 +362,24 @@ public final class MaskPostRenderer {
                         new Matrix4f());
 
         try (RenderPass pass = createCompositePass(mainTarget)) {
+            //#if MC >= 260300
+            //$$            pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline));
+            //#else
             pass.setPipeline(pipeline);
+            //#endif
             RenderSystem.bindDefaultUniforms(pass);
             pass.setUniform("DynamicTransforms", slice);
+            //#if MC >= 260300
+            //$$            pass.setUniform(
+            //$$                    "InSampler",
+            //$$                    target.getColorTextureView(),
+            //$$                    RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            //#else
             pass.bindTexture(
                     "InSampler",
                     target.getColorTextureView(),
                     RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            //#endif
             drawFullscreen(pass);
         }
     }
@@ -340,7 +416,50 @@ public final class MaskPostRenderer {
 //$$    }
 //#endif
 
-//#if MC >= 260200
+//#if MC >= 260300
+//$$    /**
+//$$     * 掩膜采集管线：世界几何，顶点位置 + uv + 颜色，采样实体贴图，输出到掩膜。
+//$$     *
+//$$     * <p>顶点着色器复用原版 {@code core/position_tex_color}（它自己就是 ProjMat * ModelViewMat * Position，
+//$$     * 并输出 {@code texCoord0} / {@code vertexColor}），与本仓库的 {@code mask_capture.fsh} 完全对得上。
+//$$     * 投影与 DynamicTransforms 是两个独立绑定组，各自都要声明。
+//$$     */
+//$$    private static RenderPipeline buildCapturePipeline() {
+//$$        return RenderPipeline.builder()
+//$$                .withLocation(Identifier.tryParse("slimefunhelper:pipeline/mask_capture"))
+//$$                .withVertexShader("core/position_tex_color")
+//$$                .withFragmentShader(Identifier.tryParse("slimefunhelper:core/mask_capture"))
+//$$                .withShaderDefine("SLF_SHADER_263")
+//$$                .withBindGroupLayout(BindGroupLayouts.PROJECTION)
+//$$                .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
+//$$                .withBindGroupLayout(BindGroupLayouts.SAMPLER0)
+//$$                .withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
+//$$                .withPrimitiveTopology(PrimitiveTopology.QUADS)
+//$$                .withCull(false)
+//$$                .withDepthStencilState(Optional.empty())
+//$$                .build();
+//$$    }
+//$$
+//$$    /**
+//$$     * 合成管线：全屏三角形 + 单张输入贴图。
+//$$     *
+//$$     * <p>用 public 的 {@link RenderPipelines#POST_PROCESSING_SNIPPET} 拿 TRIANGLES 拓扑与 Globals，
+//$$     * 再补 Projection / DynamicTransforms（颜色）与 InSampler（掩膜）三个绑定。混合用 TRANSLUCENT，
+//$$     * 掩膜没有覆盖到的像素在片元里 discard，不受混合影响。
+//$$     */
+//$$    private static RenderPipeline buildCompositePipeline(String path, String fragment) {
+//$$        return RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
+//$$                .withLocation(Identifier.tryParse("slimefunhelper:" + path))
+//$$                .withVertexShader("core/screenquad")
+//$$                .withFragmentShader(Identifier.tryParse("slimefunhelper:" + fragment))
+//$$                .withShaderDefine("SLF_SHADER_263")
+//$$                .withBindGroupLayout(BindGroupLayouts.PROJECTION)
+//$$                .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
+//$$                .withBindGroupLayout(BindGroupLayouts.IN_SAMPLER)
+//$$                .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+//$$                .build();
+//$$    }
+//#elseif MC >= 260200
     /**
      * 掩膜采集管线：世界几何，顶点位置 + uv + 颜色，采样实体贴图，输出到掩膜。
      *

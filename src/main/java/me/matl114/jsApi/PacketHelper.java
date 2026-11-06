@@ -129,7 +129,11 @@ public class PacketHelper {
         mc.gameMode.startPrediction(mc.level, (seq) -> {
             var packet = new ServerboundUseItemOnPacket(
                     offhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, hitResult, seq);
+            //#if MC >= 260300
+            //$$ if ((Object) packet instanceof PlayerInteractBlockC2SPacketAccess access) {
+            //#else
             if (packet instanceof PlayerInteractBlockC2SPacketAccess access) {
+            //#endif
                 access.setUseContext(new PlayerInteractBlockC2SPacketAccess.UseContext(
                         mc.player
                                 .getItemInHand(offhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND)

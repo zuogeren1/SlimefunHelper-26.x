@@ -31,6 +31,9 @@ import net.minecraft.core.Holder;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
 import net.minecraft.server.permissions.PermissionSet;
+//#if MC >= 260300
+//$$ import net.minecraft.util.Prediction;
+//#endif
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffects;
@@ -407,7 +410,11 @@ public abstract class ClientPlayerEntityMixin extends AbstractClientPlayer imple
 
     @Unique
     @Override
+    //#if MC >= 260300
+    //$$ public ItemEntity drop(ItemStack stack, boolean thrownFromHand, Prediction prediction) {
+    //#else
     public ItemEntity drop(ItemStack stack, boolean throwRandomly, boolean retainOwnership) {
+    //#endif
         if (!stack.isEmpty()
                 && this.level().isClientSide()
                 && InvTasks.SUPPRESS_DROPITEM_SPAWN.get()
@@ -415,7 +422,11 @@ public abstract class ClientPlayerEntityMixin extends AbstractClientPlayer imple
             ClientUtils.swing((LocalPlayer) (Object) this, InteractionHand.MAIN_HAND);
             return null;
         } else {
+            //#if MC >= 260300
+            //$$ return super.drop(stack, thrownFromHand, prediction);
+            //#else
             return super.drop(stack, throwRandomly, retainOwnership);
+            //#endif
         }
     }
 
@@ -427,7 +438,11 @@ public abstract class ClientPlayerEntityMixin extends AbstractClientPlayer imple
     }
 
     @WrapOperation(
+            //#if MC >= 260300
+            //$$ method = "sendChanges",
+            //#else
             method = "tick",
+            //#endif
             at =
                     @At(
                             value = "INVOKE",

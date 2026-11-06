@@ -1,7 +1,13 @@
 package me.matl114.hacks.utils.config;
 
+//#if MC >= 260300
+//$$ import com.mojang.blaze3d.Blaze3D;
+//#endif
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+//#if MC >= 260300
+//$$ import java.net.URI;
+//#endif
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -119,8 +125,13 @@ public class StringFormat implements NBTParsable<StringFormat> {
     public static final String URL2 = "https://mcg.tuanzi.ink/";
 
     public static void openWikiColorString() {
+        //#if MC >= 260300
+        //$$ Blaze3D.openUri(URI.create(URL1));
+        //$$ Blaze3D.openUri(URI.create(URL2));
+        //#else
         Util.getPlatform().openUri(URL1);
         Util.getPlatform().openUri(URL2);
+        //#endif
     }
 
     public List<Component> generateColorStringPreview() {

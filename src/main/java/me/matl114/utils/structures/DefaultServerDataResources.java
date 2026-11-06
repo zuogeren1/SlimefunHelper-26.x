@@ -12,7 +12,11 @@ final class DefaultServerDataResources {
     private DefaultServerDataResources() {}
 
     static CloseableResourceManager create() {
+        //#if MC >= 260300
+        //$$ PackResources vanillaPack = ServerPacksSource.createVanillaPackSource().fullResources();
+        //#else
         PackResources vanillaPack = ServerPacksSource.createVanillaPackSource();
+        //#endif
         return new MultiPackResourceManager(PackType.SERVER_DATA, List.of(vanillaPack));
     }
 }

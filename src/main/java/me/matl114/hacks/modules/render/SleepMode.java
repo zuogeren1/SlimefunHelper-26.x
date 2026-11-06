@@ -427,7 +427,12 @@ public class SleepMode extends BaseModule {
                             mc.getWindow().getHeight(),
                             (Double) mc.options.glintStrength().get(),
                             mc.level == null ? 0L : mc.level.getGameTime(),
+//#if MC >= 260300
+//$$                             // 26.3 的 update 直接收 partialTick（26.2 收 DeltaTracker 后自己取同一个值）
+//$$                             tickCounter.getGameTimeDeltaPartialTick(false),
+//#else
                             tickCounter,
+//#endif
                             mc.options.getMenuBackgroundBlurriness(),
                             mc.gameRenderer.mainCamera().position(),
                             mc.options.textureFiltering().get() == TextureFilteringMethod.RGSS);

@@ -61,6 +61,10 @@ public interface PlayerInteractBlockC2SPacketAccess {
     }
 
     static PlayerInteractBlockC2SPacketAccess of(ServerboundUseItemOnPacket packet) {
+        //#if MC >= 260300
+        //$$ return (PlayerInteractBlockC2SPacketAccess) (Object) packet;
+        //#else
         return (PlayerInteractBlockC2SPacketAccess) packet;
+        //#endif
     }
 }

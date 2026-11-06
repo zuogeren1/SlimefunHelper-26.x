@@ -2,6 +2,9 @@ package me.matl114.hacks.modules.extra;
 
 import me.matl114.utils.ClientUtils;
 import com.google.common.util.concurrent.Runnables;
+//#if MC >= 260300
+//$$ import com.mojang.blaze3d.Blaze3D;
+//#endif
 import java.util.Comparator;
 import java.util.List;
 import me.matl114.accessors.gui.ScreenAccess;
@@ -158,8 +161,13 @@ public class ClientExtra extends BaseModule {
                         if (report != null) {
                             var path = report.getSaveFile();
                             if (path != null) {
+                                //#if MC >= 260300
+                                //$$ Blaze3D.openPath(report.getSaveFile().getParent());
+                                //$$ Blaze3D.openPath(report.getSaveFile());
+                                //#else
                                 Util.getPlatform().openPath(report.getSaveFile().getParent());
                                 Util.getPlatform().openPath(report.getSaveFile());
+                                //#endif
                             }
                         }
                     }),

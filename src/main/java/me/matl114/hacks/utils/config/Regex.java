@@ -1,5 +1,8 @@
 package me.matl114.hacks.utils.config;
 
+//#if MC >= 260300
+//$$ import com.mojang.blaze3d.Blaze3D;
+//#endif
 import java.net.URI;
 import java.util.Objects;
 import java.util.Optional;
@@ -54,7 +57,11 @@ public class Regex implements NBTParsable<Regex>, Predicate<String> {
     private static void runHelpRegex() {
         try {
             URI uri = Util.parseAndValidateUntrustedUri(HELP_URL);
+            //#if MC >= 260300
+            //$$ Blaze3D.openUri(uri);
+            //#else
             Util.getPlatform().openUri(uri);
+            //#endif
         } catch (Throwable e) {
         }
     }

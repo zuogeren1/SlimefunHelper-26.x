@@ -116,6 +116,31 @@ public interface VItem {
     Codec<DataComponentPatch> COMPONENT_CHANGES_CODEC = Codec.dispatchedMap(
                     ComponentChangesType.CODEC, ComponentChangesType::getValueCodec)
             .xmap(
+                    //#if MC >= 260300
+                    //$$ (changes) -> {
+                        //$$ if (changes.isEmpty()) {
+                            //$$ return DataComponentPatch.EMPTY;
+                        //$$ } else {
+                            //$$ DataComponentPatch.Builder builder = DataComponentPatch.builder();
+                            //$$ var var2 = changes.entrySet().iterator();
+//$$
+                            //$$ while (var2.hasNext()) {
+                                //$$ Map.Entry<ComponentChangesType, ?> entry = var2.next();
+                                //$$ ComponentChangesType type = entry.getKey();
+                                //$$ // should be only used here
+                                //$$ if (type.type() != null) {
+                                    //$$ if (type.removed()) {
+                                        //$$ builder.remove((DataComponentType) type.type());
+                                    //$$ } else {
+                                        //$$ builder.set((DataComponentType) type.type(), entry.getValue());
+                                    //$$ }
+                                //$$ }
+                            //$$ }
+//$$
+                            //$$ return builder.build();
+                        //$$ }
+                    //$$ },
+                    //#else
                     (changes) -> {
                         if (changes.isEmpty()) {
                             return DataComponentPatch.EMPTY;
@@ -140,6 +165,29 @@ public interface VItem {
                             return new DataComponentPatch(reference2ObjectMap);
                         }
                     },
+                    //#endif
+                    //#if MC >= 260300
+                    //$$ (changes) -> {
+                        //$$ Reference2ObjectMap<ComponentChangesType, ?> reference2ObjectMap =
+                                //$$ new Reference2ObjectArrayMap<>(changes.size());
+                        //$$ var split = changes.split();
+                        //$$ for (var component : split.added()) {
+                            //$$ DataComponentType<?> componentType = component.type();
+                            //$$ if (!componentType.isTransient()) {
+                                //$$ ((Map) reference2ObjectMap)
+                                        //$$ .put(new ComponentChangesType(componentType, false), component.value());
+                            //$$ }
+                        //$$ }
+                        //$$ for (DataComponentType<?> componentType : split.removed()) {
+                            //$$ if (!componentType.isTransient()) {
+                                //$$ ((Map) reference2ObjectMap)
+                                        //$$ .put(new ComponentChangesType(componentType, true), Unit.INSTANCE);
+                            //$$ }
+                        //$$ }
+//$$
+                        //$$ return (Map) reference2ObjectMap;
+                    //$$ });
+                    //#else
                     (changes) -> {
                         Reference2ObjectMap<ComponentChangesType, ?> reference2ObjectMap =
                                 new Reference2ObjectArrayMap<>(changes.size());
@@ -162,6 +210,7 @@ public interface VItem {
 
                         return (Map) reference2ObjectMap;
                     });
+                    //#endif
 
     MapCodec<ItemStack> ITEM_STACK_MAP_CODEC = MapCodec.recursive("ItemStack", (codec) -> {
         return RecordCodecBuilder.mapCodec((instance) -> {

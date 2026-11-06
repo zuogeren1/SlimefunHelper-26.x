@@ -8,6 +8,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
 import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
+//#if MC >= 260300
+//$$ import net.minecraft.network.protocol.game.VecDelta;
+//#endif
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.PositionMoveRotation;
 import net.minecraft.world.entity.Relative;
@@ -83,10 +86,17 @@ public class PredictorImpl implements Predictor {
     public void onEntityPositionSyncPost(ClientboundEntityPositionSyncPacket packet) {
         if (packet.id() != ownerId) return;
         synchronized (this) {
+            //#if MC >= 260300
+            //$$ Vec3 position = packet.position().endPosition();
+            //$$ setSyncedPosition(position);
+            //$$ currentSyncedPitch = packet.xRot();
+            //$$ currentSyncedYaw = packet.yRot();
+            //#else
             PositionMoveRotation position = packet.values();
             setSyncedPosition(position.position());
             currentSyncedPitch = position.xRot();
             currentSyncedYaw = position.yRot();
+            //#endif
             addRecord(new KnownPosition(getCurrentPos(), Tasks.getTick()));
         }
     }
@@ -95,7 +105,11 @@ public class PredictorImpl implements Predictor {
         if (packet.entityId != ownerId) return;
         synchronized (this) {
             if (mc.player != null && mc.player.getId() == ownerId || packet.hasPosition()) {
+                //#if MC >= 260300
+                //$$ Vec3 position = applyDelta(getCurrentPos(), packet.getPositionDelta());
+                //#else
                 Vec3 position = applyDelta(getCurrentPos(), packet.getXa(), packet.getYa(), packet.getZa());
+                //#endif
                 setSyncedPosition(position);
             }
             if (packet.hasRotation()) {
@@ -122,6 +136,27 @@ public class PredictorImpl implements Predictor {
         double z = deltaZ == 0L ? base.z : (Math.round(base.z * 4096.0D) + deltaZ) / 4096.0D;
         return new Vec3(x, y, z);
     }
+
+    //#if MC >= 260300
+    //$$ /**
+    //$$  * 位移以 {@link VecDelta} 下发：{@code Linear} 是一次增量，{@code Stepped} 是逐 tick 的多段增量，
+    //$$  * 每段都以「上一段解出的位置」为新基准，最终取最后一段的位置；量化规则与上面的重载相同。
+    //$$  */
+    //$$ private static Vec3 applyDelta(Vec3 base, VecDelta delta) {
+    //$$     if (base == null) return Vec3.ZERO;
+    //$$     if (delta instanceof VecDelta.Linear linear) {
+    //$$         return applyDelta(base, linear.xa(), linear.ya(), linear.za());
+    //$$     }
+    //$$     if (delta instanceof VecDelta.Stepped stepped) {
+    //$$         Vec3 current = base;
+    //$$         for (VecDelta.Stepped.DeltaStep step : stepped.steps()) {
+    //$$             current = applyDelta(current, step.xa(), step.ya(), step.za());
+    //$$         }
+    //$$         return current;
+    //$$     }
+    //$$     return base;
+    //$$ }
+    //#endif
 
     /**
      * 把数据包里的「相对传送」折算成绝对位置

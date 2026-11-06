@@ -54,7 +54,11 @@ public class EnchantmentUtils {
         if (effectEntry.requirements().isEmpty()) {
             return true;
         } else {
+            //#if MC >= 260300
+            //$$ LootItemCondition condition = effectEntry.requirements().get().value();
+            //#else
             LootItemCondition condition = effectEntry.requirements().get();
+            //#endif
             return matchPartialCondition(condition, testCondition);
         }
     }
@@ -62,11 +66,23 @@ public class EnchantmentUtils {
     public static boolean matchPartialCondition(
             LootItemCondition condition, Predicate<LootItemCondition> testCondition) {
         if (condition instanceof AllOfCondition allOf) {
+            //#if MC >= 260300
+            //$$ return allOf.terms.stream().allMatch(s -> matchPartialCondition(s.value(), testCondition));
+            //#else
             return allOf.terms.stream().allMatch(s -> matchPartialCondition(s, testCondition));
+            //#endif
         } else if (condition instanceof AnyOfCondition anyOf) {
+            //#if MC >= 260300
+            //$$ return anyOf.terms.stream().anyMatch(s -> matchPartialCondition(s.value(), testCondition));
+            //#else
             return anyOf.terms.stream().anyMatch(s -> matchPartialCondition(s, testCondition));
+            //#endif
         } else if (condition instanceof InvertedLootItemCondition invert) {
+            //#if MC >= 260300
+            //$$ return !matchPartialCondition(invert.term().value(), testCondition);
+            //#else
             return !matchPartialCondition(invert.term(), testCondition);
+            //#endif
         } else {
             return testCondition.test(condition);
         }

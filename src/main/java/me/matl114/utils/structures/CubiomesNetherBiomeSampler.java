@@ -22,6 +22,9 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
+//#if MC >= 260300
+//$$ import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
+//#endif
 
 /** Seeded Nether biome and raw-noise sampling for ruined portal generation. */
 public final class CubiomesNetherBiomeSampler {
@@ -54,10 +57,18 @@ public final class CubiomesNetherBiomeSampler {
         }
         BiomeSource biomeSource = MultiNoiseBiomeSource.createFromPreset(biomeParameters);
         RandomState randomState = RandomState.create(
+                //#if MC >= 260300
+                //$$ registries.lookupOrThrow(Registries.NOISE), seed, generatorSettings.value());
+                //#else
                 generatorSettings.value(), registries.lookupOrThrow(Registries.NOISE), seed);
+                //#endif
         return new CubiomesNetherBiomeSampler(
                 biomeSource,
+                //#if MC >= 260300
+                //$$ randomState.createClimateSampler(SamplerContext.EMPTY_UNCACHED),
+                //#else
                 randomState.sampler(),
+                //#endif
                 randomState,
                 new NoiseBasedChunkGenerator(biomeSource, generatorSettings));
     }
@@ -66,8 +77,14 @@ public final class CubiomesNetherBiomeSampler {
     public net.minecraft.resources.Identifier getRuinedPortalBiomeId(StructurePosition structure) {
         int quartX = Math.toIntExact(structure.chunkX() * 4L + 2L);
         int quartZ = Math.toIntExact(structure.chunkZ() * 4L + 2L);
+        //#if MC >= 260300
+        //$$ ResourceKey<Biome> biomeKey = biomeSource
+        //$$         .createResolver(biomeNoise)
+        //$$         .getNoiseBiome(quartX, 0, quartZ)
+        //#else
         ResourceKey<Biome> biomeKey = biomeSource
                 .getNoiseBiome(quartX, 0, quartZ, biomeNoise)
+        //#endif
                 .unwrapKey()
                 .orElseThrow(() -> new IllegalStateException("Sampled biome has no registry key"));
         return biomeKey.identifier();
@@ -79,7 +96,11 @@ public final class CubiomesNetherBiomeSampler {
         int quartX = origin.getX() >> 2;
         int quartY = origin.getY() >> 2;
         int quartZ = origin.getZ() >> 2;
+        //#if MC >= 260300
+        //$$ Holder<Biome> biome = biomeSource.createResolver(biomeNoise).getNoiseBiome(quartX, quartY, quartZ);
+        //#else
         Holder<Biome> biome = biomeSource.getNoiseBiome(quartX, quartY, quartZ, biomeNoise);
+        //#endif
         var structure = DefaultWorldgenRegistryManager.registry()
                 .lookupOrThrow(Registries.STRUCTURE)
                 .getValue(structureId);

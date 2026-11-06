@@ -282,7 +282,11 @@ public class Blink extends BaseModule {
             if (pktType == GamePacketTypes.SERVERBOUND_INTERACT) {
                 handleQueueAction(packet, attackBehaviour.get());
                 escapeSwing = true;
+            //#if MC >= 260300
+            //$$ } else if (pktType == GamePacketTypes.SERVERBOUND_PUNCH && escapeSwing) {
+            //#else
             } else if (pktType == GamePacketTypes.SERVERBOUND_SWING && escapeSwing) {
+            //#endif
                 escapeSwing = false;
                 handleQueueAction(packet, attackBehaviour.get());
             } else if (pktType == GamePacketTypes.SERVERBOUND_ACCEPT_TELEPORTATION) {

@@ -10,10 +10,19 @@ import me.matl114.hacks.modules.render.RenderExtra;
 import me.matl114.utils.render.HandFaceCollector;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+//#if MC < 260300
 import net.minecraft.client.player.LocalPlayer;
+//#endif
 import net.minecraft.client.renderer.GameRenderer;
+//#if MC < 260300
 import net.minecraft.client.renderer.ItemInHandRenderer;
+//#endif
 import net.minecraft.client.renderer.SubmitNodeCollector;
+//#if MC >= 260300
+//$$ import net.minecraft.client.renderer.FirstPersonHandsAndItemsRenderer;
+//$$ import net.minecraft.client.renderer.state.level.FirstPersonHandsAndItemsRenderState;
+//$$ import net.minecraft.client.renderer.state.level.PlayerRenderState;
+//#endif
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -24,12 +33,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(GameRenderer.class)
 public abstract class GameRenderMixin {
 
+    // 26.3 的 renderLevel() 已无参、体内也不再插值恶心强度（PlayerRenderState 里存的已是最终值），没有等价注入点。
+    //#if MC < 260300
     @ModifyExpressionValue(
             method = "renderLevel",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Mth;lerp(FFF)F"))
     private float noNauseaWobble(float original) {
         return NoRender.INSTANCE.noNausea() ? 0.0F : original;
     }
+    //#endif
 
     //#if MC >= 26.2
     @Inject(method = "nightVisionScale", at = @At("HEAD"), cancellable = true)
@@ -47,13 +59,53 @@ public abstract class GameRenderMixin {
      * 第一人称手部发光：把这一帧的手部提交换成抓面 collector，提交结束后立刻把壳层与边线重提交回同一个 collector。
      *
      * <p>挂在 {@code submitHandsWithItems} 的那一处调用上，而不是另起一个渲染事件：重提交的面与手部自己的提交进的是
-     * 同一个 collector。两者的消费时机并不一致 —— 26.2 由 {@code renderItemInHand} 末尾的 {@code renderAllFeatures}
+     * 同一个 collector。两者的消费时机并不一致 —— 26.2 与 26.3 由 {@code renderItemInHand} 末尾的 {@code renderAllFeatures}
      * 一并消费，26.1.2 是 {@code renderHandsWithItems} 先在末尾把手部 flush 掉、补交的面留到外层 {@code renderLevel}
      * 才画；两者之间差的那次 model view 由 {@link HandFaceCollector} 在重提交姿势里补回。
      *
      * <p>异常不能冒泡：会跳过 {@code renderItemInHand} 的 {@code modelViewStack.popMatrix}，
      * 之后每一帧的 model view 都被污染，比「不发光」严重得多。
      */
+    //#if MC >= 260300
+    //$$ @WrapOperation(
+    //$$         method = "renderItemInHand",
+    //$$         at =
+    //$$                 @At(
+    //$$                         value = "INVOKE",
+    //$$                         target =
+    //$$                                 "Lnet/minecraft/client/renderer/FirstPersonHandsAndItemsRenderer;submitHandsWithItems(FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lnet/minecraft/client/renderer/state/level/FirstPersonHandsAndItemsRenderState;)V"))
+    //$$ private void captureHandGlow(
+    //$$         FirstPersonHandsAndItemsRenderer renderer,
+    //$$         float partialTicks,
+    //$$         PoseStack poseStack,
+    //$$         SubmitNodeCollector submitNodeCollector,
+    //$$         PlayerRenderState playerState,
+    //$$         FirstPersonHandsAndItemsRenderState state,
+    //$$         Operation<Void> original) {
+    //$$     HandView handView = HandView.INSTANCE;
+    //$$     if (handView == null || !handView.glowEnabled()) {
+    //$$         original.call(renderer, partialTicks, poseStack, submitNodeCollector, playerState, state);
+    //$$         return;
+    //$$     }
+    //$$     HandFaceCollector handFaces = handView.getHandFaces();
+    //$$     try {
+    //$$         original.call(
+    //$$                 renderer,
+    //$$                 partialTicks,
+    //$$                 poseStack,
+    //$$                 handFaces.begin(submitNodeCollector),
+    //$$                 playerState,
+    //$$                 state);
+    //$$     } finally {
+    //$$         try {
+    //$$             handFaces.flush(submitNodeCollector, handView.glowShellColor(), handView.glowBoundaryColor());
+    //$$         } catch (Exception failure) {
+    //$$             handFaces.clear();
+    //$$             handFaces.reportFailure(failure);
+    //$$         }
+    //$$     }
+    //$$ }
+    //#else
     //#if MC >= 260200
     @WrapOperation(
             method = "renderItemInHand",
@@ -97,4 +149,5 @@ public abstract class GameRenderMixin {
             }
         }
     }
+    //#endif
 }

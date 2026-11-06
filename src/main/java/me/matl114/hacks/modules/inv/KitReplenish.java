@@ -624,7 +624,11 @@ public class KitReplenish extends BaseModule {
             ItemContainerContents container = stack.get(DataComponents.CONTAINER);
             if (container != null && !Objects.equals(ItemContainerContents.EMPTY, container)) {
                 Container shulkerView = InventoryUtils.createReadOnlyInventory(
+                        //#if MC >= 260300
+                        //$$ container.itemCopies().toList());
+                        //#else
                         container.allItemsCopyStream().toList());
+                        //#endif
                 int size = Math.min(view.getContainerSize(), shulkerView.getContainerSize());
                 double score = 0;
                 for (var i = 0; i < size; ++i) {
@@ -643,7 +647,11 @@ public class KitReplenish extends BaseModule {
             ItemContainerContents container = stack.get(DataComponents.CONTAINER);
             if (container != null && !Objects.equals(ItemContainerContents.EMPTY, container)) {
                 Container shulkerView = InventoryUtils.createReadOnlyInventory(
+                        //#if MC >= 260300
+                        //$$ container.itemCopies().toList());
+                        //#else
                         container.allItemsCopyStream().toList());
+                        //#endif
                 Map<Item, Integer> itemTypeCount = new LinkedHashMap<>();
                 boolean hasSame = false;
                 for (var re : InventoryUtils.iterable(view)) {
@@ -1971,7 +1979,11 @@ public class KitReplenish extends BaseModule {
 
     public static Container loadShulkerAsSupplyInventory(ItemContainerContents component) {
         List<ItemStack> stacks = new ArrayList<>(EMPTY_SLOTS);
+        //#if MC >= 260300
+        //$$ component.itemCopies().forEach(stacks::add);
+        //#else
         component.allItemsCopyStream().forEach(stacks::add);
+        //#endif
         return InventoryUtils.createInventory(stacks);
     }
 

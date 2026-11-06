@@ -246,7 +246,12 @@ public class ShulkerDisplay extends BaseModule {
     private void renderPreview(VDrawContext context, ItemStack shulker, double x, double y, boolean selected) {
         var container = shulker.get(DataComponents.CONTAINER);
         if (container == null) return;
+//#if MC >= 260300
+//$$         // 26.3 的 ContainerComponent 用 itemCopies()，取代 26.2 的 allItemsCopyStream()
+//$$         renderPreview(context, shulker, container.itemCopies().toList(), false, x, y, selected);
+//#else
         renderPreview(context, shulker, container.allItemsCopyStream().toList(), false, x, y, selected);
+//#endif
     }
 
     private void renderPreview(
@@ -299,7 +304,11 @@ public class ShulkerDisplay extends BaseModule {
         var container = shulker.get(DataComponents.CONTAINER);
         if (container == null) return List.of();
         Map<ItemStackSample, Integer> itemCounts = new LinkedHashMap<>();
+//#if MC >= 260300
+//$$         for (ItemStack item : container.itemCopies().toList()) {
+//#else
         for (ItemStack item : container.allItemsCopyStream().toList()) {
+//#endif
             if (!item.isEmpty()) itemCounts.merge(ItemStackSample.of(item), item.getCount(), Integer::sum);
         }
         List<ItemStack> compressed = new ArrayList<>(itemCounts.size());

@@ -23,7 +23,11 @@ public abstract class KeyBoardEvents {
                             target = "Lnet/minecraft/client/KeyboardHandler;debugCrashKeyTime:J",
                             ordinal = 0))
     private void onKeyboardInput(long window, int action, KeyEvent input, CallbackInfo ci) {
+        //#if MC >= 260300
+        //$$ if (SimpleInputManager.getInstance().onKeyInput(input.key(), input.keycode(), input.modifiers(), action)) {
+        //#else
         if (SimpleInputManager.getInstance().onKeyInput(input.key(), input.scancode(), input.modifiers(), action)) {
+        //#endif
             ci.cancel();
         }
     }

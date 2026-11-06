@@ -402,12 +402,21 @@ public abstract class DrawableWidget
 
     public final boolean keyPressed(KeyEvent input) {
         THREAD_SAFE_MODIFIER_CACHE = input.modifiers();
+//#if MC >= 260300
+//$$         // 26.3 的 KeyEvent(key, keycode)：key 是 SDL scancode（InputConstants.KEY_* 的空间），keycode 是 keysym
+//$$         return this.onKeyPressed(input.key(), input.keycode(), input.modifiers());
+//#else
         return this.onKeyPressed(input.key(), input.scancode(), input.modifiers());
+//#endif
     }
 
     public final boolean keyReleased(KeyEvent input) {
         THREAD_SAFE_MODIFIER_CACHE = input.modifiers();
+//#if MC >= 260300
+//$$         return this.onKeyReleased(input.key(), input.keycode(), input.modifiers());
+//#else
         return this.onKeyReleased(input.key(), input.scancode(), input.modifiers());
+//#endif
     }
 
     public final boolean charTyped(CharacterEvent input) {

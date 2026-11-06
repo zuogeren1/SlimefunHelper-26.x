@@ -4,7 +4,11 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.levelgen.RandomState;
+//#if MC >= 260300
+//$$ import net.minecraft.world.level.levelgen.synth.Noise;
+//#else
 import net.minecraft.world.level.levelgen.synth.NormalNoise;
+//#endif
 
 /** Ports cubiomes' {@code sampleClimatePara(NP_DEPTH)} approximation. */
 final class CubiomesDepthSampler {
@@ -14,9 +18,15 @@ final class CubiomesDepthSampler {
     private static final int WEIRDNESS = 3;
     private static final Node SPLINE = createSpline();
 
+    //#if MC >= 260300
+    //$$ private final Noise continentalness;
+    //$$ private final Noise erosion;
+    //$$ private final Noise weirdness;
+    //#else
     private final NormalNoise continentalness;
     private final NormalNoise erosion;
     private final NormalNoise weirdness;
+    //#endif
 
     CubiomesDepthSampler(RandomState randomState) {
         continentalness = sampler(randomState, "continentalness");
@@ -29,9 +39,15 @@ final class CubiomesDepthSampler {
     }
 
     double sample(double quartX, double quartZ) {
+        //#if MC >= 260300
+        //$$ float c = continentalness.get(quartX, 0.0, quartZ);
+        //$$ float e = erosion.get(quartX, 0.0, quartZ);
+        //$$ float w = weirdness.get(quartX, 0.0, quartZ);
+        //#else
         float c = (float) continentalness.getValue(quartX, 0.0, quartZ);
         float e = (float) erosion.getValue(quartX, 0.0, quartZ);
         float w = (float) weirdness.getValue(quartX, 0.0, quartZ);
+        //#endif
         float peaksAndValleys = -3.0F * (Math.abs(Math.abs(w) - 0.6666667F) - 0.33333334F);
         float[] parameters = {c, e, peaksAndValleys, w};
         float offset = evaluate(SPLINE, parameters) + 0.015F;
@@ -40,7 +56,11 @@ final class CubiomesDepthSampler {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
+    //#if MC >= 260300
+    //$$ private static Noise sampler(RandomState randomState, String id) {
+    //#else
     private static NormalNoise sampler(RandomState randomState, String id) {
+    //#endif
         ResourceKey noiseKey = ResourceKey.create(Registries.NOISE, Identifier.withDefaultNamespace(id));
         return randomState.getOrCreateNoise(noiseKey);
     }

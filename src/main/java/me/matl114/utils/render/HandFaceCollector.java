@@ -34,18 +34,22 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 //$$ import com.mojang.blaze3d.systems.RenderSystem;
 //$$ import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 //#endif
+//#if MC >= 260300
+//$$ import net.minecraft.client.renderer.texture.UvMapping;
+//$$ import net.minecraft.client.resources.model.geometry.ItemQuads;
+//#endif
 
 /**
  * 第一人称手部的「发光壳层 + 边框」：抓下这一帧手部提交的每一个面，再按逐面外扩重提交两层。
  *
- * <p>手部几何在两个版本上都只走三条出口：手臂 {@code submitModelPart}（{@code AvatarRenderer#renderHand} 每只手交一个
+ * <p>手部几何在三个版本上都只走这三条出口：手臂 {@code submitModelPart}（{@code AvatarRenderer#renderHand} 每只手交一个
  * {@link ModelPart}）、手持物 {@code submitItem}（{@code ItemStackRenderState$LayerRenderState#submit}）、
  * 地图等自定义几何 {@code submitCustomGeometry}。本类覆盖第一条与第二条来抓面，第三条只转发：
  * 地图的几何不是模型面，抓下来会得到一层面片而不是手。
  *
  * <p>重提交的姿势要凑齐执行期那一次 model view（{@code RenderType#draw} 画的时候读 {@code RenderSystem} 的
- * model view 栈顶）：抓到的顶点已经乘过提交时的 pose，根上正是那张 model view 的逆。两个版本的消费时机不同 ——
- * 26.2 的重提交与手部进同一次 flush，执行期乘的还是提交时那张，姿势取 identity；26.1.2 的手部由
+ * model view 栈顶）：抓到的顶点已经乘过提交时的 pose，根上正是那张 model view 的逆。三个版本的消费时机不同 ——
+ * 26.2 与 26.3 的重提交与手部进同一次 flush，执行期乘的还是提交时那张，姿势取 identity；26.1.2 的手部由
  * {@code ItemInHandRenderer#renderHandsWithItems} 自己先 flush，本类补交的面留到外层 {@code renderLevel} 才画，
  * 那一趟 model view 已经弹回 identity，姿势就得把提交时那张带回来。复用 {@code ItemInHandRenderer} 的 PoseStack
  * 会再乘一次模型矩阵。
@@ -132,7 +136,7 @@ public final class HandFaceCollector {
      */
     private static void applyResubmitPose(PoseStack pose) {
         //#if MC >= 260200
-        // 26.2：执行期乘的就是抓面时反乘掉的那一张，这里再乘一次会把壳层挪开
+        // 26.2 与 26.3：执行期乘的就是抓面时反乘掉的那一张，这里再乘一次会把壳层挪开
         //#else
         //$$ pose.mulPose(RenderSystem.getModelViewMatrix());
         //#endif
@@ -216,9 +220,24 @@ public final class HandFaceCollector {
         }
 
         /**
-         * 手臂：两个版本的六参默认实现分别转到不同方法（26.2 转 {@code Model.Simple → submitModel}，
-         * 26.1.2 转十一参抽象方法），六参签名是唯一两版本一致的入口，所以抓面挂在这里。
+         * 手臂：六参默认实现在各版本都转到 {@code Model.Simple → submitModel}（26.1.2 另有一条十一参抽象方法），
+         * 所以抓面挂在这个三版本都有的入口上；末参只在小版本间换类型，抓面逻辑本身不看它。
          */
+        //#if MC >= 260300
+        //$$ @Override
+        //$$ public void submitModelPart(
+        //$$         ModelPart part,
+        //$$         PoseStack poseStack,
+        //$$         RenderType renderType,
+        //$$         int lightCoords,
+        //$$         int overlayCoords,
+        //$$         UvMapping uvMapping) {
+        //$$     this.delegate.submitModelPart(part, poseStack, renderType, lightCoords, overlayCoords, uvMapping);
+        //$$     if (collecting) {
+        //$$         captureModelPart(part, poseStack, lightCoords, overlayCoords);
+        //$$     }
+        //$$ }
+        //#else
         @Override
         public void submitModelPart(
                 ModelPart part,
@@ -232,7 +251,38 @@ public final class HandFaceCollector {
                 captureModelPart(part, poseStack, lightCoords, overlayCoords);
             }
         }
+        //#endif
 
+        //#if MC >= 260300
+        //$$ @Override
+        //$$ public void submitItem(
+        //$$         PoseStack poseStack,
+        //$$         ItemDisplayContext displayContext,
+        //$$         int lightCoords,
+        //$$         int overlayCoords,
+        //$$         int outlineColor,
+        //$$         int[] tintLayers,
+        //$$         ItemQuads quads,
+        //$$         ItemStackRenderState.FoilType foilType) {
+        //$$     this.delegate.submitItem(
+        //$$             poseStack, displayContext, lightCoords, overlayCoords, outlineColor, tintLayers, quads, foilType);
+        //$$     // 取 all()：半透明层（药水、玻璃）也在里面，只要 solid() 会漏掉它们的面
+        //$$     List<BakedQuad> list = quads.all();
+        //$$     if (!collecting || list.isEmpty()) {
+        //$$         return;
+        //$$     }
+        //$$     // 物品的本地变换已经压进 pose，按面取顶点就够；贴图不参与纯色壳层，不挂 texture
+        //$$     PoseStack.Pose pose = poseStack.last();
+        //$$     CapturingVertexConsumer consumer = new CapturingVertexConsumer(null, HandFaceCollector.this::addFace);
+        //$$     for (BakedQuad quad : list) {
+        //$$         for (int vertex = 0; vertex < BakedQuad.VERTEX_COUNT; vertex++) {
+        //$$             Vector3fc position = quad.position(vertex);
+        //$$             consumer.addVertex(pose, position.x(), position.y(), position.z());
+        //$$         }
+        //$$     }
+        //$$     consumer.finish();
+        //$$ }
+        //#else
         @Override
         public void submitItem(
                 PoseStack poseStack,
@@ -259,6 +309,7 @@ public final class HandFaceCollector {
             }
             consumer.finish();
         }
+        //#endif
 
         /**
          * 自定义几何只转发：手部链路上它只承载地图画面，画进壳层会多出一层平面；
@@ -318,6 +369,21 @@ public final class HandFaceCollector {
             this.delegate.submitText(
                     poseStack, x, y, text, dropShadow, displayMode, lightCoords, color, backgroundColor, outlineColor);
         }
+        //#if MC >= 260300
+        //$$ /** 与 {@code submitText} 同为纯转发：文本类提交不承载手部几何。 */
+        //$$ @Override
+        //$$ public void submitTextBackground(
+        //$$         PoseStack poseStack,
+        //$$         float x0,
+        //$$         float y0,
+        //$$         float x1,
+        //$$         float y1,
+        //$$         int color,
+        //$$         Font.DisplayMode displayMode,
+        //$$         int lightCoords) {
+        //$$     this.delegate.submitTextBackground(poseStack, x0, y0, x1, y1, color, displayMode, lightCoords);
+        //$$ }
+        //#endif
 
         @Override
         public void submitFlame(PoseStack poseStack, EntityRenderState renderState, Quaternionf rotation) {
@@ -329,6 +395,37 @@ public final class HandFaceCollector {
             this.delegate.submitLeash(poseStack, leashState);
         }
 
+        //#if MC >= 260300
+        //$$ @Override
+        //$$ public <S> void submitModel(
+        //$$         Model<? super S> model,
+        //$$         S state,
+        //$$         PoseStack poseStack,
+        //$$         RenderType renderType,
+        //$$         int lightCoords,
+        //$$         int overlayCoords,
+        //$$         int tintedColor,
+        //$$         UvMapping uvMapping,
+        //$$         int outlineColor) {
+        //$$     this.delegate.submitModel(
+        //$$             model, state, poseStack, renderType, lightCoords, overlayCoords, tintedColor, uvMapping, outlineColor);
+        //$$ }
+        //$$
+        //$$ /** 崩解覆盖是同一份实体几何的第二遍，转发即可：本类抓的只有手臂与手持物。 */
+        //$$ @Override
+        //$$ public <S> void submitCrumblingOverlay(
+        //$$         Model<? super S> model,
+        //$$         S state,
+        //$$         PoseStack poseStack,
+        //$$         RenderType renderType,
+        //$$         int lightCoords,
+        //$$         int overlayCoords,
+        //$$         int tintedColor,
+        //$$         ModelFeatureRenderer.CrumblingOverlay crumblingOverlay) {
+        //$$     this.delegate.submitCrumblingOverlay(
+        //$$             model, state, poseStack, renderType, lightCoords, overlayCoords, tintedColor, crumblingOverlay);
+        //$$ }
+        //#else
         @Override
         public <S> void submitModel(
                 Model<? super S> model,
@@ -353,6 +450,7 @@ public final class HandFaceCollector {
                     outlineColor,
                     crumblingOverlay);
         }
+        //#endif
 
         @Override
         public void submitBlockModel(
@@ -373,11 +471,19 @@ public final class HandFaceCollector {
             this.delegate.submitMovingBlock(poseStack, renderState, outlineColor);
         }
 
+        //#if MC >= 260300
+        //$$ @Override
+        //$$ public void submitBreakingBlockModel(
+        //$$         PoseStack poseStack, List<BlockStateModelPart> parts, int progress, boolean isBlockTranslucent) {
+        //$$     this.delegate.submitBreakingBlockModel(poseStack, parts, progress, isBlockTranslucent);
+        //$$ }
+        //#else
         @Override
         public void submitBreakingBlockModel(
                 PoseStack poseStack, List<BlockStateModelPart> parts, int progress) {
             this.delegate.submitBreakingBlockModel(poseStack, parts, progress);
         }
+        //#endif
 
         @Override
         public void submitShapeOutline(

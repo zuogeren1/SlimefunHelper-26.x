@@ -147,8 +147,15 @@ public class HandView extends BaseModule {
     private static void applyTransform(PoseStack matrices, Vec3 scale, Vec3 position, Vec3 rotation) {
         matrices.scale((float) scale.x(), (float) scale.y(), (float) scale.z());
         matrices.translate((float) position.x(), (float) position.y(), (float) position.z());
+//#if MC >= 260300
+//$$         // 26.3 的 PoseStack 用 rotate(Quaternionfc) 取代 mulPose(Quaternionf)
+//$$         matrices.rotate(Axis.XP.rotationDegrees((float) rotation.x()));
+//$$         matrices.rotate(Axis.YP.rotationDegrees((float) rotation.y()));
+//$$         matrices.rotate(Axis.ZP.rotationDegrees((float) rotation.z()));
+//#else
         matrices.mulPose(Axis.XP.rotationDegrees((float) rotation.x()));
         matrices.mulPose(Axis.YP.rotationDegrees((float) rotation.y()));
         matrices.mulPose(Axis.ZP.rotationDegrees((float) rotation.z()));
+//#endif
     }
 }

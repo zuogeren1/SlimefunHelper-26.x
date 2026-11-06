@@ -110,8 +110,13 @@ public class ItemStackHelper {
         if (itemStack.isEmpty()) {
             return null;
         }
+        //#if MC >= 260300
+        //$$ var components = itemStack.components;
+        //$$ return components.hasNonDefault(type) ? Optional.ofNullable(components.get(type)) : null;
+        //#else
         var map = itemStack.components.patch;
         return map == null ? null : map.get(type);
+        //#endif
     }
 
     public static <T> void setComponent(Object what, DataComponentType<T> type, @Nullable Optional<T> value) {

@@ -502,7 +502,13 @@ public class DrawContext_v1_21_11 implements VDrawContext {
                         (int) point1.x,
                         (int) point1.y,
                         DefaultTooltipPositioner.INSTANCE,
+//#if MC >= 260300
+//$$                         // 26.3 的 tooltip 多一个「首行后额外留空」开关，26.2 的排版等价于 false
+//$$                         null,
+//$$                         false);
+//#else
                         null);
+//#endif
             });
         }
     }
