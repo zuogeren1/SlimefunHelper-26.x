@@ -16,6 +16,7 @@ import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.utils.ClientUtils;
 import me.matl114.utils.Debug;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.MathUtils;
@@ -180,7 +181,7 @@ public class Airplace extends BaseModule {
                             InteractionHand.MAIN_HAND,
                             new BlockHitResult(Vec3.atBottomCenterOf(ppp).add(0, 1, 0), Direction.UP, ppp, false),
                             false);
-                    mc.player.swing(InteractionHand.MAIN_HAND);
+                    ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
                     // work by magic
                     // work by placeAfterPlace bypass
                     DisablerManager.INSTANCE.flushACPlaceQueue();

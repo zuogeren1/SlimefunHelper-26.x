@@ -38,7 +38,11 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+//#if MC >= 260300
+//$$ import net.minecraft.network.protocol.game.ServerboundPunchPacket;
+//#else
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+//#endif
 import net.minecraft.util.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
@@ -150,7 +154,11 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPacketPoint().getChannel(ServerboundAttackPacket.class), this::onPlayerAttack);
+        //#if MC >= 260300
+        //$$ registerListener(Listener.getPacketPoint().getChannel(ServerboundPunchPacket.class), this::onSwing);
+        //#else
         registerListener(Listener.getPacketPoint().getChannel(ServerboundSwingPacket.class), this::onSwing);
+        //#endif
         //        registerListener(
         //                Listener.getPacketPostHandlePoint().getChannel(PlayerPositionLookS2CPacket.class),
         //                this::onTeleportConfirm2);
@@ -304,7 +312,17 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
         ClientPlayerAccess.of(mc.player).resyncPos();
     }
 
+    //#if MC >= 260300
+    //$$ public void onSwing(Event<ServerboundPunchPacket> eventSwing) {
+    //$$     onSwingEvent(eventSwing);
+    //$$ }
+    //#else
     public void onSwing(Event<ServerboundSwingPacket> eventSwing) {
+        onSwingEvent(eventSwing);
+    }
+    //#endif
+
+    private void onSwingEvent(Event<?> eventSwing) {
         cooldownTimer.mark();
         if (cache != null) {
             eventSwing.cancel();
@@ -375,7 +393,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
                     }
                 }
                 Listener.sendPacketNoEvents(pkt);
-                mc.player.swing(InteractionHand.MAIN_HAND);
+                ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
                 if (callback != null) {
                     callback.run();
                 }

@@ -28,13 +28,13 @@ import me.matl114.managers.*;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.InventoryUtils;
+import me.matl114.utils.NetworkUtils;
 import me.matl114.utils.WorldUtils;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.utils.entity.PlayerInputUtils;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.util.Util;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
@@ -271,7 +271,7 @@ public class PacketMine extends BaseModule {
 
                             for (int i = 0; i < multiplePackets.get(); ++i) {
                                 if (swingHand.get())
-                                    mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
+                                    NetworkUtils.sendSwing(mc.getConnection());
                                 PlayerInteractionAccess.of(mc.gameMode)
                                         .sendBreakPacket(pos, !(realBreak.get() && progress > 0.7F));
                             }

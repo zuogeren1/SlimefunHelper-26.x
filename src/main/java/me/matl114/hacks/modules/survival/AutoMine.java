@@ -40,6 +40,7 @@ import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.utils.AttributeUtils;
+import me.matl114.utils.ClientUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.ItemStackUtils;
 import me.matl114.utils.MathUtils;
@@ -600,7 +601,7 @@ public class AutoMine extends BaseModule {
             }
             mc.gameMode.continueDestroyBlock(lastMinePos, dir);
             if (legalMode.get().hasSwing()) {
-                mc.player.swing(InteractionHand.MAIN_HAND);
+                ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
             }
             if (!MineExtra.INSTANCE.shouldTreatAsInstantBreak(speed)) {
                 var access = PlayerInteractionAccess.of(mc.gameMode);

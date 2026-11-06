@@ -34,7 +34,6 @@ import net.minecraft.network.protocol.game.*;
 import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
-import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
@@ -345,7 +344,7 @@ public class NoSlowDown extends BaseModule implements LegalMovementManager.Movem
                                             // to trigger plugin events
                                             input.sneak(true).sendPlayerSneakUpdatePacket();
                                             input.sneak(false).sendPlayerSneakUpdatePacket();
-                                            mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
+                                            NetworkUtils.sendSwing(mc.getConnection());
                                             mc.gameMode.startPrediction(
                                                     mc.level,
                                                     (seq) -> new ServerboundInteractPacket(
@@ -353,7 +352,7 @@ public class NoSlowDown extends BaseModule implements LegalMovementManager.Movem
                                                             InteractionHand.MAIN_HAND,
                                                             mc.player.position(),
                                                             true));
-                                            mc.getConnection().send(new ServerboundSwingPacket(InteractionHand.MAIN_HAND));
+                                            NetworkUtils.sendSwing(mc.getConnection());
                                             Debug.chat("[NoSlow] 成功伪造状态");
                                             sneakStatus = true;
                                         },

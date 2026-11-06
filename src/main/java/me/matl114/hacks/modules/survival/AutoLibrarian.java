@@ -399,7 +399,7 @@ public class AutoLibrarian extends BaseModule {
                     if (access.predictCurrentMiningProgressWithTool(ItemStack.EMPTY) < 0.7) {
                         return;
                     }
-                    mc.player.swing(InteractionHand.MAIN_HAND);
+                    ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
                     access.sendBreakPacket(true);
                 } else if (!WorldManager.canVillagerResetTrade(merchantScreen.getMenu())) {
                     WorldManager.INSTANCE.setVillagerTradeLock(targetVillager, true);

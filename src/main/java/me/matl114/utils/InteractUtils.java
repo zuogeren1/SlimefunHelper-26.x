@@ -91,7 +91,6 @@ import net.minecraft.world.item.MinecartItem;
 import net.minecraft.world.item.PlaceOnWaterBlockItem;
 import net.minecraft.world.item.PotionItem;
 import net.minecraft.world.item.ProjectileItem;
-import net.minecraft.world.item.ShovelItem;
 import net.minecraft.world.item.SpawnEggItem;
 import net.minecraft.world.item.SpyglassItem;
 import net.minecraft.world.item.TridentItem;
@@ -243,7 +242,7 @@ public class InteractUtils {
         if (actionResult instanceof InteractionResult.Success) {
             InteractionResult.Success success = (InteractionResult.Success) actionResult;
             if (success.swingSource() == InteractionResult.SwingSource.CLIENT) {
-                mc.player.swing(InteractionHand.MAIN_HAND);
+                ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
             }
         }
         return actionResult;
@@ -261,7 +260,7 @@ public class InteractUtils {
         if (actionResult3 instanceof InteractionResult.Success) {
             InteractionResult.Success success3 = (InteractionResult.Success) actionResult3;
             if (success3.swingSource() == InteractionResult.SwingSource.CLIENT) {
-                mc.player.swing(hand);
+                ClientUtils.swing(mc.player, hand);
             }
         }
     }
@@ -484,7 +483,7 @@ public class InteractUtils {
             }
         }
         // 铲子拍平 / 熄灭营火
-        if (item instanceof ShovelItem) {
+        if (interactStack.is(ItemTags.SHOVELS)) {
             if (shovelBlocks.contains(block) && world.getBlockState(pos.above()).isAir()) {
                 return true;
             }

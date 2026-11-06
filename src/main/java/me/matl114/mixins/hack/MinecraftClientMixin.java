@@ -13,6 +13,7 @@ import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.render.RenderExtra;
+import me.matl114.utils.ClientUtils;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.KeyMapping;
@@ -28,6 +29,9 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
+//#if MC >= 260300
+//$$ import net.minecraft.world.item.component.SwingAnimation;
+//#endif
 import net.minecraft.world.phys.HitResult;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Final;
@@ -266,7 +270,7 @@ public abstract class MinecraftClientMixin implements Cloneable, ClientAccess {
             if (actionResult3 instanceof InteractionResult.Success) {
                 InteractionResult.Success success3 = (InteractionResult.Success) actionResult3;
                 if (success3.swingSource() == InteractionResult.SwingSource.CLIENT) {
-                    this.player.swing(hand);
+                    ClientUtils.swing(this.player, hand);
                 }
             }
             return actionResult3;
@@ -280,13 +284,26 @@ public abstract class MinecraftClientMixin implements Cloneable, ClientAccess {
                     @At(
                             value = "INVOKE",
                             target =
+                                    //#if MC >= 260300
+                                    //$$ "Lnet/minecraft/client/player/LocalPlayer;swing(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/component/SwingAnimation;Z)Z"))
+                                    //#else
                                     "Lnet/minecraft/client/player/LocalPlayer;swing(Lnet/minecraft/world/InteractionHand;)V"))
+                                    //#endif
+    //#if MC >= 260300
+    //$$ private boolean handleBlockBreakingNoSwing(LocalPlayer instance, InteractionHand hand, SwingAnimation animation, boolean sendToSwingingEntity) {
+    //$$     if (MineExtra.INSTANCE.noSwing.get()) {
+    //$$         return false;
+    //$$     }
+    //$$     return true;
+    //$$ }
+    //#else
     private boolean handleBlockBreakingNoSwing(LocalPlayer instance, InteractionHand hand) {
         if (MineExtra.INSTANCE.noSwing.get()) {
             return false;
         }
         return true;
     }
+    //#endif
 
     @Unique
     private boolean blockAttack;
@@ -313,7 +330,22 @@ public abstract class MinecraftClientMixin implements Cloneable, ClientAccess {
                     @At(
                             value = "INVOKE",
                             target =
+                                    //#if MC >= 260300
+                                    //$$ "Lnet/minecraft/client/player/LocalPlayer;swing(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/component/SwingAnimation;Z)Z"))
+                                    //#else
                                     "Lnet/minecraft/client/player/LocalPlayer;swing(Lnet/minecraft/world/InteractionHand;)V"))
+                                    //#endif
+    //#if MC >= 260300
+    //$$ private boolean handleBlockAttackNoSwing(LocalPlayer instance, InteractionHand hand, SwingAnimation animation, boolean sendToSwingingEntity) {
+    //$$     if (blockAttack) {
+    //$$         blockAttack = false;
+    //$$         if (MineExtra.INSTANCE.noSwing.get()) {
+    //$$             return false;
+    //$$         }
+    //$$     }
+    //$$     return true;
+    //$$ }
+    //#else
     private boolean handleBlockAttackNoSwing(LocalPlayer instance, InteractionHand hand) {
         if (blockAttack) {
             blockAttack = false;
@@ -323,4 +355,5 @@ public abstract class MinecraftClientMixin implements Cloneable, ClientAccess {
         }
         return true;
     }
+    //#endif
 }

@@ -503,7 +503,7 @@ public class Attack extends BaseModule {
         //        }
         mc.gameMode.attack(mc.player, target);
         if (swing) {
-            mc.player.swing(InteractionHand.MAIN_HAND);
+            ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
         }
         // we use event to handle shield predict
 

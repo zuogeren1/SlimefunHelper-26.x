@@ -58,7 +58,11 @@ import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
+//#if MC >= 260300
+//$$ import net.minecraft.network.protocol.game.ServerboundPunchPacket;
+//#else
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+//#endif
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.TagKey;
@@ -256,7 +260,11 @@ public class PlayerStateManager extends BaseModule {
                 Listener.getPacketPostHandlePoint().getChannel(ClientboundAddEntityPacket.class),
                 this::onPlayerEnterVisualRange);
         registerListener(Listener.getOtherPlayerExitPoint(), this::onPlayerLeave);
+        //#if MC >= 260300
+        //$$ registerListener(Listener.getPacketPoint().getChannel(ServerboundPunchPacket.class), this::onSwingHand);
+        //#else
         registerListener(Listener.getPacketPoint().getChannel(ServerboundSwingPacket.class), this::onSwingHand);
+        //#endif
         registerListener(Listener.getPacketPoint().getChannel(ServerboundAttackPacket.class), this::onAttack);
         registerListener(Listener.getPacketPoint().getChannel(ClientboundDamageEventPacket.class), this::onPlayerDamage);
         registerListener(

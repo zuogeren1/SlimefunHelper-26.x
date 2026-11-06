@@ -10,6 +10,8 @@ import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.gui.screens.Overlay;
 import net.minecraft.client.gui.screens.Screen;
 import com.mojang.blaze3d.pipeline.RenderTarget;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.InteractionHand;
 
 @ApiMethod
 public class ClientUtils {
@@ -127,6 +129,22 @@ public class ClientUtils {
         minecraft.gui.openChatScreen(method);
         //#else
         //$$ minecraft.openChatScreen(method);
+        //#endif
+    }
+
+    /**
+     * 挥手。26.3 把挥手拆成「动画 + 是否发给挥手者」，并且 LocalPlayer 不再在 swing 里发包 ——
+     * 发包改由 Minecraft 的 startAttack/continueAttack 直接发 punch。调用点只想要「挥手 + 服务端看得见」，
+     * 所以这里在 26.3 上自己补 punch；26.2 的 1 参 swing 本来就会发。
+     */
+    public static void swing(LocalPlayer player, InteractionHand hand) {
+        //#if MC >= 260300
+        //$$ player.swing(hand, player.getItemInHand(hand).getAttackAnimation(), false);
+        //$$ if (hand == InteractionHand.MAIN_HAND) {
+        //$$     mc.getConnection().send(net.minecraft.network.protocol.game.ServerboundPunchPacket.INSTANCE);
+        //$$ }
+        //#else
+        player.swing(hand);
         //#endif
     }
 }

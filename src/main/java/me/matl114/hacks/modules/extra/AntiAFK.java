@@ -12,6 +12,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.utils.ClientUtils;
 import net.minecraft.world.InteractionHand;
 
 public class AntiAFK extends BaseModule {
@@ -67,7 +68,7 @@ public class AntiAFK extends BaseModule {
                 PlayerInputManager.INSTANCE.addInputModifier(modifier, 0);
             }
             if (swing.get()) {
-                mc.player.swing(InteractionHand.MAIN_HAND);
+                ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
             }
             if (rotate.get()) {
                 if (lastRotateBack) {

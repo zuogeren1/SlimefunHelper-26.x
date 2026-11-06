@@ -23,6 +23,9 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.item.ItemStack;
+//#if MC >= 260300
+//$$ import net.minecraft.world.item.component.SwingAnimation;
+//#endif
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
@@ -195,8 +198,13 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
         }
     }
 
+    //#if MC >= 260300
+    //$$ @Inject(method = "getModifiedSwingDuration", at = @At("RETURN"), cancellable = true)
+    //$$ private void applyHandViewSwingSpeed(SwingAnimation animation, CallbackInfoReturnable<Integer> cir) {
+    //#else
     @Inject(method = "getCurrentSwingDuration", at = @At("RETURN"), cancellable = true)
     private void applyHandViewSwingSpeed(CallbackInfoReturnable<Integer> cir) {
+    //#endif
         HandView handView = HandView.INSTANCE;
         if (checkClientPlayer()
                 && handView != null

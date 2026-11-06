@@ -412,7 +412,11 @@ public abstract class MinecraftClientEvents {
                     @At(
                             value = "INVOKE",
                             target =
+                                    //#if MC >= 260300
+                                    //$$ "Lnet/minecraft/client/player/LocalPlayer;swing(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/component/SwingAnimation;Z)Z",
+                                    //#else
                                     "Lnet/minecraft/client/player/LocalPlayer;swing(Lnet/minecraft/world/InteractionHand;)V",
+                                    //#endif
                             shift = At.Shift.BEFORE))
     private void restoreAttackTarget(CallbackInfoReturnable<Boolean> cir) {
         if (cacheHitResult != null) {

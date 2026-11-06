@@ -97,9 +97,6 @@ public abstract class ClientPlayerEntityMixin extends AbstractClientPlayer imple
     public abstract boolean isShiftKeyDown();
 
     @Shadow
-    public abstract void swing(InteractionHand hand);
-
-    @Shadow
     public abstract boolean isUsingItem();
 
     @Shadow
@@ -415,7 +412,7 @@ public abstract class ClientPlayerEntityMixin extends AbstractClientPlayer imple
                 && this.level().isClientSide()
                 && InvTasks.SUPPRESS_DROPITEM_SPAWN.get()
                 && !Minecraft.getInstance().isSameThread()) {
-            this.swing(InteractionHand.MAIN_HAND);
+            ClientUtils.swing((LocalPlayer) (Object) this, InteractionHand.MAIN_HAND);
             return null;
         } else {
             return super.drop(stack, throwRandomly, retainOwnership);

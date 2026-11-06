@@ -30,6 +30,7 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.utils.ClientUtils;
 import me.matl114.utils.ColorUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.NetworkUtils;
@@ -45,7 +46,11 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+//#if MC >= 260300
+//$$ import net.minecraft.network.protocol.game.ServerboundPunchPacket;
+//#else
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+//#endif
 import net.minecraft.util.*;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
@@ -288,10 +293,17 @@ public class MineExtra extends BaseModule {
                 Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class),
                 this::onSilentBreak,
                 Integer.MAX_VALUE);
+        //#if MC >= 260300
+        //$$ registerListener(
+        //$$         Listener.getPacketPostScheduleSendPoint().getChannel(ServerboundPunchPacket.class),
+        //$$         this::onLastSwing,
+        //$$         true);
+        //#else
         registerListener(
                 Listener.getPacketPostScheduleSendPoint().getChannel(ServerboundSwingPacket.class),
                 this::onLastSwing,
                 true);
+        //#endif
         registerListener(Listener.getPreGameTick(), this::onGrimCooldownResetPackets);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class), this::onPlayerMove);
         registerListener(Listener.getPreGameTick(), this::onTickGhostHandFailBreak);
@@ -440,7 +452,7 @@ public class MineExtra extends BaseModule {
                 && Tasks.getTick() != lastSwingPacket
                 && Objects.equals(access.getCurrentMiningPos(), packet.getPos())) {
             // will set lastSwingPacket in the listener above
-            mc.player.swing(InteractionHand.MAIN_HAND);
+            ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
         }
         if (packet.getAction() != ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK) {
             if (thisTickHasBroken

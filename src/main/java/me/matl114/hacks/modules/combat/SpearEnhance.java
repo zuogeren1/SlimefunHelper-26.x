@@ -25,6 +25,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.utils.ClientUtils;
 import me.matl114.utils.NetworkUtils;
 import me.matl114.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
@@ -357,7 +358,7 @@ public class SpearEnhance extends BaseModule {
                 && VItem.getInstance().isSpear(mc.player.getItemInHand(InteractionHand.MAIN_HAND))
                 && !mc.gameMode.isSpectator()) {
             if (onPiercing(() -> 0)) {
-                mc.player.swing(InteractionHand.MAIN_HAND);
+                ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
                 eventStab.cancel();
             }
         }

@@ -313,7 +313,7 @@ public class MineBot extends BaseModule {
         Direction dir = Direction.getApproximateNearest(shouldFacing).getOpposite();
         mc.gameMode.continueDestroyBlock(bp, dir);
         if (settings.swingHand()) {
-            mc.player.swing(InteractionHand.MAIN_HAND);
+            ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
         }
 
         boolean miningComplete = mc.level.getBlockState(bp).isAir() || !mc.gameMode.isDestroying();

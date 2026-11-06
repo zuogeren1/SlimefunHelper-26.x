@@ -22,7 +22,11 @@ import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+//#if MC >= 260300
+//$$ import net.minecraft.network.protocol.game.ServerboundPunchPacket;
+//#else
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+//#endif
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.resources.Identifier;
@@ -190,8 +194,12 @@ public class PacketHelper {
     }
 
     public static void sendSwingHand(boolean offhand) {
+        //#if MC >= 260300
+        //$$ NetworkUtils.sendSwing(mc.getConnection());
+        //#else
         mc.getConnection()
                 .send(new ServerboundSwingPacket(offhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND));
+        //#endif
     }
 
     public static void startMine(Object pos, Object direction) {}
