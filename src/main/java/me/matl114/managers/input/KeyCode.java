@@ -211,6 +211,18 @@ public class KeyCode {
         return MAP_NAME_TO_KEY.getInt(name);
     }
 
+    /**
+     * 26.3 的 {@code MouseButtonInfo.button()} 是 SDL 的 1 基序号（1=左 2=中 3=右），
+     * 而 GUI 内部（{@code InputHandler}、拖拽、框选）一律按 GLFW 的 0 基比较，进出 GUI 时统一转换。
+     */
+    public static int toGlfwMouseButton(int button) {
+        //#if MC >= 260300
+        //$$ return button - 1;
+        //#else
+        return button;
+        //#endif
+    }
+
     public static int getKeyCodeFromMouseAction(int button) {
         return button - 100;
     }

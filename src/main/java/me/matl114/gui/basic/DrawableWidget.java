@@ -3,6 +3,7 @@ package me.matl114.gui.basic;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import me.matl114.accessors.gui.ScreenAccess;
+import me.matl114.managers.input.KeyCode;
 import me.matl114.versioned.api.VDrawContext;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -387,17 +388,17 @@ public abstract class DrawableWidget
     public final boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
         THREAD_SAFE_MODIFIER_CACHE = click.modifiers();
         THREAD_SAFE_DOUBLE_CLICK = doubled;
-        return this.onMouseClicked(click.x(), click.y(), click.button());
+        return this.onMouseClicked(click.x(), click.y(), KeyCode.toGlfwMouseButton(click.button()));
     }
 
     public final boolean mouseReleased(MouseButtonEvent click) {
         THREAD_SAFE_MODIFIER_CACHE = click.modifiers();
-        return this.onMouseReleased(click.x(), click.y(), click.button());
+        return this.onMouseReleased(click.x(), click.y(), KeyCode.toGlfwMouseButton(click.button()));
     }
 
     public final boolean mouseDragged(MouseButtonEvent click, double offsetX, double offsetY) {
         THREAD_SAFE_MODIFIER_CACHE = click.modifiers();
-        return this.onMouseDragged(click.x(), click.y(), click.button(), offsetX, offsetY);
+        return this.onMouseDragged(click.x(), click.y(), KeyCode.toGlfwMouseButton(click.button()), offsetX, offsetY);
     }
 
     public final boolean keyPressed(KeyEvent input) {

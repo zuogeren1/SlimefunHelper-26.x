@@ -4,6 +4,7 @@ import java.util.Iterator;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.basic.Draggable;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.managers.input.KeyCode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
@@ -95,7 +96,8 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
 
     @Override
     public final boolean mouseReleased(MouseButtonEvent click) {
-        if (click.button() == this.draggingButton) {
+        int button = KeyCode.toGlfwMouseButton(click.button());
+        if (button == this.draggingButton) {
             releaseDrag(this, click.x(), click.y());
             this.draggingButton = -1;
         }
@@ -105,11 +107,12 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
     @Override
     public final boolean mouseClicked(MouseButtonEvent click, boolean input) {
         // remove the fucking super method
+        int button = KeyCode.toGlfwMouseButton(click.button());
         boolean val = false;
         for (GuiEventListener element : this.children()) {
             if (element.mouseClicked(click, input)) {
                 this.setFocused(element);
-                if (click.button() == 0) {
+                if (button == 0) {
                     this.setDragging(true);
                 }
 
@@ -117,9 +120,9 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
                 break;
             }
         }
-        if (click.button() == 0 || click.button() == 1) {
+        if (button == 0 || button == 1) {
             if (startDrag(this, click.x(), click.y())) {
-                this.draggingButton = click.button();
+                this.draggingButton = button;
             }
         }
         return val;
@@ -128,7 +131,7 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
     @Override
     public final boolean mouseDragged(MouseButtonEvent click, double deltaX, double deltaY) {
         return this.draggingElement != null
-                && click.button() == this.draggingButton
+                && KeyCode.toGlfwMouseButton(click.button()) == this.draggingButton
                 && this.draggingElement.mouseDragged(click, deltaX, deltaY);
     }
 
