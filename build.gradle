@@ -13,20 +13,23 @@ plugins {
 }
 
 // 版本节点：数字是预处理器的 MC 版本号，源码里用 //#if MC >= 260200 这种标记区分版本。
-// 26.1.2 -> 260102，26.2 -> 260200。
-// 注意 link 的方向是「旧 -> 新」：mc2612.link(mc262) 表示 26.2 建立在 26.1.2 之上，
-// 也就是 **26.2 是根节点**（源码即 src/ 原样），只有 26.1.2 需要预处理生成。
-// 新增版本时在这里加节点并 link 到最近的节点即可。
+// 26.1.2 -> 260102，26.2 -> 260200，26.3 -> 260300。
+// 根节点由 versions/mainProject 指定（这里是 26.2，src/ 原样编译），其它版本都从根节点
+// 沿 link 生成。link 是双向的，方向只决定映射表怎么用：
+//   A.link(B, file) 的映射表按「A 名 → B 名」写，生成 A 或 B 时预处理器自己选正向还是反向。
+// 新增版本时在根节点上 link 一个邻居即可，不要把根节点换成新版本。
 preprocess {
 	strictExtraMappings = false
 
 	def mc2612 = createNode('26.1.2', 26_01_02, '')
 	def mc262 = createNode('26.2', 26_02_00, '')
+	def mc263 = createNode('26.3', 26_03_00, '')
 
-	// 第三个参数是「额外映射表」：把 26.1.2 的名字映射到 26.2 的名字，
-	// 预处理器生成 26.1.2 源码时会自动反向套用（类改名 / 方法改名都靠它）。
+	// 第三个参数是「额外映射表」：把一版的名字映射到相邻一版的名字（类改名 / 方法改名都靠它），
+	// 生成任一侧源码时预处理器按方向自行套用。
 	// 写法见 https://github.com/Fallen-Breath/tweakermore 的 versions/mapping-*.txt
 	mc2612.link(mc262, file('versions/mapping-26.1.2-26.2.txt'))
+	mc262.link(mc263, file('versions/mapping-26.2-26.3.txt'))
 
 	for (final def node in getNodes()) {
 		findProject(node.project).ext.mcVersion = node.mcVersion
@@ -40,11 +43,13 @@ preprocess {
 //   "Resolution of the configuration ':26.2:compileClasspath' was attempted
 //    without an exclusive lock"
 // （对照：模板里每个节点都有 preprocessCode，链条一路往上，所以从不触发。）
-// 这里显式让预处理任务依赖另一个版本的 compileJava，把那个工程拉进执行图。
+// 这里显式让预处理任务依赖根节点的 compileJava，把那个工程拉进执行图。
+// 只依赖没有 preprocessCode 的根节点：三个版本时若让所有版本互相依赖，会形成
+// 26.1.2.preprocessCode -> 26.3.compileJava -> 26.3.preprocessCode -> 26.1.2.compileJava 的环。
 gradle.projectsEvaluated {
 	subprojects.each { p ->
 		p.tasks.matching { it.name == 'preprocessCode' }.configureEach { t ->
-			subprojects.findAll { it != p }.each { other ->
+			subprojects.findAll { it != p && !it.tasks.names.contains('preprocessCode') }.each { other ->
 				other.tasks.matching { it.name == 'compileJava' }.configureEach { ct ->
 					t.dependsOn(ct)
 				}
