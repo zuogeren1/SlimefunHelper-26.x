@@ -135,7 +135,18 @@ public class AutoResync extends BaseModule {
                 if (logAutoResync.get()) {
                     Debug.chat("Auto Resync triggered!");
                 }
+                //#if MC >= 260300
+                //$$ mc.getConnection()
+                //$$         .send(new ServerboundAcceptTeleportationPacket(
+                //$$                 packet1.id(),
+                //$$                 resyncPos.x,
+                //$$                 resyncPos.y,
+                //$$                 resyncPos.z,
+                //$$                 mc.player.getYRot(),
+                //$$                 mc.player.getXRot()));
+                //#else
                 mc.getConnection().send(new ServerboundAcceptTeleportationPacket(packet1.id()));
+                //#endif
                 executeResyncTo(resyncPos, resyncToPos, currentOnGround);
                 if (recursive.get()) {
                     mc.player.setPos(resyncToPos);
@@ -154,7 +165,18 @@ public class AutoResync extends BaseModule {
                 Vec3 resyncPos = getPosition(packet1);
                 double sqDistance = resyncToPos.distanceToSqr(resyncPos);
                 if (autoResyncPosDistance.get() > 0 && sqDistance < MathUtils.s2(autoResyncPosDistance.get())) {
+                    //#if MC >= 260300
+                    //$$ mc.getConnection()
+                    //$$         .send(new ServerboundAcceptTeleportationPacket(
+                    //$$                 packet1.id(),
+                    //$$                 resyncPos.x,
+                    //$$                 resyncPos.y,
+                    //$$                 resyncPos.z,
+                    //$$                 mc.player.getYRot(),
+                    //$$                 mc.player.getXRot()));
+                    //#else
                     mc.getConnection().send(new ServerboundAcceptTeleportationPacket(packet1.id()));
+                    //#endif
                     executeResyncTo(resyncPos, resyncToPos, currentOnGround);
                     event.cancel();
                     return;

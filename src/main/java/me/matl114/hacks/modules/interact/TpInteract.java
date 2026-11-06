@@ -75,7 +75,11 @@ public class TpInteract extends BaseModule {
         if (event.isCancelled()) return;
         if (enable.get()) {
             var packetToSend = event.context;
+            //#if MC >= 260300
+            //$$ BlockHitResult hit = event.context.hitResult();
+            //#else
             BlockHitResult hit = event.context.getHitResult();
+            //#endif
             BlockPos blockPos = hit.getBlockPos();
             double distance = InteractExtra.INSTANCE.getBlockReachDistance() + ENABLE_NO_TP_DISTANCE;
             if (new AABB(blockPos).distanceToSqr(mc.player.getEyePosition()) > MathUtils.s2(distance)) {

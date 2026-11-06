@@ -229,7 +229,11 @@ public class SoundNotify extends BaseModule {
 
     public void onEntityDestroy(Event<ClientboundRemoveEntitiesPacket> event) {
         if (!enable.get() || !playerLeave.get() || checkNull() || loginServerCheck()) return;
+        //#if MC >= 260300
+        //$$ for (int entityId : event.context().entityIds()) {
+        //#else
         for (int entityId : event.context().getEntityIds()) {
+        //#endif
             if (mc.level.getEntity(entityId) instanceof Player player && player != mc.player) {
                 play(Cue.ENTITY_LOG);
                 return;

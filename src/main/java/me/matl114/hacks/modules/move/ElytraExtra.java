@@ -855,7 +855,11 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
                     // 40-> offhand
                     sumitDelay(stack.copyWithCount(1));
                     packet.cancel();
+                    //#if MC >= 260300
+                    //$$ NetworkUtils.restoreSequence(packet.context.sequence());
+                    //#else
                     NetworkUtils.restoreSequence(packet.context.getSequence());
+                    //#endif
                 }
             }
         }
@@ -1708,7 +1712,11 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
         if (checkNull()) return;
         new HashSet<>(this.recordedWorldFireworkRockets)
                 .stream()
+                        //#if MC >= 260300
+                        //$$ .filter(s -> eventRemoval.context.entityIds().contains(s.getId()))
+                        //#else
                         .filter(s -> eventRemoval.context.getEntityIds().contains(s.getId()))
+                        //#endif
                         .forEach(this::onRemoveFirework);
     }
 
@@ -1947,7 +1955,11 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
         int id = lastEntity.getId();
         ClientboundRemoveEntitiesPacket destroyS2C = null;
         if (packet instanceof ClientboundRemoveEntitiesPacket removeEntity) {
+            //#if MC >= 260300
+            //$$ var intList = removeEntity.entityIds();
+            //#else
             var intList = removeEntity.getEntityIds();
+            //#endif
             if (intList.contains(id)) {
                 destroyS2C = removeEntity;
             } else {
@@ -1956,7 +1968,11 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
         } else if (packet instanceof ClientboundBundlePacket bundlePacket) {
             for (var bundle : bundlePacket.subPackets()) {
                 if (bundle instanceof ClientboundRemoveEntitiesPacket removeEntity) {
+                    //#if MC >= 260300
+                    //$$ var intList = removeEntity.entityIds();
+                    //#else
                     var intList = removeEntity.getEntityIds();
+                    //#endif
                     if (intList.contains(id)) {
                         destroyS2C = removeEntity;
                         break;

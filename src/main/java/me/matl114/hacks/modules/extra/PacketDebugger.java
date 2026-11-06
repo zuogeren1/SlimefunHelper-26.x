@@ -192,7 +192,11 @@ public class PacketDebugger extends BaseModule {
                 } else if (type instanceof ServerboundPlayerCommandPacket ccmd) {
                     debug("Send", simplifyId(type.type().id()), ccmd.getAction().name(), timeStr);
                 } else if (type instanceof ServerboundAcceptTeleportationPacket confirm) {
+                    //#if MC >= 260300
+                    //$$ debug("Send", simplifyId(type.type().id()), ", Id:", confirm.id(), timeStr);
+                    //#else
                     debug("Send", simplifyId(type.type().id()), ", Id:", confirm.getId(), timeStr);
+                    //#endif
                 } else if (type instanceof ServerboundPongPacket pong) {
                     debug("Send", simplifyId(type.type().id()), ", Id:", pong.getId(), timeStr);
                 } else if (type instanceof ServerboundUseItemOnPacket packet) {
@@ -201,7 +205,11 @@ public class PacketDebugger extends BaseModule {
                             simplifyId(type.type().id()),
                             ", Pos:",
                             ChatUtils.getDisplayedLocation(
+                                    //#if MC >= 260300
+                                    //$$ Vec3.atLowerCornerOf(packet.hitResult().getBlockPos())),
+                                    //#else
                                     Vec3.atLowerCornerOf(packet.getHitResult().getBlockPos())),
+                                    //#endif
                             timeStr);
                 } else {
                     debug("Send", simplifyId(type.type().id()), timeStr);

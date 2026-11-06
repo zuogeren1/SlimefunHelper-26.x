@@ -176,7 +176,11 @@ public class ChestHistory extends BaseModule {
                 && bi.getBlock() instanceof ShulkerBoxBlock) {
             //
             BlockPos placePos =
+                    //#if MC >= 260300
+                    //$$ useContext.getPlaceBlockPos(eventInteract.context.hand(), eventInteract.context.hitResult());
+                    //#else
                     useContext.getPlaceBlockPos(eventInteract.context.getHand(), eventInteract.context.getHitResult());
+                    //#endif
             // if it is a real place
             BlockState state = mc.level.getBlockState(placePos);
             if (state.getBlock() == bi.getBlock()

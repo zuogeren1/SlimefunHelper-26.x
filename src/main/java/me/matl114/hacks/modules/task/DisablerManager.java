@@ -246,7 +246,11 @@ public class DisablerManager extends BaseModule implements LegalMovementManager.
     // MultiPlace bypass, fix place before delayQueuePlace flush -> grim flag AirLiquidPlace
     public void onPlace(Event<ServerboundUseItemOnPacket> blockPlace) {
         if (blockPlace.isCancelled()) return;
+        //#if MC >= 260300
+        //$$ BlockHitResult hitResult = blockPlace.context.hitResult();
+        //#else
         BlockHitResult hitResult = blockPlace.context.getHitResult();
+        //#endif
         Direction direction = hitResult.getDirection();
         Vec3 cursor = hitResult.getLocation();
         BlockPos blockPos = hitResult.getBlockPos();
@@ -270,7 +274,11 @@ public class DisablerManager extends BaseModule implements LegalMovementManager.
                 ServerboundUseItemOnPacket pkt = blockPlace.context;
                 PacketManager.schedulePostScheduleCallback(pkt, () -> {
                     Listener.sendPacketNoEvents(new ServerboundUseItemOnPacket(
+                            //#if MC >= 260300
+                            //$$ pkt.hand(), pkt.hitResult(), NetworkUtils.generateNextSequence()));
+                            //#else
                             pkt.getHand(), pkt.getHitResult(), NetworkUtils.generateNextSequence()));
+                            //#endif
                 });
             }
         }

@@ -93,19 +93,39 @@ public class SequencedActionManager extends BaseModule {
     private void onInteractBlock(Event<ServerboundUseItemOnPacket> event) {
         if (event.isCancelled()) return;
         // ignore fake sequence
+        //#if MC >= 260300
+        //$$ maxSeq = Math.max(maxSeq, event.context.sequence());
+        //#else
         maxSeq = Math.max(maxSeq, event.context.getSequence());
+        //#endif
         var context = PlayerInteractBlockC2SPacketAccess.of(event.context).getUseContext();
         var stack = context != null && context.stack() != null
                 ? context.stack()
+                //#if MC >= 260300
+                //$$ : mc.player.getItemInHand(event.context.hand());
+                //#else
                 : mc.player.getItemInHand(event.context.getHand());
+                //#endif
         blockPlaceSequences.addLast(
                 lastBlockPlace = new IndexEntry<>(
+                        //#if MC >= 260300
+                        //$$ event.context.sequence(),
+                        //#else
                         event.context.getSequence(),
+                        //#endif
                         new UseItemOnBlock(
+                                //#if MC >= 260300
+                                //$$ event.context.hitResult(),
+                                //#else
                                 event.context.getHitResult(),
+                                //#endif
                                 InteractionResult.SUCCESS,
                                 context != null ? context.placePos() : Optional.empty(),
+                                //#if MC >= 260300
+                                //$$ event.context.hand(),
+                                //#else
                                 event.context.getHand(),
+                                //#endif
                                 stack)));
         lastBlockPlaceTick = Tasks.getTick();
     }
@@ -113,12 +133,24 @@ public class SequencedActionManager extends BaseModule {
     private void onInteractItem(Event<ServerboundUseItemPacket> event) {
         if (event.isCancelled()) return;
         // ignore fake sequence
+        //#if MC >= 260300
+        //$$ maxSeq = Math.max(maxSeq, event.context.sequence());
+        //#else
         maxSeq = Math.max(maxSeq, event.context.getSequence());
+        //#endif
         ItemStack stack = PlayerInteractItemC2SPacketAccess.of(event.context).getItemStack();
         itemUsageSequences.add(
                 lastItemUse = new IndexEntry<>(
+                        //#if MC >= 260300
+                        //$$ event.context.sequence(),
+                        //#else
                         event.context.getSequence(),
+                        //#endif
+                        //#if MC >= 260300
+                        //$$ new UseItem(InteractionResult.SUCCESS, event.context.hand(), stack)));
+                        //#else
                         new UseItem(InteractionResult.SUCCESS, event.context.getHand(), stack)));
+                        //#endif
         lastItemUseTick = Tasks.getTick();
     }
 

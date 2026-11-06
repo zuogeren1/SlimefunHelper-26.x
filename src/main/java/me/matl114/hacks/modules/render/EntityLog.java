@@ -237,7 +237,11 @@ public class EntityLog extends BaseModule {
             var packet = packetEvent.context();
             if (mc.level != null) {
                 Set<Entity> removing = new LinkedHashSet<>();
+                //#if MC >= 260300
+                //$$ for (int i : packet.entityIds()) {
+                //#else
                 for (int i : packet.getEntityIds()) {
+                //#endif
                     Entity entity = mc.level.getEntity(i);
                     if (entity == null) continue;
                     if (whiteList.get().test(entity.getType())) {

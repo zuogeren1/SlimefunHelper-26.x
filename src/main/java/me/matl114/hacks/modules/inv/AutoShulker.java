@@ -63,7 +63,11 @@ public class AutoShulker extends BaseModule {
         if (event.isCancelled()) return;
         if (autoShulker.get()) {
             ServerboundUseItemOnPacket packet = event.context;
+            //#if MC >= 260300
+            //$$ BlockHitResult hitResult = packet.hitResult();
+            //#else
             BlockHitResult hitResult = packet.getHitResult();
+            //#endif
             boolean hasShift = mc.player.isShiftKeyDown();
             BlockState state = mc.level.getBlockState(hitResult.getBlockPos());
             if (state.getBlock() instanceof ShulkerBoxBlock

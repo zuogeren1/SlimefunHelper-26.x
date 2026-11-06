@@ -76,7 +76,11 @@ public class InvDesyncFix extends BaseModule {
         if (enable.get()
                 && (useItemFix.get() || useItemFix2.get())
                 && !LivingEntityAccess.of(mc.player).isTrackedUsingItem()) {
+            //#if MC >= 260300
+            //$$ InteractionHand hand = event.context.hand();
+            //#else
             InteractionHand hand = event.context.getHand();
+            //#endif
             ItemStack stack =
                     PlayerInteractItemC2SPacketAccess.of(event.context).getItemStack();
             ItemStack currentStack = mc.player.getItemInHand(hand);

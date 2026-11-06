@@ -23,7 +23,11 @@ public interface PlayerInteractItemC2SPacketAccess {
     }
 
     static ServerboundUseItemPacket setContext(LocalPlayer player, ServerboundUseItemPacket packet) {
+        //#if MC >= 260300
+        //$$ of(packet).setItemStack(player.getItemInHand(packet.hand()).copy());
+        //#else
         of(packet).setItemStack(player.getItemInHand(packet.getHand()).copy());
+        //#endif
         return packet;
     }
 }

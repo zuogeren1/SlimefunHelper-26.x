@@ -26,7 +26,11 @@ public abstract class PlayerInteractBlockC2SPacketMixin implements PlayerInterac
 
     @Override
     @Mutable
+    //#if MC >= 260300
+    //$$ @Accessor("hitResult")
+    //#else
     @Accessor("blockHit")
+    //#endif
     public abstract void setBlockHitResult(BlockHitResult blockHitResult);
 
     @Override

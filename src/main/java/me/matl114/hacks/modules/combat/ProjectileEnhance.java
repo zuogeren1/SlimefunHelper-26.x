@@ -147,7 +147,11 @@ public class ProjectileEnhance extends BaseModule {
 
         if (enable.get()) {
             ServerboundUseItemPacket packet = packetMutableObject.context();
+            //#if MC >= 260300
+            //$$ InteractionHand hand = packet.hand();
+            //#else
             InteractionHand hand = packet.getHand();
+            //#endif
             ItemStack stack = PlayerInteractItemC2SPacketAccess.of(packetMutableObject.context)
                     .getItemStack();
             // access to the item before it is used up to 0 count
@@ -190,7 +194,11 @@ public class ProjectileEnhance extends BaseModule {
                             } else {
                                 // recreate packet to en, do something
                                 packet = new ServerboundUseItemPacket(
+                                        //#if MC >= 260300
+                                        //$$ hand, packet.sequence(), redirectTarget.y, redirectTarget.x);
+                                        //#else
                                         hand, packet.getSequence(), redirectTarget.y, redirectTarget.x);
+                                        //#endif
                             }
                         } else {
                             Debug.chat(Component.literal("[Proj Aim] Target absent"));
@@ -208,7 +216,11 @@ public class ProjectileEnhance extends BaseModule {
                             boolean exactTp = enhanceTp.get();
                             double range = tpDistance.get();
                             Vec3 facing = EntityUtils.pitchYawToRotation(
+                                    //#if MC >= 260300
+                                    //$$ packet.xRot(), packet.yRot()); // mc.player.getRotationVector();
+                                    //#else
                                     packet.getXRot(), packet.getYRot()); // mc.player.getRotationVector();
+                                    //#endif
                             Vec3 facingNorm = facing.normalize();
                             Vec3 oppositeFacing = Vec3.ZERO.subtract(facingNorm);
                             Vec3 finalMove = Vec3.ZERO;

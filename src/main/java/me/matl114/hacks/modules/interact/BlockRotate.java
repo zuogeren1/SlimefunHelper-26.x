@@ -179,10 +179,18 @@ public class BlockRotate extends BaseModule {
                         handlePlaceCorrectLitematica(blockItem, e.context, context, yawDeceive, playerLookAt);
                         handlePlaceCorrectTemperarySchematic(blockItem, e.context, context, yawDeceive);
                         handleSimpleInteractCorrect(
+                                //#if MC >= 260300
+                                //$$ e.context.hitResult().getBlockPos(), playerLookAt);
+                                //#else
                                 e.context.getHitResult().getBlockPos(), playerLookAt);
+                                //#endif
                     } else if (paccess.getUseContext().isAccepted()) {
                         BlockState oldState = paccess.getUseContext().oldState();
+                        //#if MC >= 260300
+                        //$$ BlockPos interactState = e.context.hitResult().getBlockPos();
+                        //#else
                         BlockPos interactState = e.context.getHitResult().getBlockPos();
+                        //#endif
                         BlockState newState = mc.level.getBlockState(interactState);
                         if (oldState != newState) {
                             // handle yaw fix
@@ -203,12 +211,20 @@ public class BlockRotate extends BaseModule {
                         // to ensure the rotate is successfully done
                         // use a wrong sequence id to ensure that this packet cancelled by grimac
                         Listener.sendPacketNoEvents(new ServerboundUseItemOnPacket(
+                                //#if MC >= 260300
+                                //$$ InteractionHand.OFF_HAND, e.context.hitResult(), e.context.sequence() - 1));
+                                //#else
                                 InteractionHand.OFF_HAND, e.context.getHitResult(), e.context.getSequence() - 1));
+                                //#endif
                     }
                     mc.getConnection()
                             .send(new ServerboundUseItemPacket(
                                     InteractionHand.MAIN_HAND,
+                                    //#if MC >= 260300
+                                    //$$ e.context.sequence(),
+                                    //#else
                                     e.context.getSequence(),
+                                    //#endif
                                     deceivePy.getYaw(currentPy.y),
                                     deceivePy.getPitch(currentPy.x)));
                     PlayerInteractBlockC2SPacketAccess.of(e.context).setSequence(NetworkUtils.generateNextSequence());
@@ -245,9 +261,17 @@ public class BlockRotate extends BaseModule {
             Event<PitchYawDeceive> yawDeceive) {
         if (enable3.get()) {
             // ?
+            //#if MC >= 260300
+            //$$ BlockHitResult packetHitResult = packet.hitResult();
+            //#else
             BlockHitResult packetHitResult = packet.getHitResult();
+            //#endif
             BlockState litematicaState;
+            //#if MC >= 260300
+            //$$ BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.hand(), packetHitResult);
+            //#else
             BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.getHand(), packetHitResult);
+            //#endif
             TemporarySchematic schematic = tempSchematics.remove(modifyingBlockPos);
             if (schematic == null || schematic.expire()) {
                 return;
@@ -283,11 +307,19 @@ public class BlockRotate extends BaseModule {
             Event<BlockPos> look) {
 
         if (enable2.get() && LitematicaHooks.getInstance().isEnabled()) {
+            //#if MC >= 260300
+            //$$ BlockHitResult packetHitResult = packet.hitResult();
+            //#else
             BlockHitResult packetHitResult = packet.getHitResult();
+            //#endif
             BlockState litematicaState;
             Level litematicaWorld = LitematicaHooks.getInstance().getSchematicWorld();
 
+            //#if MC >= 260300
+            //$$ BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.hand(), packetHitResult);
+            //#else
             BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.getHand(), packetHitResult);
+            //#endif
             if (!LitematicaHooks.getInstance().isPositionWithinRange(modifyingBlockPos)) return;
 
             litematicaState = litematicaWorld.getBlockState(modifyingBlockPos);
@@ -368,7 +400,11 @@ public class BlockRotate extends BaseModule {
             BlockState targetState,
             ServerboundUseItemOnPacket packet,
             boolean forceCorrect) {
+        //#if MC >= 260300
+        //$$ BlockHitResult packetHitResult = packet.hitResult();
+        //#else
         BlockHitResult packetHitResult = packet.getHitResult();
+        //#endif
         BlockState clientState = mc.level.getBlockState(modifyingBlockPos);
         if (!targetState.isAir()
                 && targetState.getBlock().asItem() == item

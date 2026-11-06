@@ -167,7 +167,11 @@ public class PositionPredict extends BaseModule {
         }
         if (ev instanceof ClientboundRemoveEntitiesPacket destroy) {
             synchronized (asyncLoadedPlayerPositionTrackers) {
+                //#if MC >= 260300
+                //$$ destroy.entityIds().forEach(asyncLoadedPlayerPositionTrackers::remove);
+                //#else
                 destroy.getEntityIds().forEach(asyncLoadedPlayerPositionTrackers::remove);
+                //#endif
             }
         }
         PredictorImpl impl;
