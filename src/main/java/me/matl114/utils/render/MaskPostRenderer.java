@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import me.matl114.events.RenderListener;
+import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -151,6 +152,8 @@ public final class MaskPostRenderer {
      * 比 {@code renderLevel} 早，那时读写到的还是上一帧的相机；帧末尾的 {@code RenderListener}
      * 矩阵才是本帧 {@code submitFeatures} 写入的那一份。
      */
+    private static boolean reportedFailure = false;
+
     public static void flush() {
         if (PENDING.isEmpty()) return;
         List<Pending> frame = new ArrayList<>(PENDING);
@@ -164,6 +167,10 @@ public final class MaskPostRenderer {
                 render(pending, view, proj);
             } catch (RuntimeException failure) {
                 // 掩膜只是标注，任何一步失败都不该把渲染帧拖崩；下一帧会重新采集
+                if (!reportedFailure) {
+                    reportedFailure = true;
+                    Debug.info("MaskPostRenderer: mask composite failed", failure);
+                }
                 break;
             }
         }
@@ -265,6 +272,12 @@ public final class MaskPostRenderer {
 //$$        }
 //$$
 //$$        captureBuffer.upload();
+//$$        // prepare() 可能触发贴图上传，而 pass 内上传会抛
+//$$        // "Close the existing render pass before presenting"；必须在开 pass 之前把整批都准备好。
+//$$        Map<Identifier, PreparedRenderType> prepared = new LinkedHashMap<>();
+//$$        for (Identifier texture : draws.keySet()) {
+//$$            prepared.put(texture, layer(texture).prepare());
+//$$        }
 //$$        // 输出目标只在这一张 pass 上声明：同一个掩膜、同一批 draw，逐层各开一张 pass 会把开销翻倍
 //$$        try (RenderPass pass = RenderSystem.getDevice()
 //$$                .createCommandEncoder()
@@ -272,7 +285,7 @@ public final class MaskPostRenderer {
 //$$            for (Map.Entry<Identifier, StagedVertexBuffer.Draw> entry : draws.entrySet()) {
 //$$                StagedVertexBuffer.ExecuteInfo info = captureBuffer.getExecuteInfo(entry.getValue());
 //$$                if (info == null) continue;
-//$$                layer(entry.getKey()).prepare().drawFromBuffer(info, pass);
+//$$                prepared.get(entry.getKey()).drawFromBuffer(info, pass);
 //$$            }
 //$$        }
 //$$    }
