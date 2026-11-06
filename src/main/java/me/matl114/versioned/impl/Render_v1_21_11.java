@@ -1,6 +1,8 @@
 package me.matl114.versioned.impl;
 
 //#if MC >= 260300
+//$$ import com.mojang.renderpearl.api.pipeline.BlendFunction;
+//$$ import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 //$$ import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 //#elseif MC >= 260200
 import com.mojang.blaze3d.PrimitiveTopology;
@@ -114,6 +116,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     public static final RenderPipeline DEBUG_LINES =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
                     .withLocation(Identifier.tryParse("slimefunhelper:pipeline/debug_lines"))
+                    //#if MC >= 260300
+                    //$$ // 26.3 的 LINES_SNIPPET 不再自带颜色目标，必须显式声明；否则主 pass 上 setPipeline 会抛
+                    //$$ .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+                    //#endif
                     // 线层必须留着 LINES 拓扑：LINES 不是 GL_LINES，而是把每条线段的两个顶点
                     // 各自复制一份（BufferBuilder#endLastVertex），再按 4 顶点 → 2 三角形展开
                     // （indexCount = n/4*6）；rendertype_lines 的顶点着色器正是用 gl_VertexID 的奇偶
@@ -158,6 +164,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     public static final RenderPipeline ESP_TRACE_LINES_PIPELINE =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
                     .withLocation(Identifier.tryParse("slimefunhelper:pipeline/esp_trace_lines"))
+                    //#if MC >= 260300
+                    //$$ // 26.3 的 LINES_SNIPPET 不再自带颜色目标，必须显式声明；否则主 pass 上 setPipeline 会抛
+                    //$$ .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+                    //#endif
                     .withDepthStencilState(NO_DEPTH_TEST_STATE)
                     .withCull(false)
                     //#if MC >= 260200
@@ -187,6 +197,10 @@ public class Render_v1_21_11 implements VRender, VRender.WrapRenderOperation {
     public static final RenderPipeline DEBUG_LINES_STRIP =
             RenderPipelines.register(RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
                     .withLocation(Identifier.tryParse("slimefunhelper:pipeline/debug_lines_strip"))
+                    //#if MC >= 260300
+                    //$$ // 26.3 的 LINES_SNIPPET 不再自带颜色目标，必须显式声明；否则主 pass 上 setPipeline 会抛
+                    //$$ .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+                    //#endif
                     .withDepthStencilState(NO_DEPTH_TEST_STATE)
                     //#if MC >= 260200
                     .withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH)
