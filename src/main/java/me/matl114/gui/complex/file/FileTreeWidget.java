@@ -4,6 +4,7 @@ import static me.matl114.managers.input.KeyCode.KEY_DELETE;
 import static me.matl114.managers.input.KeyCode.KEY_ENTER;
 import static me.matl114.managers.input.KeyCode.KEY_KP_ENTER;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -60,7 +61,6 @@ import net.minecraft.util.Util;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
-import org.lwjgl.glfw.GLFW;
 
 /** File display and single selection. All public methods must be called on the client thread. */
 public class FileTreeWidget extends SubScreenWidget {
@@ -317,7 +317,7 @@ public class FileTreeWidget extends SubScreenWidget {
                 cancelRename(edit);
                 return false;
             }
-            if (event.context().action() == GLFW.GLFW_PRESS && !isInsideRenameInput(edit)) {
+            if (event.context().action() == InputConstants.PRESS && !isInsideRenameInput(edit)) {
                 finishRename(edit);
                 return false;
             }

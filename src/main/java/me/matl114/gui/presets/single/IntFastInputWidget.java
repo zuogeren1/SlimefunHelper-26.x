@@ -1,5 +1,6 @@
 package me.matl114.gui.presets.single;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.function.Consumer;
 import lombok.Setter;
 import lombok.experimental.Accessors;
@@ -15,7 +16,6 @@ import me.matl114.utils.config.kv.AttrKeyValues;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
-import org.lwjgl.glfw.GLFW;
 
 @Accessors(chain = true)
 public class IntFastInputWidget extends SubScreenWidget {
@@ -160,7 +160,7 @@ public class IntFastInputWidget extends SubScreenWidget {
                         .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
                                 "widget.gui.int-fast-input-widget.confirm.tooltips", "")))
                         .withInputHandler(InputHandler.keyPress(((el, keycode) -> {
-                            if (keycode == GLFW.GLFW_KEY_ENTER) {
+                            if (keycode == InputConstants.KEY_RETURN) {
                                 callback();
                                 return true;
                             }

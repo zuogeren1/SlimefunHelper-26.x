@@ -2,6 +2,7 @@ package me.matl114.managers.input;
 
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -14,7 +15,6 @@ import me.matl114.events.impl.MouseClickAction;
 import me.matl114.events.impl.MouseScrollAction;
 import me.matl114.managers.InputState;
 import net.minecraft.client.Minecraft;
-import org.lwjgl.glfw.GLFW;
 
 public class SimpleInputManager implements IInputManager {
     protected static final SimpleInputManager instance = new SimpleInputManager();
@@ -74,8 +74,8 @@ public class SimpleInputManager implements IInputManager {
     }
 
     public boolean onKeyInputPre(int keyCode, int scanCode, int modifiers, int action) {
-        if (keyCode != -1) {
-            boolean pressed = action != GLFW.GLFW_RELEASE;
+        if (keyCode != KeyCode.KEY_NONE) {
+            boolean pressed = action != InputConstants.RELEASE;
             InputState state = getKeyStateOrCreate(keyCode);
             if (pressed) {
 
@@ -104,7 +104,7 @@ public class SimpleInputManager implements IInputManager {
         boolean canceled = hardWareInput.isCancelled();
 
         // will trigger Click handler
-        boolean isKeyClicking = action != GLFW.GLFW_RELEASE;
+        boolean isKeyClicking = action != InputConstants.RELEASE;
         canceled = checkKeyBindsForChanges(keyCode, stateChange, isKeyClicking) || canceled;
 
         return canceled;
@@ -114,7 +114,7 @@ public class SimpleInputManager implements IInputManager {
         boolean cancel = false;
         int transferedKeyCode = KeyCode.getKeyCodeFromMouseAction(eventButton);
         if (eventButton != -1) {
-            boolean isMouseClicked = action == GLFW.GLFW_PRESS;
+            boolean isMouseClicked = action == InputConstants.PRESS;
             // Update the cached pressed keys status
             boolean stateChange = onKeyInputPre(transferedKeyCode, 0, 0, action);
             Event<MouseClickAction> hardWareInput =

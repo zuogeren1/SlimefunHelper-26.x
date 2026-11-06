@@ -1,5 +1,6 @@
 package me.matl114.hacks.modules.inv;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import me.matl114.utils.ClientUtils;
 
 import me.matl114.events.Event;
@@ -25,7 +26,6 @@ import net.minecraft.client.gui.screens.inventory.CommandBlockEditScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.SignEditScreen;
 import net.minecraft.client.gui.screens.inventory.StructureBlockEditScreen;
-import org.lwjgl.glfw.GLFW;
 
 public class GuiMove extends BaseModule {
     public GuiMove() {
@@ -101,10 +101,10 @@ public class GuiMove extends BaseModule {
         if (keyBinding.key.getValue() != keyCode) {
             return false;
         }
-        if (action == GLFW.GLFW_PRESS) {
+        if (action == InputConstants.PRESS) {
             keyBinding.setDown(true);
             return true;
-        } else if (action == GLFW.GLFW_RELEASE) {
+        } else if (action == InputConstants.RELEASE) {
             keyBinding.setDown(false);
             return true;
         }

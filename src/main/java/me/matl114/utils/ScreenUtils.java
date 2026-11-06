@@ -9,6 +9,7 @@ import javax.annotation.Nonnull;
 import me.matl114.accessors.access.HandledScreenAccess;
 import me.matl114.events.Listener;
 import me.matl114.events.catchers.PacketCatcherImpl;
+import me.matl114.managers.input.KeyCode;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.utils.collections.Point;
 import net.minecraft.CrashReport;
@@ -125,31 +126,27 @@ public class ScreenUtils {
     }
 
     public static boolean hasShiftDown() {
-        return InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 340)
-                || InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 344);
+        return KeyCode.isKeyDown(KeyCode.KEY_LEFT_SHIFT) || KeyCode.isKeyDown(KeyCode.KEY_RIGHT_SHIFT);
     }
 
     public static boolean hasCtrlDown() {
-        return InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 341)
-                || InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 345);
+        return KeyCode.isKeyDown(KeyCode.KEY_LEFT_CONTROL) || KeyCode.isKeyDown(KeyCode.KEY_RIGHT_CONTROL);
     }
 
     public static boolean hasAltDown() {
-        return InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 342)
-                || InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 346);
+        return KeyCode.isKeyDown(KeyCode.KEY_LEFT_ALT) || KeyCode.isKeyDown(KeyCode.KEY_RIGHT_ALT);
     }
 
     public static boolean hasEnterDown() {
-        return InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 257)
-                || InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 355);
+        return KeyCode.isKeyDown(KeyCode.KEY_ENTER) || KeyCode.isKeyDown(355);
     }
 
     public static boolean hasKeyPressed(int keyCode) {
-        return InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), keyCode);
+        return KeyCode.isKeyDown(keyCode);
     }
 
     public static boolean isToggle(int keyCode) {
-        return keyCode == 257 || keyCode == 32 || keyCode == 335;
+        return keyCode == KeyCode.KEY_ENTER || keyCode == KeyCode.KEY_SPACE || keyCode == KeyCode.KEY_KP_ENTER;
     }
 
     public static final Map<MenuType<?>, Integer> nonPlayerSlots = Map.ofEntries(
@@ -203,55 +200,40 @@ public class ScreenUtils {
     }
 
     public static int getCurrentModifiers() {
-        var windowHandle = mc.getWindow().handle();
-        if (windowHandle == 0) {
+        if (mc.getWindow().handle() == 0) {
             return 0;
         }
 
         int modifiers = 0;
 
         // 检查 Shift 键
-        if (org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SHIFT)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS
-                || org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
-            modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT;
+        if (KeyCode.isKeyDown(KeyCode.KEY_LEFT_SHIFT) || KeyCode.isKeyDown(KeyCode.KEY_RIGHT_SHIFT)) {
+            modifiers |= InputConstants.MOD_SHIFT;
         }
 
         // 检查 Control 键
-        if (org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_CONTROL)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS
-                || org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_CONTROL)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
-            modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
+        if (KeyCode.isKeyDown(KeyCode.KEY_LEFT_CONTROL) || KeyCode.isKeyDown(KeyCode.KEY_RIGHT_CONTROL)) {
+            modifiers |= InputConstants.MOD_CONTROL;
         }
 
         // 检查 Alt 键
-        if (org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_ALT)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS
-                || org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_ALT)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
-            modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_ALT;
+        if (KeyCode.isKeyDown(KeyCode.KEY_LEFT_ALT) || KeyCode.isKeyDown(KeyCode.KEY_RIGHT_ALT)) {
+            modifiers |= InputConstants.MOD_ALT;
         }
 
         // 检查 Windows/Command 键
-        if (org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SUPER)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS
-                || org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SUPER)
-                        == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
-            modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER;
+        if (KeyCode.isKeyDown(KeyCode.KEY_LEFT_SUPER) || KeyCode.isKeyDown(KeyCode.KEY_RIGHT_SUPER)) {
+            modifiers |= InputConstants.MOD_SUPER;
         }
 
         // 检查 Caps Lock
-        if (org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_CAPS_LOCK)
-                == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
-            modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_CAPS_LOCK;
+        if (KeyCode.isKeyDown(KeyCode.KEY_CAPS_LOCK)) {
+            modifiers |= InputConstants.MOD_CAPS_LOCK;
         }
 
         // 检查 Num Lock
-        if (org.lwjgl.glfw.GLFW.glfwGetKey(windowHandle, org.lwjgl.glfw.GLFW.GLFW_KEY_NUM_LOCK)
-                == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
-            modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_NUM_LOCK;
+        if (KeyCode.isKeyDown(KeyCode.KEY_NUM_LOCK)) {
+            modifiers |= InputConstants.MOD_NUM_LOCK;
         }
 
         return modifiers;
@@ -276,22 +258,22 @@ public class ScreenUtils {
     public static void simulateKeyAction(Screen screen, int key, int scancode, int action, int modifiers) {
         if (screen != null) {
             switch (key) {
-                case 258:
+                case KeyCode.KEY_TAB:
                     mc.setLastInputType(InputType.KEYBOARD_TAB);
-                case 259:
-                case 260:
-                case 261:
+                case KeyCode.KEY_BACKSPACE:
+                case KeyCode.KEY_INSERT:
+                case KeyCode.KEY_DELETE:
                 default:
                     break;
-                case 262:
-                case 263:
-                case 264:
-                case 265:
+                case KeyCode.KEY_RIGHT:
+                case KeyCode.KEY_LEFT:
+                case KeyCode.KEY_DOWN:
+                case KeyCode.KEY_UP:
                     mc.setLastInputType(InputType.KEYBOARD_ARROW);
             }
         }
         KeyEvent keyInput = new KeyEvent(key, scancode, modifiers);
-        if (action == 1
+        if (action == InputConstants.PRESS
                 && (!(screen instanceof KeyBindsScreen)
                         || ((KeyBindsScreen) screen).lastKeySelection <= Util.getMillis() - 20L)) {
             if (mc.options.keyFullscreen.matches(keyInput)) {
@@ -307,8 +289,8 @@ public class ScreenUtils {
             boolean[] bls = new boolean[] {false};
             wrapScreenError(
                     () -> {
-                        if (action != 1 && action != 2) {
-                            if (action == 0) {
+                        if (action != InputConstants.PRESS && action != InputConstants.REPEAT) {
+                            if (action == InputConstants.RELEASE) {
                                 bls[0] = screen.keyReleased(keyInput);
                             }
                         } else {
@@ -357,11 +339,11 @@ public class ScreenUtils {
         }
 
         boolean bl4 = var10000;
-        if (action == 0) {
+        if (action == InputConstants.RELEASE) {
             KeyMapping.set(key2, false);
 
         } else {
-            boolean bl5 = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), 292);
+            boolean bl5 = KeyCode.isKeyDown(KeyCode.KEY_F3);
 
             if (bl3) {
                 if (bl5) {
@@ -379,9 +361,13 @@ public class ScreenUtils {
             mc.setLastInputType(InputType.MOUSE);
         }
         MouseButtonInfo mouseInput = new MouseButtonInfo(button, mods);
-        boolean bl = action == 1;
+        boolean bl = action == InputConstants.PRESS;
         final MouseHandler mouse = mc.mouseHandler;
+        //#if MC >= 260300
+        //$$ MouseButtonInfo i = mouseInput;
+        //#else
         MouseButtonInfo i = mouse.simulateRightClick(mouseInput, bl);
+        //#endif
         if (bl) {
 
             mouse.activeButton = i;

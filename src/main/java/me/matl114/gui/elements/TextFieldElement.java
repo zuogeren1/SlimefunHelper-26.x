@@ -1,5 +1,6 @@
 package me.matl114.gui.elements;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
@@ -32,7 +33,6 @@ import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.minecraft.util.StringUtil;
 import net.minecraft.util.Util;
-import org.lwjgl.glfw.GLFW;
 
 @Accessors(chain = true)
 public class TextFieldElement extends AbstractElement implements InputElement, TextFieldAccess {
@@ -446,15 +446,15 @@ public class TextFieldElement extends AbstractElement implements InputElement, T
         boolean ctrlOrCmd = hasCtrlOrCmd(modifiers);
         boolean shift = hasShift(modifiers);
         switch (keyCode) {
-            case GLFW.GLFW_KEY_BACKSPACE -> {
+            case InputConstants.KEY_BACKSPACE -> {
                 this.erase(-1, ctrlOrCmd);
                 return true;
             }
-            case GLFW.GLFW_KEY_DELETE -> {
+            case InputConstants.KEY_DELETE -> {
                 this.erase(1, ctrlOrCmd);
                 return true;
             }
-            case GLFW.GLFW_KEY_RIGHT -> {
+            case InputConstants.KEY_RIGHT -> {
                 if (ctrlOrCmd) {
                     this.setCursor(this.getWordSkipPosition(1), shift);
                 } else {
@@ -462,7 +462,7 @@ public class TextFieldElement extends AbstractElement implements InputElement, T
                 }
                 return true;
             }
-            case GLFW.GLFW_KEY_LEFT -> {
+            case InputConstants.KEY_LEFT -> {
                 if (ctrlOrCmd) {
                     this.setCursor(this.getWordSkipPosition(-1), shift);
                 } else {
@@ -470,29 +470,29 @@ public class TextFieldElement extends AbstractElement implements InputElement, T
                 }
                 return true;
             }
-            case GLFW.GLFW_KEY_HOME -> {
+            case InputConstants.KEY_HOME -> {
                 this.setCursor(0, shift);
                 return true;
             }
-            case GLFW.GLFW_KEY_END -> {
+            case InputConstants.KEY_END -> {
                 this.setCursor(this.getText().length(), shift);
                 return true;
             }
             default -> {
-                if (ctrlOrCmd && keyCode == GLFW.GLFW_KEY_A) {
+                if (ctrlOrCmd && keyCode == InputConstants.KEY_A) {
                     this.setCursor(this.getText().length(), false);
                     this.setSelectionEnd(0);
                     return true;
                 }
-                if (ctrlOrCmd && keyCode == GLFW.GLFW_KEY_C) {
+                if (ctrlOrCmd && keyCode == InputConstants.KEY_C) {
                     mc.keyboardHandler.setClipboard(this.getSelectedText());
                     return true;
                 }
-                if (ctrlOrCmd && keyCode == GLFW.GLFW_KEY_V) {
+                if (ctrlOrCmd && keyCode == InputConstants.KEY_V) {
                     this.write(mc.keyboardHandler.getClipboard());
                     return true;
                 }
-                if (ctrlOrCmd && keyCode == GLFW.GLFW_KEY_X) {
+                if (ctrlOrCmd && keyCode == InputConstants.KEY_X) {
                     mc.keyboardHandler.setClipboard(this.getSelectedText());
                     this.write("");
                     return true;
@@ -819,11 +819,11 @@ public class TextFieldElement extends AbstractElement implements InputElement, T
     }
 
     protected boolean hasCtrlOrCmd(int modifiers) {
-        return (modifiers & GLFW.GLFW_MOD_CONTROL) != 0 || (modifiers & GLFW.GLFW_MOD_SUPER) != 0;
+        return (modifiers & InputConstants.MOD_CONTROL) != 0 || (modifiers & InputConstants.MOD_SUPER) != 0;
     }
 
     protected boolean hasShift(int modifiers) {
-        return (modifiers & GLFW.GLFW_MOD_SHIFT) != 0;
+        return (modifiers & InputConstants.MOD_SHIFT) != 0;
     }
 
     @FunctionalInterface

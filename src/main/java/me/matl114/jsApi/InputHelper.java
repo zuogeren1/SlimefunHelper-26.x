@@ -1,5 +1,6 @@
 package me.matl114.jsApi;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import me.matl114.utils.ClientUtils;
 
 import me.matl114.managers.input.KeyCode;
@@ -20,39 +21,39 @@ public class InputHelper {
         return mc.keyboardHandler;
     }
 
-    public static Class<?> GLFW = org.lwjgl.glfw.GLFW.class;
+    public static Class<?> INPUT_CONSTANTS = InputConstants.class;
 
     public static void keyAction(int key, int action) {
         keyAction(key, action, ScreenUtils.getCurrentModifiers());
     }
 
     public static void keyAction(int key, int action, int modifiers) {
-        keyAction(key, org.lwjgl.glfw.GLFW.glfwGetKeyScancode(key), action, modifiers);
+        keyAction(key, KeyCode.getKeyEventSecondaryCode(key), action, modifiers);
     }
     /**
-     * 处理GLFW键盘按键事件的方法。
-     * @param key       按键的GLFW常量键值。表示具体的按键标识符，如{@code org.lwjgl.glfw.GLFW.GLFW_KEY_A}、
-     *                  {@code org.lwjgl.glfw.GLFW.GLFW_KEY_SPACE}等。这些常量定义了键盘上每个按键的唯一标识。
-     * @param scancode  按键的物理扫描码。这是由键盘硬件生成的原始值，表示按键在键盘上的物理位置。
-     *                  与操作系统和键盘布局无关，同一物理按键在不同键盘布局下具有相同的扫描码。
-     *                  例如，QWERTY键盘的"A"键和AZERTY键盘的"Q"键（物理位置相同）具有相同的扫描码。
+     * 处理键盘按键事件的方法。
+     * @param key       按键的键值常量，如{@code InputConstants.KEY_A}、
+     *                  {@code InputConstants.KEY_SPACE}等。这些常量定义了键盘上每个按键的唯一标识。
+     * @param scancode  按键的次级标识，取值由{@code KeyCode#getKeyEventSecondaryCode}按版本给出：
+     *                  26.2 是物理扫描码，由键盘硬件生成，与操作系统和键盘布局无关（QWERTY的"A"键和AZERTY的"Q"键物理位置相同，扫描码也相同）；
+     *                  26.3 是键码，因为那边的键值本身就是扫描码。
      * @param action    按键动作类型。指示按键是被按下、释放还是重复触发。
      *                  可能的取值：
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_PRESS}   (1): 按键被按下
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_RELEASE} (0): 按键被释放
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_REPEAT}  (2): 按键被按住并重复触发
+     *                  - {@code InputConstants.PRESS}   (1): 按键被按下
+     *                  - {@code InputConstants.RELEASE} (0): 按键被释放
+     *                  - {@code InputConstants.REPEAT}: 按键被按住并重复触发（两版取值不同，不要按字面量比较）
      *
      * @param modifiers 修饰键的状态标志位。表示事件发生时哪些修饰键被同时按住。
      *                  这是一个按位组合的标志，可以通过位运算检查各个修饰键的状态。
      *                  常用修饰键常量：
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT}:     Shift键被按住
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL}:   Ctrl键被按住
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_MOD_ALT}:       Alt/Option键被按住
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER}:     Windows/Command键被按住
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_MOD_CAPS_LOCK}: 大写锁定开启
-     *                  - {@code org.lwjgl.glfw.GLFW.GLFW_MOD_NUM_LOCK}:  数字锁定开启
+     *                  - {@code InputConstants.MOD_SHIFT}:     Shift键被按住
+     *                  - {@code InputConstants.MOD_CONTROL}:   Ctrl键被按住
+     *                  - {@code InputConstants.MOD_ALT}:       Alt/Option键被按住
+     *                  - {@code InputConstants.MOD_SUPER}:     Windows/Command键被按住
+     *                  - {@code InputConstants.MOD_CAPS_LOCK}: 大写锁定开启
+     *                  - {@code InputConstants.MOD_NUM_LOCK}:  数字锁定开启
      *                  示例：检查Ctrl+Shift组合
-     *                  {@code if ((modifiers & (GLFW_MOD_CONTROL | GLFW_MOD_SHIFT)) != 0)}
+     *                  {@code if ((modifiers & (InputConstants.MOD_CONTROL | InputConstants.MOD_SHIFT)) != 0)}
      *
      * @threadSafety 内部会自动切换到Minecraft主线程执行。
      */
@@ -120,22 +121,22 @@ public class InputHelper {
     }
 
     public static boolean hasShiftDown() {
-        return SimpleInputManager.getInstance().isKeyPressed(340)
-                || SimpleInputManager.getInstance().isKeyPressed(344);
+        return SimpleInputManager.getInstance().isKeyPressed(KeyCode.KEY_LEFT_SHIFT)
+                || SimpleInputManager.getInstance().isKeyPressed(KeyCode.KEY_RIGHT_SHIFT);
     }
 
     public static boolean hasCtrlDown() {
-        return SimpleInputManager.getInstance().isKeyPressed(341)
-                || SimpleInputManager.getInstance().isKeyPressed(345);
+        return SimpleInputManager.getInstance().isKeyPressed(KeyCode.KEY_LEFT_CONTROL)
+                || SimpleInputManager.getInstance().isKeyPressed(KeyCode.KEY_RIGHT_CONTROL);
     }
 
     public static boolean hasAltDown() {
-        return SimpleInputManager.getInstance().isKeyPressed(342)
-                || SimpleInputManager.getInstance().isKeyPressed(346);
+        return SimpleInputManager.getInstance().isKeyPressed(KeyCode.KEY_LEFT_ALT)
+                || SimpleInputManager.getInstance().isKeyPressed(KeyCode.KEY_RIGHT_ALT);
     }
 
     public static boolean hasEnterDown() {
-        return SimpleInputManager.getInstance().isKeyPressed(257)
+        return SimpleInputManager.getInstance().isKeyPressed(KeyCode.KEY_ENTER)
                 || SimpleInputManager.getInstance().isKeyPressed(355);
     }
 
