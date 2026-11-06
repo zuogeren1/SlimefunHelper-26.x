@@ -76,7 +76,13 @@ public abstract class GuiScreenEvents implements GuiScreenAccess {
                             //#else
                             //$$ target = "Lnet/minecraft/client/Minecraft;screen:Lnet/minecraft/client/gui/screens/Screen;",
                             //#endif
+                            //#if MC >= 260300
+                            //$$ // 26.3 的 setScreen 在赋值前还读了三次 this.screen（clearFocus/removed），
+                            //$$ // 写入是第 4 次访问，所以这里要 ordinal = 3 才是「赋值之后」。
+                            //$$ ordinal = 3,
+                            //#else
                             ordinal = 2,
+                            //#endif
                             shift = At.Shift.AFTER),
             cancellable = true)
     public void onMidSetScreen(Screen screen, CallbackInfo ci) {
