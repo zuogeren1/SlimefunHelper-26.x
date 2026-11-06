@@ -42,8 +42,15 @@ public abstract class GameRendererEvents {
      * <p>合成必须发生在 GUI 之后：26.x 的 2D 事件在 {@code extractRenderState} 阶段广播，
      * 那时 GUI 还没真正画，而掩膜合成是一个独立的 {@code RenderPass}，只能在这里发。
      */
+    //#if MC >= 260300
+    //$$ @Inject(method = "render", at = @At("RETURN"))
+    //$$ private void onFrameEnd(CallbackInfo ci) {
+    //$$     MaskPostRenderer.flush();
+    //$$ }
+    //#else
     @Inject(method = "render", at = @At("RETURN"))
     private void onFrameEnd(DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
         MaskPostRenderer.flush();
     }
+    //#endif
 }
