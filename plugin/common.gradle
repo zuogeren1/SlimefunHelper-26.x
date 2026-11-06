@@ -90,14 +90,19 @@ tasks.named('compileJava') {
 	doFirst { ensureHostJar() }
 }
 
+// expand(...) 的实参在**执行期**才被读；闭包里再碰 project 会被配置缓存判为
+// 「引用脚本对象」并让 processResources 失败（和宿主 common.gradle 同一处类型的问题）。
+def pluginResourcesVersion = project.mod_version
+def pluginResourcesMinecraftVersion = project.minecraft_version
+
 processResources {
-	inputs.property "version", project.mod_version
-	inputs.property "minecraft_version", project.minecraft_version
+	inputs.property "version", pluginResourcesVersion
+	inputs.property "minecraft_version", pluginResourcesMinecraftVersion
 
 	filesMatching("fabric.mod.json") {
 		expand(
-				"version": project.mod_version,
-				"minecraft_version": project.minecraft_version
+				"version": pluginResourcesVersion,
+				"minecraft_version": pluginResourcesMinecraftVersion
 		)
 	}
 }
