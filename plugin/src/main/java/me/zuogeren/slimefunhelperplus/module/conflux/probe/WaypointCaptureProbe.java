@@ -35,9 +35,10 @@ import net.minecraft.world.level.Level;
  * 点有多少、长什么样（名字/坐标/颜色/是否临时）、什么时候被删。渲染是下一步的事，
  * 因为坐标尺度与颜色映射都还没实测过。
  *
- * <p><b>默认不动别人的数据</b>：开关默认关，关掉即还原成原来的 hooks 实例。开启期间 SFH 的临时点
- * 不再进 Xaero 的路径点集合（被本探针接管），所以装 Xaero 的实例上打开它会在日志里留一条 WARN ——
- * 这是验证期有意的行为，不改 Xaero 已有的任何路径点，关掉开关立刻恢复。
+ * <p><b>默认不动别人的数据</b>：捕获开关默认关，关掉即还原成原来的 hooks 实例；路径点模式只在
+ * conflux 可用时才会装上它（那时点本来就该进 conflux）。开启期间 SFH 的临时点不再进 Xaero 的路径点集合
+ * （被本探针接管），所以装 Xaero 的实例上会在日志里留一条 WARN —— 不改 Xaero 已有的任何路径点，
+ * 关掉开关立刻恢复。
  *
  * <p><b>副作用（预期内）</b>：宿主 {@code XaeroHelper.onXaeroTempWaypointSync()} 会以为小地图在，
  * 于是「同步旅行目标」那条也会跑起来，把 {@code [SFH] Travel} 提交到这里。这不影响玩家看到的东西
@@ -78,7 +79,9 @@ public final class WaypointCaptureProbe {
     /**
      * 把 {@code XaeroHooks#minimap} 换成捕获桩。
      *
-     * <p>幂等：已经装上就直接返回。真 Xaero 小地图在场时照样接管（验证期需要），但会在日志里留 WARN；
+     * <p>幂等：已经装上就直接返回。真 Xaero 小地图在场时照样接管 —— 捕获开关是验证期需要，
+     * 路径点模式（且 conflux 在场）则是「点本来就该改去 conflux」的正常路径；两种情况都会在日志里留
+     * WARN，因为代价是 SFH 的临时点不再进 Xaero。conflux 不在时上层不会调进来，避免白白接管。
      * 失败只记一次，不按 tick 重试。
      */
     public boolean install() {

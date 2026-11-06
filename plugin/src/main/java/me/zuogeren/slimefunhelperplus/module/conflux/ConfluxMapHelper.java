@@ -310,8 +310,13 @@ public class ConfluxMapHelper extends BaseModule {
      */
     public void onPostGameTick(Event<LocalPlayer> event) {
         // 探针与 loadedChunkRender 无关，但必须放在它那个提前返回之前，否则关掉区块渲染就收不到样本。
-        // 捕获是两个开关共用的底座：只要有一个要，就得装。
-        boolean wantCapture = waypointCapture.get() || waypointMarkers.get();
+        // 捕获是所有下游开关共用的底座：只要有一个要，就得装。
+        // 路径点模式也必须算上 —— 探针是点的唯一来源，不装的话默认配置下什么都写不出来。
+        // 但它只在 conflux 可用时才算：conflux 不在时接管探针只会让装 Xaero 的玩家
+        // 白白失去 Xaero 侧的 SFH 点，换不来任何东西。
+        boolean wantCapture = waypointCapture.get()
+                || waypointMarkers.get()
+                || (waypointMode.get() && ConfluxMapHooks.getInstance().isEnabled());
         if (wantCapture) {
             waypointProbe.install();
         } else {
