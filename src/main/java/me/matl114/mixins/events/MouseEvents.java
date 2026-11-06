@@ -101,6 +101,15 @@ public abstract class MouseEvents {
                                     //#endif
                             ordinal = 0,
                             shift = At.Shift.BEFORE))
+    //#if MC >= 260300
+    //$$ private void onMouseClick(long window, MouseButtonInfo input, int action, CallbackInfo ci) {
+    //$$     Point coord = ScreenUtils.getMouseCoord(this.minecraft, (MouseHandler) (Object) this);
+    //$$     if (SimpleInputManager.getInstance()
+    //$$             .onMouseClick(coord.x, coord.y, input.button(), action, input.modifiers())) {
+    //$$         ci.cancel();
+    //$$     }
+    //$$ }
+    //#else
     private void onMouseClick(
             long window,
             MouseButtonInfo input,
@@ -113,6 +122,7 @@ public abstract class MouseEvents {
             ci.cancel();
         }
     }
+    //#endif
 
     @WrapOperation(
             method = "handleAccumulatedMovement",
