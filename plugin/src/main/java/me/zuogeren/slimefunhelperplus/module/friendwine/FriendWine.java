@@ -145,7 +145,9 @@ public class FriendWine extends BaseModule {
         double vertical = 1.0D + stretchAmplitude.get() * wave;
         float horizontal = (float) (1.0D / Math.sqrt(vertical));
         float spin = (float) ((seconds * spinSpeed.get()) % 360.0D);
-        poseStack.mulPose(Axis.YP.rotationDegrees(spin));
+        // 26.3 把 PoseStack.mulPose(Quaternionfc) 改名为 rotate；两者内部都是 last().rotate(by)，
+        // 走 last().pose() 可以让插件三个版本共用一份源码，不必引入 //#if。
+        poseStack.last().pose().rotate(Axis.YP.rotationDegrees(spin));
         poseStack.scale(horizontal, (float) vertical, horizontal);
     }
 
