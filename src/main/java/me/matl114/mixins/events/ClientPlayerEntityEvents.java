@@ -23,6 +23,9 @@ import net.minecraft.client.multiplayer.chat.ChatAbilities;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
+//#if MC >= 260300
+//$$ import net.minecraft.client.player.ItemActivation;
+//#endif
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
 import net.minecraft.stats.StatsCounter;
@@ -138,6 +141,20 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
         this.positionReminder = ticks;
     }
 
+    //#if MC >= 260300
+    //$$ @Inject(method = "<init>", at = @At("RETURN"))
+    //$$ private void onClientPlayerInitConfiguration(
+    //$$         Minecraft client,
+    //$$         ClientLevel world,
+    //$$         ClientPacketListener networkHandler,
+    //$$         StatsCounter stats,
+    //$$         ClientRecipeBook recipeBook,
+    //$$         Input lastPlayerInput,
+    //$$         boolean lastSprinting,
+    //$$         ChatAbilities abilities,
+    //$$         ItemActivation itemActivation,
+    //$$         CallbackInfo ci) {
+    //#else
     @Inject(method = "<init>", at = @At("RETURN"))
     private void onClientPlayerInitConfiguration(
             Minecraft client,
@@ -149,6 +166,7 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
             boolean lastSprinting,
             ChatAbilities abilities,
             CallbackInfo ci) {
+    //#endif
         this.movementManager = new LegalMovementManager();
     }
 
@@ -322,6 +340,9 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
         return par1;
     }
 
+    //#if MC >= 260300
+    //$$ // 26.3 的丢弃入口在 MultiPlayerGameMode#dropItem（见 MultiPlayerGameModeEvents）
+    //#else
     @Inject(method = "drop(Z)Z", at = @At("HEAD"), cancellable = true)
     private void onDropSelected(boolean entireStack, CallbackInfoReturnable<Boolean> cir) {
         if (checkClientPlayer()) {
@@ -330,6 +351,7 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
             }
         }
     }
+    //#endif
 
     @Inject(method = "closeContainer", at = @At("HEAD"), cancellable = true)
     private void onCloseHandledScreen(CallbackInfo ci) {

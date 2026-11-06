@@ -23,8 +23,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(LocalPlayer.class)
 public abstract class BaritoneClientPlayerEntityRotFixMixin extends AbstractClientPlayer
         implements ClientPlayerEntityAccess {
+    //#if MC >= 260300
+    //$$ // 26.3 起 LocalPlayer 不再覆写 getViewXRot（在 Entity 上）；@Shadow 只解析目标类自身声明的成员
+    //#else
     @Shadow
     public abstract float getViewXRot(float tickProgress);
+    //#endif
 
     @Shadow
     public abstract float getViewYRot(float tickProgress);

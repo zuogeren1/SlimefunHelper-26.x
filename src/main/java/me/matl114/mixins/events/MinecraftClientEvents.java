@@ -52,6 +52,11 @@ public abstract class MinecraftClientEvents {
     @Shadow
     public abstract void tick();
 
+    //#if MC >= 260300
+    //$$ @Shadow
+    //$$ public abstract DeltaTracker getDeltaTracker();
+    //#endif
+
     @Shadow
     @Nullable
     public LocalPlayer player;
@@ -82,6 +87,18 @@ public abstract class MinecraftClientEvents {
     }
 
     // 26.2: GameRenderer.render(DeltaTracker, boolean) 的调用点从 runTick 搬到了 renderFrame
+    //#if MC >= 260300
+    //$$ // 26.3 GameRenderer.render() 无参：DeltaTracker 改从 Minecraft#getDeltaTracker() 取，调用点
+    //$$ // 已没有 advanceGameTime，Event 的 extraArgs 只保留 DeltaTracker（消费者只读 getArgs(0)）
+    //$$ @WrapWithCondition(
+    //$$         method = "renderFrame",
+    //$$         at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/GameRenderer;render()V"))
+    //$$ private boolean onGameRenderer(GameRenderer instance) {
+    //$$     Event<GameRenderer> rendererEvent = new Event<>(instance, true, false, getDeltaTracker());
+    //$$     Listener.getGameRender().handleValue(rendererEvent);
+    //$$     return !rendererEvent.isCancelled();
+    //$$ }
+    //#else
     @WrapWithCondition(
             method = "renderFrame",
             at =
@@ -94,6 +111,7 @@ public abstract class MinecraftClientEvents {
         Listener.getGameRender().handleValue(rendererEvent);
         return !rendererEvent.isCancelled();
     }
+    //#endif
 
     @WrapOperation(
             method = "emergencySaveAndCrash(Lnet/minecraft/CrashReport;)V",
