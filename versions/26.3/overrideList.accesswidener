@@ -37,7 +37,6 @@ accessible	field	net/minecraft/client/multiplayer/ClientChunkCache$Storage	chunk
 accessible	field	net/minecraft/client/gui/components/AbstractScrollArea	scrolling	Z
 accessible	field	net/minecraft/network/Connection	channel	Lio/netty/channel/Channel;
 accessible	field	net/minecraft/client/MouseHandler	activeButton	Lnet/minecraft/client/input/MouseButtonInfo;
-accessible	method	net/minecraft/client/MouseHandler	simulateRightClick	(Lnet/minecraft/client/input/MouseButtonInfo;Z)Lnet/minecraft/client/input/MouseButtonInfo;
 accessible	field	net/minecraft/client/MouseHandler	lastClick	Lnet/minecraft/client/MouseHandler$LastClick;
 accessible	class	net/minecraft/client/MouseHandler$LastClick
 accessible	field	net/minecraft/client/MouseHandler	lastClickButton	I
@@ -80,7 +79,6 @@ accessible	method	net/minecraft/world/entity/animal/feline/Ocelot	isTrusting	()Z
 accessible	field	net/minecraft/client/KeyMapping	clickCount	I
 accessible	field	net/minecraft/client/particle/ParticleResources	spriteSets	Ljava/util/Map;
 accessible	class	net/minecraft/client/particle/ParticleResources$MutableSpriteSet
-accessible	field	net/minecraft/world/level/storage/loot/predicates/CompositeLootItemCondition	terms	Ljava/util/List;
 accessible	method	net/minecraft/world/entity/LivingEntity	checkTotemDeathProtection	(Lnet/minecraft/world/damagesource/DamageSource;)Z
 accessible	method	net/minecraft/world/entity/player/Player	createAttackSource	(Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/world/damagesource/DamageSource;
 accessible	field	net/minecraft/world/entity/Entity	stuckSpeedMultiplier	Lnet/minecraft/world/phys/Vec3;
@@ -94,7 +92,7 @@ accessible	field	net/minecraft/client/particle/ParticleEngine	resourceManager	Ln
 accessible	field	net/minecraft/client/renderer/GameRenderer	globalSettingsUniform	Lnet/minecraft/client/renderer/GlobalSettingsUniform;
 accessible	field	net/minecraft/client/gui/Gui	clientLevelTeardownInProgress	Z
 accessible	field	net/minecraft/client/gui/GuiGraphicsExtractor	deferredTooltip	Ljava/lang/Runnable;
-accessible	method	net/minecraft/client/gui/GuiGraphicsExtractor	innerBlit	(Lcom/mojang/blaze3d/pipeline/RenderPipeline;Lnet/minecraft/resources/Identifier;IIIIFFFFI)V
+accessible	method	net/minecraft/client/gui/GuiGraphicsExtractor	innerBlit	(Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;Lnet/minecraft/resources/Identifier;IIIIFFFFI)V
 accessible	field	net/minecraft/advancements/predicates/entity/EntityPredicate	parts	Ljava/util/Map;
 accessible	field	net/minecraft/client/gui/GuiGraphicsExtractor	guiSprites	Lnet/minecraft/client/renderer/texture/TextureAtlas;
 accessible	field	net/minecraft/core/cauldron/CauldronInteraction$Dispatcher	items	Ljava/util/Map;
