@@ -2,6 +2,7 @@ package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.lang.reflect.RecordComponent;
 import java.util.Iterator;
@@ -106,6 +107,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 每个配置项的文本读写句柄：createKeyValue 会挂监听，不能每帧重建。 */
     private final Map<WrapperConfigRef<?>, AttrKeyValue<?>> handles = new IdentityHashMap<>();
 
+    /** 没有显式约束的数值，其推导区间只算一次，避免跨数量级时轨道跳档；复合数值按分量分开记。 */
+    private final Map<String, double[]> derivedBounds = new HashMap<>();
+
     /** 一帧内布局出来的行，绘制时写入、点击时读取；坐标为屏幕绝对坐标。 */
     private record Row(int y, int height, WrapperConfigRef<?> ref, String section, boolean header) {}
 
@@ -166,36 +170,61 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 Component.empty());
         box.setBordered(false);
         box.setMaxLength(16);
-        box.setValue(numberText());
-        int part = numberPart;
-        box.setResponder(text -> commitNumber(part, text));
         this.numberBox = box;
-        this.lastNumberKey = System.identityHashCode(numberTarget) + ":" + numberPart + ":" + numberRowY;
+        this.lastNumberKey = numberKey(numberTarget, numberPart, numberRowY);
+        applyNumberText(box, numberTarget, numberPart);
         this.addRenderableWidget(box);
         this.setFocused(box);
     }
 
-    private String numberText() {
-        if (numberTarget == null) {
-            return "";
-        }
-        if (numberPart < 0) {
-            return valueText(numberTarget.ref());
-        }
-        double[] parts = components(numberTarget.ref().getValue());
-        return parts != null && numberPart < parts.length ? formatNumber(parts[numberPart]) : "";
+    private static String numberKey(WrapperConfigRef<?> target, int part, int rowY) {
+        return System.identityHashCode(target) + ":" + part + ":" + rowY;
     }
 
-    private void commitNumber(int part, String text) {
-        if (numberTarget == null) {
+    private String numberTextOf(WrapperConfigRef<?> target, int part) {
+        if (target == null) {
+            return "";
+        }
+        if (part < 0) {
+            return valueText(target.ref());
+        }
+        double[] parts = components(target.ref().getValue());
+        return parts != null && part < parts.length ? formatNumber(parts[part]) : "";
+    }
+
+    /**
+     * 把当前值写进输入框，并把 responder 重新绑到 (目标, 分量) 这一对上。
+     *
+     * <p>{@code EditBox.setValue} 会同步回调 responder，所以程序写值时必须先摘掉 responder：
+     * 否则「切到另一格」会被当成用户输入，把新一格的数值写进旧一格。
+     * responder 里带的也是绑定时的那一对，不受之后字段变化影响。
+     */
+    private void applyNumberText(EditBox box, WrapperConfigRef<?> target, int part) {
+        box.setResponder(null);
+        try {
+            String text = numberTextOf(target, part);
+            if (!text.equals(box.getValue())) {
+                box.setValue(text);
+            }
+        } finally {
+            box.setResponder(text -> {
+                if (box == this.numberBox) {
+                    commitNumber(target, part, text);
+                }
+            });
+        }
+    }
+
+    private void commitNumber(WrapperConfigRef<?> target, int part, String text) {
+        if (target == null) {
             return;
         }
         try {
             double value = Double.parseDouble(text.trim().replace(',', '.'));
             if (part < 0) {
-                setNumeric(numberTarget.ref(), value);
+                setNumeric(target.ref(), value);
             } else {
-                setValue(numberTarget.ref(), withComponent(numberTarget.ref().getValue(), part, value));
+                setValue(target.ref(), withComponent(target.ref().getValue(), part, value));
             }
         } catch (NumberFormatException ignored) {
             // 打到一半（"-"、"."）解析不了是正常的
@@ -211,18 +240,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         super.tick();
         if (numberTarget == null) {
             if (numberBox != null) {
+                numberBox.setResponder(null);
                 this.removeWidget(numberBox);
                 numberBox = null;
             }
         } else if (numberBox == null) {
             startNumberBox();
-        } else {
-            String key = System.identityHashCode(numberTarget) + ":" + numberPart + ":" + numberRowY;
-            if (!key.equals(lastNumberKey)) {
-                numberBox.setY(numberRowY + Math.max(0, numberPart) * ROW_H + 3);
-                numberBox.setValue(numberText());
-                lastNumberKey = key;
-            }
+        } else if (!numberKey(numberTarget, numberPart, numberRowY).equals(lastNumberKey)) {
+            // 换一格就换一只输入框：不复用，也就没有"旧绑定写新值"的机会
+            numberBox.setResponder(null);
+            this.removeWidget(numberBox);
+            numberBox = null;
+            startNumberBox();
         }
         Iterator<Map.Entry<WrapperConfigRef<?>, DrawableWidget>> it = editors.entrySet().iterator();
         while (it.hasNext()) {
@@ -254,6 +283,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
     }
 
+    /**
+     * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位，以及"一条记录里几个 double"（例如 {@code Vec2}）。
+     * 后者也必须在列，否则行里画的是自己的滑杆、点击却让给宿主控件，两头都没接上。
+     */
     private boolean nativeControl(WrapperConfigRef<?> ref) {
         Ref<?> value = ref.ref();
         return value instanceof FlagRef
@@ -262,7 +295,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value instanceof DoubleRef
                 || value instanceof FloatRef
                 || value instanceof EnumRef<?>
-                || value instanceof KeyBindRef;
+                || value instanceof KeyBindRef
+                || components(value.getValue()) != null;
     }
 
     // ------------------------------------------------------------------ 数据
@@ -334,36 +368,62 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 ref, r -> (AttrKeyValue<?>) r.ref().createKeyValue(r.keyName()));
     }
 
-    /** 上下界：和原界面一致，先看 NumberClamp 校验器，缺一侧就按宿主那套兜底推出来。 */
-    private double[] bounds(WrapperConfigRef<?> ref, double current) {
-        Double min = null;
-        Double max = null;
+    /**
+     * 上下界：先看 {@link NumberClamp} 校验器，缺一侧就按宿主那套兜底推出来。
+     *
+     * <p>推导出来的那一侧要缓存：每帧按当前值重推的话，数值一跨数量级轨道就跟着变，
+     * 拖动中的比例会突然跳档。只有当前值真的跑出缓存区间时才按新的数量级扩一档。
+     */
+    private double[] bounds(WrapperConfigRef<?> ref, double current, int part) {
+        Double fixedMin = null;
+        Double fixedMax = null;
         for (Object validator : handle(ref).getValidators()) {
             if (validator instanceof NumberClamp<?> clamp) {
                 if (clamp.min() != null) {
                     double value = clamp.min().doubleValue();
-                    min = min == null ? value : Math.max(min, value);
+                    fixedMin = fixedMin == null ? value : Math.max(fixedMin, value);
                 }
                 if (clamp.max() != null) {
                     double value = clamp.max().doubleValue();
-                    max = max == null ? value : Math.min(max, value);
+                    fixedMax = fixedMax == null ? value : Math.min(fixedMax, value);
                 }
             }
         }
-        if (min == null && max == null) {
-            // 没有约束时按数量级取一段固定区间：跟着当前值走的话，
-            // 比例会恒等于 0.5，滑块看着卡在中间而数值照涨。
+        String key = System.identityHashCode(ref) + "#" + part;
+        double[] derived = derivedBounds.get(key);
+        boolean escaped = derived == null
+                || (fixedMin == null && current < derived[0])
+                || (fixedMax == null && current > derived[1]);
+        if (escaped) {
+            derived = deriveBounds(current, fixedMin, fixedMax);
+            derivedBounds.put(key, derived);
+        }
+        double min = fixedMin != null ? fixedMin : derived[0];
+        double max = fixedMax != null ? fixedMax : derived[1];
+        if (max <= min) {
+            max = min + 1.0;
+        }
+        return new double[] {min, max};
+    }
+
+    private static double[] deriveBounds(double current, Double fixedMin, Double fixedMax) {
+        double min;
+        double max;
+        if (fixedMin == null && fixedMax == null) {
+            // 完全没有约束：按当前值的数量级取一段区间，跨档时再扩
             double magnitude = Math.max(1.0, Math.abs(current));
             double top = Math.pow(10.0, Math.ceil(Math.log10(magnitude)));
             max = top;
             min = current < 0 ? -top : 0.0;
-        } else if (min == null) {
-            min = max == null || max <= 10 ? (max == null ? 0 : max - 10) : 0;
-        } else if (max == null) {
-            max = min + 10;
-        }
-        if (max <= min) {
-            max = min + 1;
+        } else if (fixedMin == null) {
+            max = fixedMax;
+            min = max <= 10 ? max - 10 : 0.0;
+        } else if (fixedMax == null) {
+            min = fixedMin;
+            max = min + Math.max(1.0, Math.abs(min) * 0.5);
+        } else {
+            min = fixedMin;
+            max = fixedMax;
         }
         return new double[] {min, max};
     }
@@ -489,7 +549,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         editorRects.clear();
         hovered = null;
 
-        paintBar(ctx, p);
+        paintBar(ctx, p, mouseX, mouseY);
         paintBody(ctx, p, mouseX, mouseY);
         paintDropdown(ctx, p, mouseX, mouseY);
         paintFooter(ctx, p);
@@ -497,16 +557,22 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         paintTooltip(ctx, p, mouseX, mouseY);
     }
 
-    private void paintBar(VDrawContext ctx, Ef.Palette p) {
+    private void paintBar(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
         Ef.fill(ctx, winX, winY, winW, BAR_H, Ef.BAR_BG);
 
-        Ef.cutOutline(ctx, winX + 6, winY + 5, 34, 12, Ef.BAR_INK2, 3);
+        boolean backHot = mouseX >= winX + 6 && mouseX <= winX + 40 && mouseY >= winY + 5 && mouseY <= winY + 17;
+        if (backHot) {
+            Ef.cutFill(ctx, winX + 6, winY + 5, 34, 12, Ef.BAR_RULE, Ef.CUT);
+        } else {
+            Ef.cutOutline(ctx, winX + 6, winY + 5, 34, 12, Ef.BAR_INK2, Ef.CUT);
+        }
         Ef.text(ctx, "< 返回", winX + 9, winY + 6, Ef.BAR_INK);
 
         int titleX = winX + 48;
         String name = EndfieldClickGuiScreen.moduleLabel(module);
         Ef.text(ctx, name, titleX, winY + 6, Ef.BAR_INK);
-        Ef.tracked(ctx, module.getName().toUpperCase(Locale.ROOT), titleX + Ef.textWidth(name) + 8, winY + 7, Ef.BAR_INK2, 1);
+        String id = module.getName().toUpperCase(Locale.ROOT);
+        Ef.trackedWide(ctx, id, titleX + Ef.textWidth(name) + 8, winY + 7, Ef.BAR_INK2, 1, 1.2F);
 
         if (module.getBindFlag() == null) {
             return;
@@ -548,12 +614,15 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         } finally {
             ctx.disableScissor();
         }
+        Ef.scrollbar(ctx, winX + winW - 4, top + 2, height - 6, scroll, totalHeight, height, p.rule(), p.ink2());
     }
 
     private void paintSection(VDrawContext ctx, Ef.Palette p, int y, String section) {
         String leaf = section.isEmpty() ? "MAIN" : leaf(section).replace('-', ' ').toUpperCase(Locale.ROOT);
-        Ef.tracked(ctx, "// " + leaf, contentLeft, y + 7, p.ink2(), 1);
-        Ef.text(ctx, sectionTitle(section), contentLeft + 96, y + 7, p.ink());
+        String eyebrow = "// " + leaf;
+        Ef.trackedWide(ctx, eyebrow, contentLeft, y + 7, p.ink2(), 1, 1.2F);
+        int titleX = contentLeft + Math.max(72, Ef.trackedWideWidth(eyebrow, 1, 1.2F) + 10);
+        Ef.text(ctx, sectionTitle(section), titleX, y + 7, p.ink());
         Ef.rule(ctx, contentLeft, y + SECTION_H - 6, contentWidth, p.rule());
     }
 
@@ -568,16 +637,17 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (hover) {
             Ef.fill(ctx, contentLeft - 4, y, contentWidth + 8, rowH, Ef.mix(p.paper(), p.ink(), 0.04f));
-            Ef.fill(ctx, contentLeft - 4, y, 2, rowH, p.trace());
+            Ef.fill(ctx, contentLeft - 4, y, 3, rowH, p.trace());
         }
-        Ef.text(ctx, Ef.ellipsis(label(ref), contentWidth - 130), contentLeft, y + 5, p.ink());
+        Ef.text(ctx, Ef.ellipsis(label(ref), labelWidth()), contentLeft, y + 5, p.ink());
+        Ef.rule(ctx, contentLeft - 4, y + rowH - 1, contentWidth + 8, Ef.alpha(p.rule(), 0.55F));
 
         // 行尾的重置：宿主自带图标，只有带默认值的项才画
         if (ref.ref().hasDefaultValue()) {
             int iconX = contentLeft + contentWidth - 13;
             boolean hot = mouseX >= iconX - 2 && mouseX <= iconX + 12 && mouseY >= y && mouseY < y + 12;
             if (hot) {
-                Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), 3);
+                Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), Ef.CUT);
             }
             Ef.icon(ctx, Constants.RESET_BUTTON_SPRITE, iconX + 1, y + 4, 9, hot ? p.ink() : p.ink2());
         }
@@ -599,27 +669,33 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
         } else if (isNumeric(value)) {
             double numeric = numericOf(value);
-            double[] range = bounds(ref, numeric);
+            double[] range = bounds(ref, numeric, -1);
             paintSlider(ctx, p, y, right, valueText(value), numeric, range[0], range[1], "",
                     numberTarget == ref && numberPart < 0);
         } else if (value instanceof EnumRef<?>) {
             String text = valueText(value) + "   ▾";
             int textW = Ef.textWidth(text);
             int chipX = right - textW - 10;
-            Ef.fill(ctx, chipX, y + 3, textW + 10, 11, dropdown == ref ? p.ink() : p.chip());
+            Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, dropdown == ref ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, dropdown == ref ? p.paper() : p.ink());
         } else if (value instanceof KeyBindRef bindRef) {
             boolean listening = keyTarget == ref;
             String text = listening ? "按任意键…" : keyText(bindRef);
             int textW = Ef.textWidth(text);
             int chipX = right - textW - 12;
-            Ef.cutOutline(ctx, chipX, y + 3, textW + 12, 12, listening ? Ef.SIGNAL : p.rule(), 3);
-            Ef.text(ctx, text, chipX + 6, y + 5, listening ? Ef.SIGNAL : p.ink());
+            // 等待按键是"需要看一眼"的状态，用强调色填充；强调色当线当字在浅色纸面上看不见
+            if (listening) {
+                Ef.cutFill(ctx, chipX, y + 3, textW + 12, 12, Ef.SIGNAL, Ef.CUT);
+                Ef.text(ctx, text, chipX + 6, y + 5, Ef.ON_SIGNAL);
+            } else {
+                Ef.cutOutline(ctx, chipX, y + 3, textW + 12, 12, p.rule(), Ef.CUT);
+                Ef.text(ctx, text, chipX + 6, y + 5, p.ink());
+            }
         } else if (parts != null) {
             // 一条记录里的几个数值：每个分量占一行，标签用字段名
             String[] names = componentNames(raw);
             for (int i = 0; i < parts.length; i++) {
-                double[] range = bounds(ref, parts[i]);
+                double[] range = bounds(ref, parts[i], i);
                 paintSlider(ctx, p, y + i * ROW_H, right, formatNumber(parts[i]),
                         parts[i], range[0], range[1], names[i],
                         numberTarget == ref && numberPart == i);
@@ -659,25 +735,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (lines.isEmpty()) {
             return;
         }
-        int lineH = Ef.lineH() + 2;
-        int width = 0;
-        for (String line : lines) {
-            width = Math.max(width, Ef.textWidth(line));
-        }
-        width += 14;
-        int height = lines.size() * lineH + 10;
-        int x = Math.max(8, Math.min(this.width - width - 8, mouseX + 12));
-        int y = Math.max(8, Math.min(this.height - height - 8, mouseY + 12));
-
-        // 说明必须能看清：固定接近不透明，不跟界面透明度一起淡
-        int panel = 0xF0000000 | (p.panel() & 0x00FFFFFF);
-        Ef.fill(ctx, x, y, width, height, panel);
-        Ef.cutOutline(ctx, x, y, width, height, p.ink(), 3);
-        int ty = y + 5;
-        for (String line : lines) {
-            Ef.text(ctx, line, x + 7, ty, p.ink());
-            ty += lineH;
-        }
+        Ef.tooltip(ctx, p, lines, mouseX, mouseY, this.width, this.height);
     }
 
     /**
@@ -701,7 +759,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.fill(ctx, sliderX + knob - 1, lineY - 3, 2, 7, p.ink());
         if (editing) {
             // 输入框自己画字，这里只给个框；框的位置和输入框完全对齐
-            Ef.cutOutline(ctx, right - TEXT_W, y + 3, TEXT_W, 11, p.ink(), 3);
+            Ef.cutOutline(ctx, right - TEXT_W, y + 3, TEXT_W, 11, p.ink(), Ef.CUT);
         } else {
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink());
         }
@@ -770,7 +828,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int height = options.length * rowH + 4;
         int top = dropTop(height);
         Ef.fill(ctx, dropX, top, dropW, height, p.panel());
-        Ef.cutOutline(ctx, dropX, top, dropW, height, p.ink(), 3);
+        Ef.cutOutline(ctx, dropX, top, dropW, height, p.ink(), Ef.CUT);
 
         Object current = dropdown.ref().getValue();
         for (int i = 0; i < options.length; i++) {
@@ -795,7 +853,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.text(ctx, left, winX + 8, y + 3, p.ink2());
         String mid = module.getModuleManager() == null ? "" : module.getModuleManager().getName();
         Ef.text(ctx, mid, winX + 8 + Ef.textWidth(left) + 12, y + 3, p.ink2());
-        String hint = "拖滑杆 · 右键减一";
+        String hint = "拖滑杆 │ 右键减一";
         Ef.text(ctx, hint, winX + winW - 8 - Ef.textWidth(hint), y + 3, p.ink2());
     }
 
@@ -814,6 +872,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int my = (int) mouseY;
         // 上一次拖动在这里收尾：重新点击就重新判定
         dragRef = null;
+        // 点别处收起数值输入框；真的点在数值槽上时 hitNumber 会把它重新设回来
+        numberTarget = null;
         buildRows();
 
         if (dropdown != null) {
@@ -953,7 +1013,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             dragPart = part;
             dragTrackX = trackX;
             dragTrackW = trackW;
-            double[] range = bounds(wrapper, current);
+            double[] range = bounds(wrapper, current, part);
             dragMin = range[0];
             dragMax = range[1];
             applyRatio(wrapper, part, current, (mouseX - trackX) / (double) trackW);
@@ -963,13 +1023,19 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             numberTarget = wrapper;
             numberPart = part;
             numberRowY = rowY;
+            if (numberBox != null) {
+                // 旧绑定立刻失效：tick 里会按新目标重写文本并重挂 responder
+                numberBox.setResponder(null);
+                // 点击会被本屏的整屏控件吃掉，焦点要还给输入框，否则点一下就没法继续打字
+                this.setFocused(numberBox);
+            }
             return true;
         }
         return false;
     }
 
     private void applyRatio(WrapperConfigRef<?> wrapper, int part, double current, double ratio) {
-        double[] range = bounds(wrapper, current);
+        double[] range = bounds(wrapper, current, part);
         applyRange(wrapper, part, range[0], range[1], ratio);
     }
 
@@ -991,9 +1057,6 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (dragRef == null) {
             return false;
         }
-        double current = dragPart < 0
-                ? numericOf(dragRef.ref())
-                : components(dragRef.ref().getValue())[dragPart];
         // 用按下那一刻的区间，拖动过程中区间不跟着数值变
         applyRange(dragRef, dragPart, dragMin, dragMax, (mouseX - dragTrackX) / (double) dragTrackW);
         return true;
@@ -1008,38 +1071,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return Math.min(56, Math.max(28, contentWidth / 5));
     }
 
-    /** 0~1 之间的小数按比例处理，给滑杆；其余没有可靠上下界，只给步进。 */
-    private static boolean isRatio(double value) {
-        return value >= 0.0 && value <= 1.0;
-    }
-
-    private static double round2(double value) {
-        return Math.round(value * 100.0) / 100.0;
-    }
-
-    private static int stepFor(long value, double mouseX, int right, String text) {
-        int step = Math.abs(value) >= 100 ? 10 : 1;
-        if (mouseX >= right - 12 && mouseX <= right) {
-            return step;
-        }
-        int valueW = Math.max(20, Ef.textWidth(text));
-        if (mouseX >= right - valueW - 14 && mouseX < right - valueW) {
-            return -step;
-        }
-        return 0;
-    }
-
-    private static double stepForDouble(double value, double mouseX, int right, String text) {
-        double magnitude = Math.abs(value);
-        double step = magnitude >= 10 ? 1.0 : (magnitude >= 1 ? 0.5 : 0.1);
-        if (mouseX >= right - 12 && mouseX <= right) {
-            return step;
-        }
-        int valueW = Math.max(20, Ef.textWidth(text));
-        if (mouseX >= right - valueW - 14 && mouseX < right - valueW) {
-            return -step;
-        }
-        return 0;
+    /** 标签可用宽度：控件区左侧那一段，别让长名字压到滑轨上。 */
+    private int labelWidth() {
+        return Math.max(40, controlRight() - TEXT_W - 8 - sliderWidth() - 10 - contentLeft);
     }
 
     private void back() {
