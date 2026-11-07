@@ -77,7 +77,8 @@ public class ConfigManager extends BaseModule {
         return name.endsWith(".nbt") || name.endsWith(".dat") || name.endsWith(".json");
     }
 
-    private void openSnapshotScreen(ElementFactory factory, boolean saving) {
+    /** 打开快照保存/读取的文件选择界面；插件的新界面从这里接同一套入口。 */
+    public void openSnapshotScreen(ElementFactory factory, boolean saving) {
         int width = Math.max(120, Math.min(440, mc.getWindow().getGuiScaledWidth() - 20));
         int height = Math.max(150, Math.min(320, mc.getWindow().getGuiScaledHeight() - 30));
         DrawableWidget widget = saving
