@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.Constants;
 import me.matl114.gui.GenericScreen;
@@ -476,16 +477,22 @@ public class BaritonePage extends GenericScreen {
 
     /** 行尾重置：只有拿得到出厂值的项才画，点它写回 {@code defaultValue}。 */
     private void paintReset(VDrawContext ctx, Ef.Palette p, Row row, int mouseX, int mouseY) {
-        if (!defaults.containsKey(row.entry().name())) {
+        Object def = defaults.get(row.entry().name());
+        if (def == null) {
             return;
         }
         int y = row.y();
         int iconX = contentRight() - 13;
         boolean hot = mouseX >= iconX - 2 && mouseX <= iconX + 12 && mouseY >= y && mouseY < y + 12;
-        if (hot) {
+        // 值跑出厂值的那一行，图标铺当前位置色：一眼能看出哪一行动过
+        boolean modified = !Objects.equals(valueOf(row.entry()), def);
+        if (modified) {
+            Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.trace(), Ef.CUT);
+        } else if (hot) {
             Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), Ef.CUT);
         }
-        Ef.icon(ctx, Constants.RESET_BUTTON_SPRITE, iconX + 1, y + 4, 9, hot ? p.ink() : p.ink2());
+        int fg = modified ? p.onTrace() : (hot ? p.ink() : p.ink2());
+        Ef.icon(ctx, Constants.RESET_BUTTON_SPRITE, iconX + 1, y + 4, 9, fg);
     }
 
     /** 开关块：实心墨块 = 开，虚线框 = 关，点一下切一次。 */
