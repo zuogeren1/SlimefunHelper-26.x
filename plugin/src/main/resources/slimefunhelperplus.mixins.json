@@ -4,7 +4,9 @@
 	"package": "me.zuogeren.slimefunhelperplus.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [],
-	"client": [],
+	"client": [
+		"ClickGuiTakeoverMixin"
+	],
 	"injectors": {
 		"defaultRequire": 1
 	}

@@ -20,6 +20,8 @@
   "new-click-gui.opacity.tooltips": "1 表示完全不透明，越小越能看见背后的世界",
   "new-click-gui.open-key": "打开界面的按键",
   "new-click-gui.open-key.tooltips": "点一下再按新键即可绑定；右键清除",
+  "new-click-gui.takeover-multiplayer": "接管多人游戏界面的 ClickGui",
+  "new-click-gui.takeover-multiplayer.tooltips": "打开后，多人游戏界面右上角那个 SlimefunHelper 按钮会打开本界面；关掉时仍开宿主的 ClickGui",
   "widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
   "widget.click-gui.module-name.Render.FriendWine": "朋友的酒",
   "widget.click-gui.module-name.Render.FriendWine.tooltips": "网络梗：所有生物变成果冻一样 Q 弹并旋转",

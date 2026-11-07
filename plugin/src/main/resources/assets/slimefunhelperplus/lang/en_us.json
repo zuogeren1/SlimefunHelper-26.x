@@ -20,6 +20,8 @@
   "new-click-gui.opacity.tooltips": "1 is fully opaque; lower values let the world show through",
   "new-click-gui.open-key": "Open key",
   "new-click-gui.open-key.tooltips": "Click, then press a key to bind; right-click clears",
+  "new-click-gui.takeover-multiplayer": "Take over the multiplayer screen ClickGui",
+  "new-click-gui.takeover-multiplayer.tooltips": "When on, the SlimefunHelper button on the multiplayer screen opens this GUI instead of the host's ClickGui",
   "widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
   "widget.click-gui.module-name.Render.FriendWine": "Friend's Wine",
   "widget.click-gui.module-name.Render.FriendWine.tooltips": "Meme: every living entity wobbles like jelly and spins in place",

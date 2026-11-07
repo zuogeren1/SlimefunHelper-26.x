@@ -1,13 +1,14 @@
 package me.zuogeren.slimefunhelperplus.module.newclickgui;
 
+import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.managers.config.DoubleRef;
+import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.managers.Configs;
-import me.matl114.utils.ClientUtils;
 import me.zuogeren.slimefunhelperplus.config.PluginConfig;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldClickGuiScreen;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
@@ -39,6 +40,9 @@ public class NewClickGui extends BaseModule {
     /** 界面背景的不透明度：1 = 不透明，越低越能看见背后的世界。 */
     public final DoubleRef opacity;
 
+    /** 多人游戏界面右上角的 SlimefunHelper 按钮是否改成本界面；关掉时仍开宿主自己的 ClickGui。 */
+    public final FlagRef takeoverMultiplayer;
+
     public NewClickGui() {
         super("NewClickGui");
         instance = this;
@@ -47,6 +51,10 @@ public class NewClickGui extends BaseModule {
         this.opacity = doubleBuilder(base.add("opacity"))
                 .defaultValue(0.92D)
                 .validator(Configs.doubleRange(0.25D, 1.0D))
+                .build();
+
+        this.takeoverMultiplayer = flagBuilder(base.add("takeover-multiplayer"))
+                .defaultValue(false)
                 .build();
 
         this.openKey = hotkey(base.add("open-key"))
@@ -75,12 +83,31 @@ public class NewClickGui extends BaseModule {
         return Math.max(0.25D, Math.min(1.0D, instance.opacity.get()));
     }
 
+    /** 是否接管多人游戏界面右上角那个按钮。 */
+    public static boolean takeoverMultiplayer() {
+        return instance != null && instance.takeoverMultiplayer != null && instance.takeoverMultiplayer.get();
+    }
+
+    /**
+     * 从任意界面打开本界面。
+     *
+     * <p>多人游戏界面还没有玩家实体，所以不能像热键路径那样按 {@code player} 判空；
+     * 走来处记录，关闭时回到打开它的那个界面。
+     */
+    public static void openScreen() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) {
+            return;
+        }
+        ScreenAccess.of(new EndfieldClickGuiScreen(settings())).openFromCurrent();
+    }
+
     private void openGui() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.player == null) {
             return;
         }
-        ClientUtils.setScreen(minecraft, new EndfieldClickGuiScreen(settings()));
+        openScreen();
     }
 
 }
