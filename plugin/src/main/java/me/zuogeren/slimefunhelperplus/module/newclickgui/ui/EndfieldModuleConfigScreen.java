@@ -15,6 +15,9 @@ import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
+import me.matl114.hacks.utils.config.OptionalPrimitive;
+import me.matl114.hacks.utils.config.WrapEnum;
+import me.matl114.managers.config.ConfigEnum;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.EnumRef;
 import me.matl114.managers.config.FlagRef;
@@ -60,6 +63,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int RESET_W = 16;
     /** 动作节的分节键：不会与任何配置路径相同（配置路径里不可能出现 NUL）。 */
     private static final String ACTION_SECTION = "\u0000actions";
+    /** 数值格的下标：-1 是整值，>= 0 是记录分量，-2 是「可选值」里那一层。 */
+    private static final int OPTIONAL_PART = -2;
 
     /** 模块页就有它；好友/宏/快捷键/全配置这类"非模块页"为 null，命令栏不出启用块。 */
     private final BaseModule module;
@@ -130,6 +135,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private WrapperConfigRef<?> numberTarget;
     private int numberPart = -1;
     private int numberRowY;
+    /** 数值槽的左边界：可选值那一行的槽比普通行左边多让出一个开关的位置。 */
+    private int numberSlotX;
     private EditBox numberBox;
     private String lastNumberKey = "";
 
@@ -317,7 +324,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void startNumberBox() {
         EditBox box = new EditBox(
                 Minecraft.getInstance().font,
-                controlRight() - TEXT_W + 3,
+                numberSlotX + 3,
                 numberRowY + Math.max(0, numberPart) * ROW_H + 4,
                 TEXT_W - 6,
                 9,
@@ -338,6 +345,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private String numberTextOf(WrapperConfigRef<?> target, int part) {
         if (target == null) {
             return "";
+        }
+        if (part == OPTIONAL_PART) {
+            Object inner = optionalInner(target.ref().getValue());
+            return inner instanceof Number number ? formatNumber(number.doubleValue()) : "";
         }
         if (part < 0) {
             return valueText(target.ref());
@@ -378,7 +389,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         try {
             double value = Double.parseDouble(text.trim().replace(',', '.'));
-            if (part < 0) {
+            if (part == OPTIONAL_PART) {
+                writeOptionalNumber(target.ref(), value);
+            } else if (part < 0) {
                 setNumeric(target.ref(), value);
             } else {
                 setValue(target.ref(), withNumericPart(target.ref().getValue(), part, value));
@@ -453,6 +466,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value instanceof FloatRef
                 || value instanceof EnumRef<?>
                 || value instanceof KeyBindRef
+                || value.getValue() instanceof OptionalPrimitive<?>
                 || recordParts(value.getValue()) != null;
     }
 
@@ -585,6 +599,36 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return new double[] {min, max};
     }
 
+    /** 「可选值」里那一层：没启用时值是空的，读出来就是 null。 */
+    private static Object optionalInner(Object value) {
+        return value instanceof OptionalPrimitive<?> optional ? optional.getValue() : null;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void writeOptionalNumber(Ref<?> ref, double value) {
+        Object raw = ref.getValue();
+        // 用裸类型接：withValue 的参数是通配捕获，带 ? 就没法把新值放回去
+        if (!(raw instanceof OptionalPrimitive optional)) {
+            return;
+        }
+        Object inner = optional.getValue();
+        if (!(inner instanceof Number number)) {
+            return;
+        }
+        ((Ref) ref).setValue(optional.withValue(coerce(number.getClass(), value)));
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void writeOptionalOption(Ref<?> ref, Object option) {
+        Object raw = ref.getValue();
+        if (!(raw instanceof OptionalPrimitive optional)) {
+            return;
+        }
+        // 内层是 WrapEnum 的要原样包回去，宿主按包装类型序列化
+        Object next = optional.getValue() instanceof WrapEnum<?> ? new WrapEnum<>((ConfigEnum) option) : option;
+        ((Ref) ref).setValue(optional.withValue(next));
+    }
+
     /**
      * 一条记录里的几格：数值各自走滑杆，枚举走下拉，别的类型返回 null 交回宿主控件。
      *
@@ -645,44 +689,49 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private static Object coerce(Class<?> type, double value) {
-        if (type == double.class) {
+        if (type == double.class || type == Double.class) {
             return value;
         }
-        if (type == float.class) {
+        if (type == float.class || type == Float.class) {
             return (float) value;
         }
-        if (type == int.class) {
+        if (type == int.class || type == Integer.class) {
             return (int) Math.round(value);
         }
-        if (type == long.class) {
+        if (type == long.class || type == Long.class) {
             return Math.round(value);
         }
-        if (type == short.class) {
+        if (type == short.class || type == Short.class) {
             return (short) Math.round(value);
         }
-        if (type == byte.class) {
+        if (type == byte.class || type == Byte.class) {
             return (byte) Math.round(value);
         }
         return value;
     }
 
-    /** 下拉里要列哪些取值：普通枚举项看整个 Ref，记录里的枚举项看那一格自己的类型。 */
+    /**
+     * 下拉里要列哪些取值：普通枚举项看整个 Ref，记录里的枚举项看那一格，可选值看它的内层。
+     * {@code WrapEnum} 只是把枚举包了一层，取值表仍按里面的枚举类型列。
+     */
     private static Object[] optionsFor(WrapperConfigRef<?> ref, int part) {
-        Object value = ref.ref().getValue();
-        if (part >= 0) {
-            Object[] parts = recordParts(value);
-            value = parts != null && part < parts.length ? parts[part] : null;
-        }
+        Object value = enumValueOf(ref.ref().getValue(), part);
         return value instanceof Enum<?> e ? e.getDeclaringClass().getEnumConstants() : new Object[0];
     }
 
     private static Object currentOf(WrapperConfigRef<?> ref, int part) {
-        Object value = ref.ref().getValue();
-        if (part >= 0) {
-            Object[] parts = recordParts(value);
-            return parts != null && part < parts.length ? parts[part] : null;
+        return enumValueOf(ref.ref().getValue(), part);
+    }
+
+    private static Object enumValueOf(Object raw, int part) {
+        Object value = raw;
+        if (part == OPTIONAL_PART) {
+            value = optionalInner(raw);
+        } else if (part >= 0) {
+            Object[] parts = recordParts(raw);
+            value = parts != null && part < parts.length ? parts[part] : null;
         }
-        return value;
+        return value instanceof WrapEnum<?> wrap ? wrap.value : value;
     }
 
     private static String enumLabel(Object option) {
@@ -890,7 +939,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             Ef.fill(ctx, contentLeft - 4, y, contentWidth + 8, rowH, Ef.mix(p.paper(), p.ink(), 0.04f));
             Ef.fill(ctx, contentLeft - 4, y, 3, rowH, p.trace());
         }
-        Ef.text(ctx, Ef.ellipsis(label(ref), labelWidth()), contentLeft, y + 5, p.ink());
+        int labelW = slotRow(ref.ref().getValue()) ? Math.max(24, labelWidth() - 28) : labelWidth();
+        Ef.text(ctx, Ef.ellipsis(label(ref), labelW), contentLeft, y + 5, p.ink());
         Ef.rule(ctx, contentLeft - 4, y + rowH - 1, contentWidth + 8, Ef.alpha(p.rule(), 0.55F));
 
         // 行尾的重置：宿主自带图标，只有带默认值的项才画
@@ -942,6 +992,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 Ef.cutOutline(ctx, chipX, y + 3, textW + 12, 12, p.rule(), Ef.CUT);
                 Ef.text(ctx, text, chipX + 6, y + 5, p.ink());
             }
+        } else if (raw instanceof OptionalPrimitive<?> optional) {
+            paintOptional(ctx, p, y, ref, optional);
         } else if (parts != null) {
             // 一条记录里的几格：每格占一行，行名用字段名；数值拖滑杆，枚举点开下拉
             String[] names = componentNames(raw);
@@ -1077,6 +1129,55 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         String shown = Ef.ellipsis(name, available);
         Ef.tracked(ctx, shown, rightEdge - Ef.trackedWidth(shown, 1), y + 5, p.ink2(), 1);
+    }
+
+    /** 这一行尾要单独占一个开关位（可选值），行名得相应缩短。 */
+    private static boolean slotRow(Object value) {
+        return value instanceof OptionalPrimitive<?>;
+    }
+
+    /**
+     * 「可选值」：行尾一个开关决定这一项是否生效，右边是内层值自己的控件。
+     *
+     * <p>没启用时值区写一块「未启用」，留空会被当成坏掉的控件；
+     * 内层可以是数值（滑杆）、枚举（下拉），也可以是 {@code WrapEnum} 包着的枚举。
+     */
+    private void paintOptional(VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref,
+            OptionalPrimitive<?> optional) {
+        int right = controlRight();
+        int sw = 20;
+        int sh = 9;
+        int sy = y + (ROW_H - sh) / 2;
+        if (optional.isPresent()) {
+            Ef.fill(ctx, right - sw, sy, sw, sh, p.ink());
+            Ef.fill(ctx, right - 9, sy + 2, 5, 5, p.paper());
+        } else {
+            Ef.dashedOutline(ctx, right - sw, sy, sw, sh, p.ink2());
+            Ef.fill(ctx, right - sw + 2, sy + 2, 5, 5, p.ink2());
+        }
+
+        int innerRight = right - 28;
+        Object inner = optional.getValue();
+        if (!optional.isPresent() || inner == null) {
+            String off = "未启用";
+            int offW = Ef.textWidth(off) + 10;
+            Ef.dashedOutline(ctx, innerRight - offW, y + 3, offW, 11, p.ink2());
+            Ef.text(ctx, off, innerRight - offW + 5, y + 5, p.ink2());
+            return;
+        }
+        if (inner instanceof WrapEnum<?> wrap) {
+            String text = wrap.value instanceof Enum<?> e
+                    ? enumLabel(e)
+                    : (wrap.valueString == null ? "—" : wrap.valueString);
+            paintPartEnum(ctx, p, y, innerRight, "", text, dropdown == ref && dropPart == OPTIONAL_PART);
+        } else if (inner instanceof Enum<?> e) {
+            paintPartEnum(ctx, p, y, innerRight, "", enumLabel(e), dropdown == ref && dropPart == OPTIONAL_PART);
+        } else if (inner instanceof Number number) {
+            double numeric = number.doubleValue();
+            double[] range = bounds(ref, numeric, OPTIONAL_PART);
+            paintSlider(ctx, p, y, innerRight, formatNumber(numeric), numeric, range[0], range[1], "",
+                    numberTarget == ref && numberPart == OPTIONAL_PART);
+        }
     }
 
     /** 记录里的一格枚举：切角块 + 下拉箭头，点击展开取值表。 */
@@ -1347,7 +1448,31 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return false;
         }
         if (isNumeric(ref)) {
-            return hitNumber(wrapper, -1, mouseX, button, rowY, valueText(ref), numericOf(ref));
+            return hitNumber(wrapper, -1, right, mouseX, button, rowY, valueText(ref), numericOf(ref));
+        }
+        if (ref.getValue() instanceof OptionalPrimitive<?> optional) {
+            // 行尾开关：只切「这一项是否生效」，不碰内层值
+            if (mouseX >= right - 24) {
+                setValue(ref, optional.withPresent(!optional.isPresent()));
+                return true;
+            }
+            Object inner = optional.getValue();
+            if (!optional.isPresent() || inner == null) {
+                return false;
+            }
+            int innerRight = right - 28;
+            if (inner instanceof Number number) {
+                double current = number.doubleValue();
+                return hitNumber(wrapper, OPTIONAL_PART, innerRight, mouseX, button, rowY,
+                        formatNumber(current), current);
+            }
+            if (inner instanceof Enum<?> || inner instanceof WrapEnum<?>) {
+                if (button == 0) {
+                    openDropdown(wrapper, OPTIONAL_PART, rowY);
+                    return true;
+                }
+            }
+            return false;
         }
         Object[] parts = recordParts(ref.getValue());
         if (parts != null) {
@@ -1355,7 +1480,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             Object part = parts[index];
             if (part instanceof Number number) {
                 double current = number.doubleValue();
-                return hitNumber(wrapper, index, mouseX, button, rowY, formatNumber(current), current);
+                return hitNumber(wrapper, index, right, mouseX, button, rowY, formatNumber(current), current);
             }
             if (part instanceof Enum<?> && button == 0) {
                 openDropdown(wrapper, index, rowY);
@@ -1389,7 +1514,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private void applyOption(WrapperConfigRef<?> wrapper, int part, Object option) {
-        if (part < 0) {
+        if (part == OPTIONAL_PART) {
+            writeOptionalOption(wrapper.ref(), option);
+        } else if (part < 0) {
             setValue(wrapper.ref(), option);
         } else {
             setValue(wrapper.ref(), withPart(wrapper.ref().getValue(), part, option));
@@ -1398,8 +1525,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 数字行的一击：滑轨起拖，数值槽开输入框，右键退一档。 */
     private boolean hitNumber(
-            WrapperConfigRef<?> wrapper, int part, int mouseX, int button, int rowY, String text, double current) {
-        int right = controlRight();
+            WrapperConfigRef<?> wrapper, int part, int right, int mouseX, int button, int rowY, String text,
+            double current) {
         int trackW = sliderWidth();
         int trackX = right - TEXT_W - 8 - trackW;
         if (button == 1) {
@@ -1423,6 +1550,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             numberTarget = wrapper;
             numberPart = part;
             numberRowY = rowY;
+            numberSlotX = right - TEXT_W;
             if (numberBox != null) {
                 // 旧绑定立刻失效：tick 里会按新目标重写文本并重挂 responder
                 numberBox.setResponder(null);
@@ -1445,7 +1573,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private void applyValue(WrapperConfigRef<?> wrapper, int part, double next) {
-        if (part < 0) {
+        if (part == OPTIONAL_PART) {
+            writeOptionalNumber(wrapper.ref(), next);
+        } else if (part < 0) {
             setNumeric(wrapper.ref(), next);
         } else {
             setValue(wrapper.ref(), withNumericPart(wrapper.ref().getValue(), part, next));
