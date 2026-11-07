@@ -419,6 +419,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     @Override
     protected void refreshWidgets() {
         super.refreshWidgets();
+        // 重新 init（例如从宿主界面返回）会把子控件全部清掉，但 editors 里还留着这些已经不在屏幕上的对象：
+        // 不清掉它，tick 会以为这一行已经有编辑器，宿主控件再也建不回来
+        editors.clear();
         winW = Math.min(this.width - 8, Math.max(280, Math.round(this.width * 0.78F)));
         winH = Math.min(this.height - 8, Math.max(200, Math.round(this.height * 0.78F)));
         winX = (this.width - winW) / 2;
