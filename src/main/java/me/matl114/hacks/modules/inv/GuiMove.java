@@ -13,6 +13,7 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
+import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.managers.input.SimpleInputManager;
 import net.minecraft.client.KeyMapping;
@@ -26,6 +27,7 @@ import net.minecraft.client.gui.screens.inventory.CommandBlockEditScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.SignEditScreen;
 import net.minecraft.client.gui.screens.inventory.StructureBlockEditScreen;
+import net.minecraft.client.player.ClientInput;
 
 public class GuiMove extends BaseModule {
     public GuiMove() {
@@ -51,6 +53,25 @@ public class GuiMove extends BaseModule {
         super.registerAll();
         registerListener(Listener.getKeyboardInput(), this::onKeyInput);
         registerListener(Listener.getPostSetScreen(), this::onPostSetScreen);
+        registerListener(Listener.getPlayerKeyboardInputTick(), this::onInputTick);
+    }
+
+    /**
+     * 界面打开时按物理键状态逐帧同步移动键。
+     *
+     * <p>只接管“有界面”的帧：没有界面时原版按键事件已经把这些映射维护好了，
+     * 这里再写一遍会与它们打架；界面里若有输入框聚焦（{@link #skip()}），
+     * 一律置为松开，避免字符输入时角色乱跑。
+     */
+    public void onInputTick(Event<ClientInput> event) {
+        if (checkNull()) return;
+        Screen screen = ClientUtils.getScreen(mc);
+        if (screen == null) return;
+        boolean allowed = enable.get() && !skip();
+        initBinding();
+        for (KeyMapping re : getBindings()) {
+            re.setDown(allowed && KeyCode.isKeyDown(re.key.getValue()));
+        }
     }
 
     public KeyMapping[] inputBindings;
