@@ -299,6 +299,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         winX = (this.width - winW) / 2;
         winY = (this.height - winH) / 2;
         barH = tabBar == null ? BAR_H : tabBar.measure(winW, light());
+        layoutContent();
 
         EfWidget.of(0, 0, this.width, this.height, this::paint)
                 .click(this::click)
@@ -667,11 +668,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return winH - barH - FOOT_H - 4;
     }
 
+    /**
+     * 内容区的左边界与宽度：只由窗口矩形决定。
+     *
+     * <p>子类在 {@code refreshWidgets} 里就要建原版输入框（{@code contentLeftPx()} 那些钩子），
+     * 而那一步早于第一次绘制，所以布局不能只发生在 {@code buildRows} 里。
+     */
+    private void layoutContent() {
+        contentLeft = winX + PAD;
+        contentWidth = Math.min(winW - PAD * 2, 560);
+    }
+
     private void buildRows() {
         rows.clear();
         actionRows.clear();
-        contentLeft = winX + PAD;
-        contentWidth = Math.min(winW - PAD * 2, 560);
+        layoutContent();
 
         int y = bodyTop() + toolHeight() - scroll;
         String current = null;
