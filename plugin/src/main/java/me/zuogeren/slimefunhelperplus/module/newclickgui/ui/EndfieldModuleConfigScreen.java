@@ -16,6 +16,7 @@ import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
+import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.config.WrapEnum;
 import me.matl114.managers.config.ConfigEnum;
 import me.matl114.managers.config.DoubleRef;
@@ -46,7 +47,7 @@ import net.minecraft.network.chat.Component;
  * 之前按窗口切成几个子控件时，坐标系一层套一层（控件偏移 + 局部 + 裁剪），
  * 每加一个特性就要重算一遍，这里直接去掉那一层。
  *
- * <p>控件分两类：开关 / 整数步进 / 比例滑杆 / 枚举下拉 / 键位绑定各走专用控件；
+ * <p>控件分两类：开关 / 整数步进 / 比例滑杆 / 枚举下拉 / 键位绑定 / 颜色各走专用控件；
  * 其余类型（列表、引用、格式化文本等）统一走「对象 → 文本 → 对象」——
  * 文本由 ref 自己的 {@code AttrKeyValue} 负责转换，和原配置界面同一套 stringify 工厂，
  * 所以这里不再有「不支持」的分支。
@@ -59,6 +60,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int PAD = 14;
     /** 数值槽位的固定宽度：宽度稳定，滑轨才不会随数值跳动。 */
     private static final int TEXT_W = 40;
+    /** 颜色输入框的宽度：装得下 {@code #RRGGBB}，又不至于把行名挤出去。 */
+    private static final int COLOR_W = 70;
     /** 行尾重置按钮占的宽度。 */
     private static final int RESET_W = 16;
     /** 动作节的分节键：不会与任何配置路径相同（配置路径里不可能出现 NUL）。 */
@@ -139,6 +142,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private int numberSlotX;
     private EditBox numberBox;
     private String lastNumberKey = "";
+
+    /** 手动输入颜色的输入框：目标与行位置记下来，输入框按它们贴着色块长出来。 */
+    private WrapperConfigRef<?> colorTarget;
+    private int colorRowY;
+    private EditBox colorBox;
+    private String lastColorKey = "";
 
     /** 每个配置项的文本读写句柄：createKeyValue 会挂监听，不能每帧重建。 */
     private final Map<WrapperConfigRef<?>, AttrKeyValue<?>> handles = new IdentityHashMap<>();
@@ -402,6 +411,89 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
+     * 颜色输入框：贴着色块长出来，落在 {@link #paintColor} 画的那个框里。
+     *
+     * <p>和数值框同一条规矩：原版控件只在 tick 里增删，点击与渲染期间只改字段。
+     */
+    private void startColorBox() {
+        EditBox box = new EditBox(
+                Minecraft.getInstance().font,
+                controlRight() - COLOR_W + 3,
+                colorRowY + 4,
+                COLOR_W - 6,
+                9,
+                Component.empty());
+        box.setBordered(false);
+        box.setMaxLength(16);
+        this.colorBox = box;
+        this.lastColorKey = colorKey(colorTarget, colorRowY);
+        applyColorText(box, colorTarget);
+        this.addRenderableWidget(box);
+        this.setFocused(box);
+    }
+
+    private static String colorKey(WrapperConfigRef<?> target, int rowY) {
+        return System.identityHashCode(target) + ":" + rowY;
+    }
+
+    /**
+     * 把当前值写进输入框，并把 responder 重新绑到目标项上。
+     *
+     * <p>{@code EditBox.setValue} 会同步回调 responder，程序写值前必须先摘掉：
+     * 否则「换个颜色再开编辑」会被当成用户输入，把显示值写回配置。
+     */
+    private void applyColorText(EditBox box, WrapperConfigRef<?> target) {
+        box.setResponder(null);
+        try {
+            String text = hexOf(colorOf(target));
+            if (!text.equals(box.getValue())) {
+                box.setValue(text);
+            }
+        } finally {
+            box.setResponder(text -> {
+                if (box == this.colorBox) {
+                    commitColor(target, text);
+                }
+            });
+        }
+    }
+
+    /**
+     * 输入合法才写回，非法输入保持原值。
+     *
+     * <p>十六进制按定长六位挡：{@code #} 开头的串 TextColor 只当十六进制解释，{@code "#12"} 会被收成
+     * RGB(0x12)，打到一半的半截值不能就这样改掉配置。命名色不另抄表，仍交给
+     * {@link WrapColor#WrapColor(String)} 解析；它只认小写名，而 ChatFormatting 的写法是全大写，所以先转小写。
+     */
+    private void commitColor(WrapperConfigRef<?> target, String text) {
+        if (target == null) {
+            return;
+        }
+        String value = text.trim().toLowerCase(Locale.ROOT);
+        if (value.startsWith("#") && !fullHex(value)) {
+            return;
+        }
+        try {
+            setValue(target.ref(), new WrapColor(value));
+        } catch (RuntimeException ignored) {
+            // 名字拼错或者打到一半（空串、单独的 "#"）：等打完，不拿半截值覆盖配置
+        }
+    }
+
+    /** 整串是否就是 {@code #} 加六位十六进制：输入框只认这一种十六进制写法。 */
+    private static boolean fullHex(String value) {
+        if (value.length() != 7) {
+            return false;
+        }
+        for (int i = 1; i < value.length(); i++) {
+            if (Character.digit(value.charAt(i), 16) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * 宿主控件的增删不能发生在点击/渲染的遍历里，所以每 tick 同步一次：
      * 这一帧还在的行跟着走，消失的行卸掉，新出现的行建出来。
      */
@@ -422,6 +514,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             this.removeWidget(numberBox);
             numberBox = null;
             startNumberBox();
+        }
+        if (colorTarget == null) {
+            if (colorBox != null) {
+                colorBox.setResponder(null);
+                this.removeWidget(colorBox);
+                colorBox = null;
+            }
+        } else if (colorBox == null) {
+            startColorBox();
+        } else if (!colorKey(colorTarget, colorRowY).equals(lastColorKey)) {
+            // 换一格就换一只输入框：不复用，也就没有"旧绑定写新值"的机会
+            colorBox.setResponder(null);
+            this.removeWidget(colorBox);
+            colorBox = null;
+            startColorBox();
         }
         Iterator<Map.Entry<WrapperConfigRef<?>, DrawableWidget>> it = editors.entrySet().iterator();
         while (it.hasNext()) {
@@ -454,7 +561,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位，以及"一条记录里几个 double"（例如 {@code Vec2}）。
+     * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位 / 颜色，以及"一条记录里几个 double"（例如 {@code Vec2}）。
      * 后者也必须在列，否则行里画的是自己的滑杆、点击却让给宿主控件，两头都没接上。
      */
     private boolean nativeControl(WrapperConfigRef<?> ref) {
@@ -466,6 +573,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value instanceof FloatRef
                 || value instanceof EnumRef<?>
                 || value instanceof KeyBindRef
+                || value.getValue() instanceof WrapColor
                 || value.getValue() instanceof OptionalPrimitive<?>
                 || recordParts(value.getValue()) != null;
     }
@@ -1011,12 +1119,52 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                     paintPartEnum(ctx, p, partY, right, names[i], enumLabel(part), open);
                 }
             }
+        } else if (raw instanceof WrapColor) {
+            paintColor(ctx, p, y, ref);
         } else {
             // 其余类型由宿主自带的编辑器负责绘制：这里只登记矩形并留白
             int boxW = Math.min(260, Math.max(120, contentWidth / 3));
             editorRects.put(ref, new int[] {right - boxW, y + 2, boxW, ROW_H - 4});
             Ef.fill(ctx, right - boxW, y + 3, boxW, ROW_H - 6, Ef.alpha(p.chip(), 0.35F));
         }
+    }
+
+    /**
+     * 颜色行：切角块里一块 12×12 的色块加它的十六进制值，点一下就地换成输入框。
+     *
+     * <p>整块右对齐到 {@link #controlRight()}：行尾那一列要留给重置图标，控件压过去就点不到了。
+     * 编辑期间只画框，字由输入框自己画，所以框与输入框的位置必须逐像素对齐。
+     */
+    private void paintColor(VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref) {
+        int right = controlRight();
+        if (colorTarget == ref) {
+            Ef.cutOutline(ctx, right - COLOR_W, y + 3, COLOR_W, 12, p.ink(), Ef.CUT);
+            return;
+        }
+        int rgb = colorOf(ref);
+        String hex = hexOf(rgb);
+        int pad = 2;
+        int swatch = 12;
+        int gap = 5;
+        int chipW = pad + swatch + gap + Ef.textWidth(hex) + 3;
+        int chipX = right - chipW;
+        Ef.cutFill(ctx, chipX, y + 3, chipW, 12, p.chip(), Ef.CUT);
+        Ef.fill(ctx, chipX + pad, y + 3, swatch, swatch, 0xFF000000 | rgb);
+        Ef.text(ctx, hex, chipX + pad + swatch + gap, y + 5, p.ink());
+    }
+
+    /** 颜色行的当前值：取不到就按白画，绘制路径不能因为一个坏值停住。 */
+    private static int colorOf(WrapperConfigRef<?> ref) {
+        Object value = ref.ref().getValue();
+        if (value instanceof WrapColor color && color.color() != null) {
+            return color.asRGB();
+        }
+        return 0xFFFFFF;
+    }
+
+    /** 显示一律写成 {@code #RRGGBB}：输入框预填的就是这个串，而它本身能被再解析回同一个值。 */
+    private static String hexOf(int rgb) {
+        return String.format(Locale.ROOT, "#%06X", rgb & 0xFFFFFF);
     }
 
     /**
@@ -1316,8 +1464,14 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int my = (int) mouseY;
         // 上一次拖动在这里收尾：重新点击就重新判定
         dragRef = null;
-        // 点别处收起数值输入框；真的点在数值槽上时 hitNumber 会把它重新设回来
+        // 点别处收起数值/颜色输入框；真的点在它们的控件上时，各自的 hit 方法会把它重新设回来
         numberTarget = null;
+        // 颜色输入框盖在行尾的值区上，落在它框里的这一下是去挪光标的：不接、也不收起编辑
+        // （画布不接，容器会把点击继续派给输入框自己；重建输入框则会把正在打的内容换回旧值）
+        if (colorTarget != null && colorBox != null && colorBox.isMouseOver(mouseX, mouseY)) {
+            return false;
+        }
+        colorTarget = null;
         buildRows();
 
         if (dropdown != null) {
@@ -1431,6 +1585,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         dropdown = null;
         dropPart = -1;
         numberTarget = null;
+        colorTarget = null;
         buildRows();
         scroll = Math.max(0, Math.min(maxScroll(), scroll - (int) (Math.signum(amount) * 18)));
         return true;
@@ -1473,6 +1628,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 }
             }
             return false;
+        }
+        if (ref.getValue() instanceof WrapColor) {
+            return hitColor(wrapper, mouseX, button, rowY);
         }
         Object[] parts = recordParts(ref.getValue());
         if (parts != null) {
@@ -1560,6 +1718,26 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 点色块进入编辑：这里只记目标，输入框留给 tick 去建。
+     *
+     * <p>已经有一只输入框时先摘掉它的 responder，并让 tick 按新目标重新建一只：
+     * 复用旧框的话，摘掉的 responder 不会再挂回去，之后打字就不写回配置了。
+     * 焦点也只能在 tick 里给——点击处理完，容器会把焦点交回铺满屏幕的这块画布。
+     */
+    private boolean hitColor(WrapperConfigRef<?> wrapper, int mouseX, int button, int rowY) {
+        if (button != 0 || mouseX < controlRight() - COLOR_W) {
+            return false;
+        }
+        colorTarget = wrapper;
+        colorRowY = rowY;
+        lastColorKey = "";
+        if (colorBox != null) {
+            colorBox.setResponder(null);
+        }
+        return true;
     }
 
     private void applyRatio(WrapperConfigRef<?> wrapper, int part, double current, double ratio) {
