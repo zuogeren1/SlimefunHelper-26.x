@@ -6,7 +6,6 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import java.lang.ref.WeakReference;
 import java.util.*;
 import java.util.function.Consumer;
-import lombok.Getter;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -45,7 +44,6 @@ import net.minecraft.world.phys.Vec3;
 public class XaeroHelper extends BaseModule {
     public static XaeroHelper INSTANCE;
 
-    @Getter
     @Broadcast
     private static final EventChannel<Level> worldSwitchPoint = new EventChannel<>();
 
