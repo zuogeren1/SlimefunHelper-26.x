@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import me.matl114.accessors.gui.ScreenAccess;
+import me.matl114.gui.Constants;
 import me.matl114.gui.GenericScreen;
 import me.matl114.hooks.BaritoneHooks;
 import me.matl114.utils.ChatUtils;
@@ -44,6 +45,8 @@ public class BaritonePage extends GenericScreen {
     private static final int PAD = 14;
     /** 数值槽位的固定宽度：宽度稳定，滑轨才不会随数值跳动。 */
     private static final int TEXT_W = 44;
+    /** 行尾重置按钮占的宽度。 */
+    private static final int RESET_W = 18;
     /** 行首序号栏的宽度。 */
     private static final int INDEX_W = 22;
     /** 设置项翻译键前缀，与宿主旧界面同一个约定。 */
@@ -70,6 +73,9 @@ public class BaritonePage extends GenericScreen {
 
     /** 每项滑杆的取值区间：只在当前值跑出区间时重取。 */
     private final Map<String, double[]> ranges = new HashMap<>();
+
+    /** 出厂值：Baritone 的 Setting 自带 defaultValue，拿不到的那些就不给重置入口。 */
+    private final Map<String, Object> defaults = new HashMap<>();
 
     /** 设置项说明的折行结果，按设置名缓存，不每帧查语言表。 */
     private final Map<String, List<String>> tips = new HashMap<>();
@@ -103,6 +109,23 @@ public class BaritonePage extends GenericScreen {
         this.settings = settings;
         this.available = isApiSupported();
         this.entries = this.available ? readSettings() : List.of();
+        if (this.available) {
+            readDefaults();
+        }
+    }
+
+    /** 出厂值不动，读一次就够；老版本 Baritone 没有这个能力时整页不显示重置。 */
+    private void readDefaults() {
+        for (Entry entry : this.entries) {
+            try {
+                Object value = BaritoneHooks.getInstance().getDefaultValue(entry.name());
+                if (value != null) {
+                    defaults.put(entry.name(), value);
+                }
+            } catch (Throwable ignored) {
+                // 这一项没有出厂值：跳过，不影响其它行
+            }
+        }
     }
 
     // ------------------------------------------------------------------ 数据
@@ -320,18 +343,23 @@ public class BaritonePage extends GenericScreen {
         return contentLeft + contentWidth;
     }
 
+    /** 控件的右边界：行尾留一列给重置按钮，控件不压到图标上。 */
+    private int controlRight() {
+        return contentRight() - RESET_W;
+    }
+
     private int sliderWidth() {
         return Math.min(56, Math.max(28, contentWidth / 5));
     }
 
     /** 标签可用宽度：别让长名字压到滑轨上。 */
     private int labelWidth() {
-        return Math.max(40, contentRight() - TEXT_W - 8 - sliderWidth() - 10 - textX());
+        return Math.max(40, controlRight() - TEXT_W - 8 - sliderWidth() - 10 - textX());
     }
 
     /** 右端数值槽的左边：这一格既显示数值，点它也能就地手输。 */
     private int fieldX() {
-        return contentRight() - TEXT_W;
+        return controlRight() - TEXT_W;
     }
 
     /** 输入框的身份：同一条设置在任何一帧都是同一格。 */
@@ -342,7 +370,7 @@ public class BaritonePage extends GenericScreen {
     private void buildRows() {
         rows.clear();
         contentLeft = winX + PAD;
-        contentWidth = Math.min(winW - PAD * 2, 560);
+        contentWidth = winW - PAD * 2;
 
         int y = bodyTop() - scroll;
         for (int i = 0; i < entries.size(); i++) {
@@ -429,6 +457,8 @@ public class BaritonePage extends GenericScreen {
         Ef.text(ctx, Ef.ellipsis(label(row.entry()), labelWidth()), textX(), y + 5, p.ink());
         Ef.rule(ctx, contentLeft - 4, y + ROW_H - 1, contentWidth + 8, Ef.alpha(p.rule(), 0.55F));
 
+        paintReset(ctx, p, row, mouseX, mouseY);
+
         Object value = valueOf(row.entry());
         if (value instanceof Boolean flag) {
             paintSwitch(ctx, p, y, flag);
@@ -440,13 +470,27 @@ public class BaritonePage extends GenericScreen {
             paintEnum(ctx, p, y, dropdown == row.entry(), option.name());
         } else {
             String shown = Ef.ellipsis(preview(value), Math.min(200, Math.max(80, contentWidth / 2)));
-            Ef.text(ctx, shown, contentRight() - Ef.textWidth(shown), y + 5, p.ink2());
+            Ef.text(ctx, shown, controlRight() - Ef.textWidth(shown), y + 5, p.ink2());
         }
+    }
+
+    /** 行尾重置：只有拿得到出厂值的项才画，点它写回 {@code defaultValue}。 */
+    private void paintReset(VDrawContext ctx, Ef.Palette p, Row row, int mouseX, int mouseY) {
+        if (!defaults.containsKey(row.entry().name())) {
+            return;
+        }
+        int y = row.y();
+        int iconX = contentRight() - 13;
+        boolean hot = mouseX >= iconX - 2 && mouseX <= iconX + 12 && mouseY >= y && mouseY < y + 12;
+        if (hot) {
+            Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), Ef.CUT);
+        }
+        Ef.icon(ctx, Constants.RESET_BUTTON_SPRITE, iconX + 1, y + 4, 9, hot ? p.ink() : p.ink2());
     }
 
     /** 开关块：实心墨块 = 开，虚线框 = 关，点一下切一次。 */
     private void paintSwitch(VDrawContext ctx, Ef.Palette p, int y, boolean on) {
-        int right = contentRight();
+        int right = controlRight();
         int width = 20;
         int height = 9;
         int top = y + (ROW_H - height) / 2;
@@ -464,7 +508,7 @@ public class BaritonePage extends GenericScreen {
             VDrawContext ctx, Ef.Palette p, Row row, int mouseX, int mouseY, String text,
             double value, double min, double max) {
         int y = row.y();
-        int right = contentRight();
+        int right = controlRight();
         int width = sliderWidth();
         int left = right - TEXT_W - 8 - width;
         int lineY = y + ROW_H / 2;
@@ -495,7 +539,7 @@ public class BaritonePage extends GenericScreen {
     private void paintEnum(VDrawContext ctx, Ef.Palette p, int y, boolean opened, String text) {
         String chip = Ef.ellipsis(text, Math.max(60, contentWidth / 3)) + "   ▾";
         int width = Ef.textWidth(chip);
-        int left = contentRight() - width - 10;
+        int left = controlRight() - width - 10;
         Ef.cutFill(ctx, left, y + 3, width + 10, 11, opened ? p.ink() : p.chip(), Ef.CUT);
         Ef.text(ctx, chip, left + 5, y + 5, opened ? p.paper() : p.ink());
     }
@@ -556,11 +600,11 @@ public class BaritonePage extends GenericScreen {
         String left = available ? entries.size() + " 项设置  │  已开启 " + enabledCount() + " 项" : "Baritone 不可用";
         Ef.text(ctx, left, winX + 8, y + 3, p.ink2());
         if (available) {
-            String hint = "点开关切换 │ 拖滑杆改数值 │ 点数字手输";
+            String hint = "点开关切换 │ 拖滑杆改数值 │ 点数字手输 │ 右键重置";
             int room = winW - 16 - Ef.textWidth(left);
             if (Ef.textWidth(hint) > room) {
                 // 窄窗先省掉"点开关切换"：右侧提示压到左侧统计上比少一句提示更糟
-                hint = "拖滑杆 │ 点数字可手输";
+                hint = "拖滑杆 │ 数字手输 │ 右键重置";
             }
             Ef.text(ctx, hint, winX + winW - 8 - Ef.textWidth(hint), y + 3, p.ink2());
         }
@@ -652,16 +696,28 @@ public class BaritonePage extends GenericScreen {
             if (my < row.y() || my >= row.y() + ROW_H) {
                 continue;
             }
-            return hit(row, mx, button);
+            return hit(row, mx, my, button);
         }
         return false;
     }
 
-    private boolean hit(Row row, int mouseX, int button) {
+    private boolean hit(Row row, int mouseX, int mouseY, int button) {
         Entry entry = row.entry();
+        if (defaults.containsKey(entry.name())) {
+            // 行尾图标与右键都能恢复默认：图标是看得见的入口，右键是配置页一直有的手势
+            boolean icon = button == 0
+                    && mouseX >= contentRight() - 15
+                    && mouseX <= contentRight() - 1
+                    && mouseY >= row.y()
+                    && mouseY < row.y() + 12;
+            if (icon || button == 1) {
+                write(entry, defaults.get(entry.name()));
+                return true;
+            }
+        }
         Object value = valueOf(entry);
         if (value instanceof Boolean flag) {
-            if (mouseX >= contentRight() - 24) {
+            if (mouseX >= controlRight() - 24) {
                 write(entry, !flag);
                 return true;
             }
@@ -677,7 +733,7 @@ public class BaritonePage extends GenericScreen {
                 return true;
             }
             int width = sliderWidth();
-            int left = contentRight() - TEXT_W - 8 - width;
+            int left = controlRight() - TEXT_W - 8 - width;
             if (button == 0 && mouseX >= left - 3 && mouseX <= left + width + 3) {
                 dragEntry = entry;
                 dragTrackX = left;
@@ -693,7 +749,7 @@ public class BaritonePage extends GenericScreen {
             if (button == 0) {
                 dropdown = entry;
                 dropW = Math.min(180, Math.max(120, contentWidth / 3));
-                dropX = contentRight() - dropW;
+                dropX = controlRight() - dropW;
                 dropY = row.y() + ROW_H;
                 return true;
             }
