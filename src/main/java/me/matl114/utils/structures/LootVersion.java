@@ -8,7 +8,8 @@ public enum LootVersion implements ConfigEnum {
     V1_21_4("1.21.4", true, false, false),
     V1_21_11("1.21.11", true, true, true),
     V26_1("26.1", false, true, true),
-    V26_2("26.2", false, true, true);
+    V26_2("26.2", false, true, true),
+    V26_3("26.3", false, true, true);
 
     private final String gameVersion;
     private final boolean ancientCityHasNameTag;
@@ -43,7 +44,7 @@ public enum LootVersion implements ConfigEnum {
     }
 
     public boolean hasLodestonePortalPool() {
-        return this == V1_21_11 || this == V26_1 || this == V26_2;
+        return this == V1_21_11 || this == V26_1 || this == V26_2 || this == V26_3;
     }
 
     @Override

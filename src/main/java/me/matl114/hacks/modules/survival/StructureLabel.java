@@ -113,7 +113,9 @@ public class StructureLabel extends BaseModule {
             .build();
 
     public final EnumRef<LootVersion> lootVersion = builder(root.add("loot-version"), LootVersion.class)
-            //#if MC >= 260200
+            //#if MC >= 260300
+            //$$ .defaultValue(LootVersion.V26_3)
+            //#elseif MC >= 260200
             .defaultValue(LootVersion.V26_2)
             //#else
             //$$ .defaultValue(LootVersion.V26_1)
