@@ -68,6 +68,16 @@ public abstract class BaritoneHooks implements IHooks {
 
     public abstract <T> ValueAccessor<T> getSetting(String name);
 
+    /**
+     * 这一项的出厂值：Baritone 的 {@code Setting} 自带 {@code defaultValue}。
+     *
+     * <p>拿不到（没有 Baritone、名字不在表里或版本不认识）返回 {@code null}，
+     * 调用方据此决定要不要给出"恢复默认"的入口，不靠猜。
+     */
+    public Object getDefaultValue(String name) {
+        return null;
+    }
+
     public abstract boolean isBaritoneElytraProcessing();
 
     public abstract boolean isBaritonePathing();
@@ -283,6 +293,17 @@ public abstract class BaritoneHooks implements IHooks {
         @Override
         public <T> ValueAccessor<T> getSetting(String name) {
             return (ValueAccessor<T>) settingsMap.get(name);
+        }
+
+        @Override
+        public Object getDefaultValue(String name) {
+            if (name == null) {
+                return null;
+            }
+            // byLowerName 是 Baritone 自己维护的小写索引（它建表时用的就是无参 toLowerCase），
+            // 这里跟着用同一套转换，换到别的默认语言环境也不会对不上
+            Settings.Setting<?> setting = settings.byLowerName.get(name.toLowerCase());
+            return setting == null ? null : setting.defaultValue;
         }
 
         public String getCommandPrefix() {
