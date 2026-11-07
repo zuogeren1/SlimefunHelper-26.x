@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.Constants;
+import me.matl114.gui.FilterService;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
@@ -209,6 +210,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 所以连着建索引时的大小一起存，大小变了就重排。
      */
     private final Map<Registry<?>, IdIndex> idIndex = new IdentityHashMap<>();
+
+    /** 上一次筛选的结果：拼音转换不便宜，同一个搜索词每帧重算会把界面拖慢。 */
+    private Registry<?> shownRegistry;
+    private String shownFilter = "";
+    private List<Identifier> shownCache;
 
     /** 每个配置项的文本读写句柄：createKeyValue 会挂监听，不能每帧重建。 */
     private final Map<WrapperConfigRef<?>, AttrKeyValue<?>> handles = new IdentityHashMap<>();
@@ -1648,21 +1654,38 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return ids;
     }
 
-    /** 这一屏要列哪些候选：给了搜索词就按 id 与显示名各筛一遍，大小写不敏感。 */
+    /**
+     * 这一屏要列哪些候选：id 与显示名各筛一遍；显示名交给宿主的 {@link FilterService#nameMatch}，
+     * 于是中文名可以用全拼与首字母搜（「lieyanren」/「lyr」都能命中「烈焰人」），和宿主自己的列表一致。
+     *
+     * <p>结果按「注册表 + 搜索词」缓存：拼音转换不便宜，每帧对几百个候选重算会拖慢界面，
+     * 只有搜索词变了才重算一次。
+     */
     private List<Identifier> listShown(EntrySet<?> set) {
         List<Identifier> ids = sortedIds(set);
         if (listFilter.isEmpty()) {
             return ids;
         }
+        Registry<?> registry = set.registry();
+        if (shownCache != null && shownRegistry == registry && shownFilter.equals(listFilter)) {
+            return shownCache;
+        }
         String needle = listFilter.toLowerCase(Locale.ROOT);
+        // 拼音是连写的：允许在查询里随手加空格/下划线（「lie yan ren」「lie_yan_ren」），
+        // 比对前先把这两种分隔符去掉；id 那一侧仍按原样匹配，下划线在 id 里是有意义的
+        String compact = needle.replace(" ", "").replace("_", "");
+        String pinyinNeedle = compact.isEmpty() ? needle : compact;
         List<Identifier> out = new ArrayList<>();
         for (Identifier id : ids) {
-            String name = entryName(set.registry().getValue(id), id);
+            String name = entryName(registry.getValue(id), id);
             if (id.toString().toLowerCase(Locale.ROOT).contains(needle)
-                    || name.toLowerCase(Locale.ROOT).contains(needle)) {
+                    || FilterService.nameMatch(name, pinyinNeedle)) {
                 out.add(id);
             }
         }
+        shownRegistry = registry;
+        shownFilter = listFilter;
+        shownCache = out;
         return out;
     }
 
