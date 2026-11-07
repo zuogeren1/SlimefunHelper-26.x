@@ -21,6 +21,7 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.LongRef;
 import me.matl114.managers.config.MapRef;
 import me.matl114.managers.config.Ref;
+import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
@@ -29,6 +30,7 @@ import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldClickGuiScreen;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldTabBar;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.FieldEditor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -42,7 +44,7 @@ import net.minecraft.network.chat.Component;
  * 和宿主 {@code ConfigMultiLevelList} 走的是同一条解析路。
  * 解析不出来的路径仍要列出来，只是画成只读行——总表的价值一半在"这里有什么"，不是"这里能改什么"。
  *
- * <p>控件只做四件事：开关翻转、数值增减、枚举轮换、右键恢复默认。
+ * <p>可写的有四类：开关翻转、数值就地输入（± 只是步进）、枚举下拉、文本就地编辑；右键恢复默认。
  * 都走 {@link Ref} 自己的写入口，所以校验器、更新监听、脏标记全部沿用宿主那一套，
  * 不在这里复制一份配置语义。
  */
@@ -63,6 +65,10 @@ public class ConfigPage extends GenericScreen {
     private static final int RAIL_STEP = 19;
     /** 数值行两侧加减键的边长。 */
     private static final int BTN = 13;
+    /** 值槽（就地编辑的那一格）的宽度：右沿正好让到减号左边，与 ± 两键不重叠。 */
+    private static final int VALUE_W = 56;
+    /** 枚举下拉里一行候选的高度。 */
+    private static final int DROP_ROW_H = 13;
     private static final float WIDE = 1.2F;
     private static final String TITLE = "全配置";
     private static final String LATIN = "CONFIG";
@@ -88,6 +94,12 @@ public class ConfigPage extends GenericScreen {
     /** 原版输入框，只负责收字与画字；框体由 paintSearch 画。 */
     private EditBox searchBox;
 
+    /** 行内编辑：同一时刻只有一格在改，原版输入框由它在 tick 里增删。 */
+    private final FieldEditor editor = new FieldEditor();
+
+    /** 打开中的枚举下拉：记的是 key，列表重建后同一条路径仍是同一下拉。 */
+    private String dropdownKey;
+
     private int winX;
     private int winY;
     private int winW;
@@ -110,6 +122,9 @@ public class ConfigPage extends GenericScreen {
 
     /** 分节标题行（item 为 null）或一条设置行。 */
     private record Line(int y, int height, String section, Item item) {}
+
+    /** 一块矩形：值槽与下拉面板共用，绘制与命中取同一份几何。 */
+    private record Rect(int x, int y, int w, int h) {}
 
     public ConfigPage(EndfieldSettings settings) {
         super(Component.empty(), 0, 0);
@@ -138,6 +153,9 @@ public class ConfigPage extends GenericScreen {
         this.y = 0;
         this.railScroll = 0;
         this.itemScroll = 0;
+        // 行要按新尺寸重排：贴行的输入框与下拉都按旧坐标算，先收起来（文本顺手提交）
+        editor.close();
+        dropdownKey = null;
         this.roots.clear();
         this.itemCache.clear();
         for (Config config : Config.REGISTRY.stream().toList()) {
@@ -186,6 +204,16 @@ public class ConfigPage extends GenericScreen {
         });
         this.searchBox = box;
         this.addRenderableWidget(box);
+    }
+
+    /**
+     * 输入框是原版控件，增删不能发生在点击与渲染的遍历里，
+     * 所以统一放在这个每 tick 调一次的位置。
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        editor.tick();
     }
 
     // ------------------------------------------------------------------ 几何
@@ -369,7 +397,7 @@ public class ConfigPage extends GenericScreen {
 
     /** 这一页真正给了控件的类型；其余只显示当前值。 */
     private static boolean writable(Ref<?> ref) {
-        return ref instanceof FlagRef || isNumeric(ref) || ref instanceof EnumRef<?>;
+        return ref instanceof FlagRef || isNumeric(ref) || ref instanceof EnumRef<?> || ref instanceof StringRef;
     }
 
     private static double numericOf(Ref<?> ref) {
@@ -385,17 +413,51 @@ public class ConfigPage extends GenericScreen {
         return magnitude >= 10.0D ? 1.0D : (magnitude >= 1.0D ? 0.5D : 0.1D);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static void nudge(Ref<?> ref, double delta) {
-        double next = numericOf(ref) + delta;
+    /** 按 Ref 的实际类型写回：整数取整，小数留两位；步进与手输走同一条路，口径不会分叉。 */
+    private static void setNumber(Ref<?> ref, double value) {
         if (ref instanceof IntRef intRef) {
-            intRef.set((int) Math.round(next));
+            intRef.set((int) Math.round(value));
         } else if (ref instanceof LongRef longRef) {
-            longRef.set(Math.round(next));
+            longRef.set(Math.round(value));
         } else if (ref instanceof DoubleRef doubleRef) {
-            doubleRef.set(Math.round(next * 100.0D) / 100.0D);
+            doubleRef.set(Math.round(value * 100.0D) / 100.0D);
         } else if (ref instanceof FloatRef floatRef) {
-            floatRef.set((float) (Math.round(next * 100.0D) / 100.0D));
+            floatRef.set((float) (Math.round(value * 100.0D) / 100.0D));
+        }
+    }
+
+    private static void nudge(Ref<?> ref, double delta) {
+        setNumber(ref, numericOf(ref) + delta);
+    }
+
+    /** 输入框里的数：解析不了（"-"、"." 这种打到一半的）就不动配置。 */
+    private static void commitNumber(Ref<?> ref, String text) {
+        try {
+            double value = Double.parseDouble(text.trim().replace(',', '.'));
+            // "NaN"/"Infinity" 也解析得出来，但写进配置就是坏值
+            if (!Double.isFinite(value)) {
+                return;
+            }
+            setNumber(ref, value);
+        } catch (NumberFormatException ignored) {
+            // 半截输入不是错误，继续等下一个字
+        }
+    }
+
+    /** 文本提交：交的是 trim 之后的原文，空串照写（空串是合法取值，不是"没改"）。 */
+    private static void commitText(Ref<?> ref, String text) {
+        if (ref instanceof StringRef stringRef) {
+            stringRef.set(text.trim());
+        }
+    }
+
+    /** 文本行的原文：显示会截断，回填与写回都必须拿完整值。 */
+    private static String textValueOf(Ref<?> ref) {
+        try {
+            Object value = ref.getValue();
+            return value == null ? "" : String.valueOf(value);
+        } catch (Throwable e) {
+            return "";
         }
     }
 
@@ -415,6 +477,45 @@ public class ConfigPage extends GenericScreen {
             return value == null ? "—" : enumLabel(value);
         } catch (Throwable e) {
             return "—";
+        }
+    }
+
+    /**
+     * 枚举的候选：取当前取值的 {@link ConfigEnum#getMap()}，也就是它的声明顺序。
+     * 类型还没注册完成时取 map 会抛，这里兜住并退回空表（芯片保持只读）。
+     */
+    private static List<ConfigEnum> enumOptions(Ref<?> ref) {
+        try {
+            Object value = ref.getValue();
+            if (value instanceof ConfigEnum configEnum) {
+                Map<String, ConfigEnum> map = configEnum.getMap();
+                if (map != null) {
+                    return new ArrayList<>(map.values());
+                }
+            }
+        } catch (Throwable e) {
+            // 注册未完成：这一次没有可选项
+        }
+        return List.of();
+    }
+
+    /** 当前取值：只用来在下拉里标出当前项，取不到就当没有当前项。 */
+    private static ConfigEnum currentEnum(Ref<?> ref) {
+        try {
+            Object value = ref.getValue();
+            return value instanceof ConfigEnum configEnum ? configEnum : null;
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    /** 写回选中的枚举：走 Ref 自己的写入口，校验器与更新监听照旧生效。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void selectEnum(Ref<?> ref, ConfigEnum value) {
+        try {
+            ((Ref) ref).setValue(value);
+        } catch (Throwable e) {
+            // 类型不符或校验器拒绝：保持原值
         }
     }
 
@@ -490,7 +591,7 @@ public class ConfigPage extends GenericScreen {
             return right - 20;
         }
         if (isNumeric(ref)) {
-            return right - BTN * 2 - 4 - 56;
+            return right - BTN * 2 - 4 - VALUE_W;
         }
         if (ref instanceof EnumRef<?>) {
             return right - enumWidth(ref);
@@ -506,18 +607,57 @@ public class ConfigPage extends GenericScreen {
         return Math.min(180, Math.max(40, itemsWidth() / 3));
     }
 
+    /**
+     * 值槽：点一下就能原地改的那一格。
+     *
+     * <p>数值让开 ± 两键，槽右沿正好落在减号左边；文本没有键要让，占住只读区原本那一段。
+     * 绘制、悬停与命中共用这一份几何，不会出现"看着在格子里却点不到"。
+     */
+    private Rect valueSlot(Item item, int rowY) {
+        Ref<?> ref = item.ref();
+        int w = isNumeric(ref) ? VALUE_W : readOnlyWidth();
+        return new Rect(controlLeft(item), rowY + FieldEditor.FIELD_TOP, w, FieldEditor.FIELD_H);
+    }
+
+    private boolean inValueSlot(Item item, int rowY, int mx, int my) {
+        Rect slot = valueSlot(item, rowY);
+        return mx >= slot.x() && mx < slot.x() + slot.w() && my >= slot.y() && my < slot.y() + slot.h();
+    }
+
+    /**
+     * 枚举下拉的矩形：贴在行下方，放不下翻到行上方，最后夹进窗口。
+     *
+     * <p>宽度跟着候选文本走但不超过设置列，右沿对到 {@link #itemsRight()}，与芯片同一条线；
+     * 绘制与命中都用这一份，翻上翻下不会各算一套。
+     */
+    private Rect dropdownRect(Line line, int count) {
+        int w = Math.min(itemsWidth(), Math.max(120, enumWidth(line.item().ref())));
+        int h = count * DROP_ROW_H + 4;
+        int x = Math.max(winX + 4, Math.min(winX + winW - 4 - w, itemsRight() - w));
+        int y = line.y() + ROW_H + 2;
+        if (y + h > winY + winH - 4) {
+            y = line.y() - h - 2;
+        }
+        y = Math.max(winY + 4, Math.min(winY + winH - 4 - h, y));
+        return new Rect(x, y, w, h);
+    }
+
     // ------------------------------------------------------------------ 绘制
 
     private void paint(EfWidget self, VDrawContext ctx, int mouseX, int mouseY) {
         Ef.Palette p = pal();
         buildLines();
         hovered = null;
+        // 输入框默认白字，浅色主题的 panel 底上看不见
+        editor.setTextColor(p.ink());
 
         paintBar(ctx, p, mouseX, mouseY);
         paintSearch(ctx, p);
         paintBody(ctx, p, mouseX, mouseY);
         paintFooter(ctx, p);
         paintFrame(ctx, p);
+        // 下拉是浮层：越过正文裁剪与页脚，所以画在帧之后；说明框仍盖在它上面
+        paintDropdown(ctx, p, mouseX, mouseY);
         paintTip(ctx, p, mouseX, mouseY);
     }
 
@@ -693,21 +833,95 @@ public class ConfigPage extends GenericScreen {
         } else if (isNumeric(ref)) {
             int minusX = right - BTN * 2 - 4;
             int plusX = right - BTN;
-            int valueRight = minusX - 6;
-            String text = valueText(ref);
-            Ef.text(ctx, text, valueRight - Ef.textWidth(text), y + 5, p.ink());
+            paintValue(ctx, p, item, y, mouseX, mouseY);
             paintStep(ctx, p, minusX, y, "-", mouseX, mouseY);
             paintStep(ctx, p, plusX, y, "+", mouseX, mouseY);
         } else if (ref instanceof EnumRef<?>) {
             String text = enumText(ref) + " ▾";
-            int width = Ef.textWidth(text) + 10;
+            int width = enumWidth(ref);
             int chipX = right - width;
-            boolean hot = mouseX >= chipX && mouseX <= right && mouseY >= y + 3 && mouseY < y + 15;
+            boolean open = enumKey(item).equals(dropdownKey);
+            boolean hot = open || (mouseX >= chipX && mouseX <= right && mouseY >= y + 3 && mouseY < y + 15);
             Ef.cutFill(ctx, chipX, y + 3, width, 12, hot ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, p.ink());
+        } else if (ref instanceof StringRef) {
+            paintValue(ctx, p, item, y, mouseX, mouseY);
         } else {
             String text = Ef.ellipsis(valueText(ref), readOnlyWidth());
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink2());
+        }
+    }
+
+    /**
+     * 值槽：编辑中只画框（字由输入框自己画），其余时候值右对齐到槽内沿。
+     *
+     * <p>悬停补一圈 1px 的框——这一格能点开，是点之前就该看出来的事。
+     * 值右对齐到槽内沿而不是行尾，框出现时字不会横向跳一格。
+     */
+    private void paintValue(VDrawContext ctx, Ef.Palette p, Item item, int rowY, int mouseX, int mouseY) {
+        Ref<?> ref = item.ref();
+        Rect slot = valueSlot(item, rowY);
+        if (editor.isOpenFor(editorKey(item))) {
+            FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), true, false);
+            return;
+        }
+        boolean hot = mouseX >= slot.x()
+                && mouseX < slot.x() + slot.w()
+                && mouseY >= slot.y()
+                && mouseY < slot.y() + slot.h();
+        if (hot) {
+            FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), false, true);
+        }
+        boolean blank = false;
+        String text;
+        if (ref instanceof StringRef) {
+            text = textValueOf(ref);
+            blank = text.isEmpty();
+        } else {
+            text = valueText(ref);
+        }
+        String shown = Ef.ellipsis(blank ? "空" : text, slot.w() - 8);
+        Ef.text(ctx, shown, slot.x() + slot.w() - 6 - Ef.textWidth(shown), rowY + 5, blank ? p.ink2() : p.ink());
+    }
+
+    /**
+     * 枚举下拉：panel 底、切角边，一行一个候选，当前项左侧压一条 3px 的当前位置线。
+     *
+     * <p>画在帧之后：它是浮层，可以越过正文裁剪与页脚；指在面板上时不再顺带出底下那一行的说明。
+     */
+    private void paintDropdown(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
+        Line line = lineOfKey(dropdownKey);
+        if (line == null) {
+            // 行被筛掉或滚出视野：面板没有可贴的位置
+            dropdownKey = null;
+            return;
+        }
+        List<ConfigEnum> options = enumOptions(line.item().ref());
+        if (options.isEmpty()) {
+            dropdownKey = null;
+            return;
+        }
+        Rect box = dropdownRect(line, options.size());
+        Ef.fill(ctx, box.x(), box.y(), box.w(), box.h(), p.panel());
+        Ef.cutOutline(ctx, box.x(), box.y(), box.w(), box.h(), p.ink(), Ef.CUT);
+
+        ConfigEnum current = currentEnum(line.item().ref());
+        for (int i = 0; i < options.size(); i++) {
+            int oy = box.y() + 2 + i * DROP_ROW_H;
+            boolean hot = mouseX >= box.x() && mouseX <= box.x() + box.w() && mouseY >= oy && mouseY < oy + DROP_ROW_H;
+            boolean active = options.get(i) == current;
+            if (hot) {
+                Ef.fill(ctx, box.x() + 1, oy, box.w() - 2, DROP_ROW_H, Ef.mix(p.panel(), p.ink(), 0.08F));
+            }
+            if (active) {
+                Ef.fill(ctx, box.x() + 1, oy, 3, DROP_ROW_H, p.trace());
+            }
+            Ef.text(ctx, Ef.ellipsis(enumLabel(options.get(i)), box.w() - 14), box.x() + 8, oy + 3,
+                    active ? p.ink() : p.ink2());
+        }
+
+        if (mouseX >= box.x() && mouseX <= box.x() + box.w() && mouseY >= box.y() && mouseY <= box.y() + box.h()) {
+            hovered = null;
         }
     }
 
@@ -765,10 +979,37 @@ public class ConfigPage extends GenericScreen {
 
     // ------------------------------------------------------------------ 交互
 
+    /** 行内编辑的身份：数值与文本各占一份，同一行同一用途的 key 不随帧变化。 */
+    private static String editorKey(Item item) {
+        return (item.ref() instanceof StringRef ? "text:" : "num:") + item.path();
+    }
+
+    /** 枚举下拉的身份：芯片、候选与命中都认这一条路径。 */
+    private static String enumKey(Item item) {
+        return "enum:" + item.path();
+    }
+
     private boolean click(EfWidget self, double mouseX, double mouseY, int button) {
         int mx = (int) mouseX;
         int my = (int) mouseY;
 
+        // 这一下是给输入框的：容器会把它继续派下去，这里挪走焦点就打不进去了
+        if (editor.contains(mouseX, mouseY)) {
+            return false;
+        }
+        // 点到别处：文本这一类要在这里提交，之后再按新的目标处理这一下
+        editor.close();
+        buildLines();
+
+        if (dropdownKey != null) {
+            boolean picked = clickDropdown(mx, my, button);
+            dropdownKey = null;
+            if (picked) {
+                return true;
+            }
+            // 面板外的一击只关面板，不穿透到下面的控件；命令栏是例外，照旧切页
+            return my >= winY && my < winY + barH && clickTabBar(mx, my);
+        }
         if (my >= winY && my < winY + barH) {
             return clickTabBar(mx, my);
         }
@@ -779,11 +1020,53 @@ public class ConfigPage extends GenericScreen {
         if (my < bodyTop() || my >= bodyBottom()) {
             return false;
         }
-        buildLines();
         if (mx >= winX && mx < winX + railW) {
             return button == 0 && clickRail(mx, my);
         }
         return clickItems(mx, my, button);
+    }
+
+    /** 按 key 找回布局里的那一行：被筛掉或滚出可视区的行没有可贴的位置，也就算找不到。 */
+    private Line lineOfKey(String key) {
+        if (key == null) {
+            return null;
+        }
+        for (Line line : lines) {
+            if (line.item() == null || !key.equals(enumKey(line.item()))) {
+                continue;
+            }
+            if (line.y() + ROW_H < bodyTop() || line.y() > bodyBottom()) {
+                return null;
+            }
+            return line;
+        }
+        return null;
+    }
+
+    /** 下拉里的一击：落在候选行上才写回，面板空白处只收面板。 */
+    private boolean clickDropdown(int mx, int my, int button) {
+        if (button != 0) {
+            return false;
+        }
+        Line line = lineOfKey(dropdownKey);
+        if (line == null) {
+            return false;
+        }
+        List<ConfigEnum> options = enumOptions(line.item().ref());
+        if (options.isEmpty()) {
+            return false;
+        }
+        Rect box = dropdownRect(line, options.size());
+        if (mx < box.x() || mx > box.x() + box.w()) {
+            return false;
+        }
+        int top = box.y() + 2;
+        int index = (my - top) / DROP_ROW_H;
+        if (my < top || index < 0 || index >= options.size()) {
+            return false;
+        }
+        selectEnum(line.item().ref(), options.get(index));
+        return true;
     }
 
     /** 分类条：点当前项什么都不做，点别的项当场换页，点右侧切深浅。 */
@@ -840,6 +1123,33 @@ public class ConfigPage extends GenericScreen {
         return false;
     }
 
+    /**
+     * 点开一格的输入框：这里只登记目标与几何，原版控件要等 tick 才建。
+     *
+     * <p>数值逐字写回（解析不了的半截输入由 {@link #commitNumber} 忽略）；文本等 Enter 或点到别处
+     * 才交一次——每敲一个字就写一次配置，宿主的更新监听会被打成筛子。
+     */
+    private void openEditor(Item item, int rowY) {
+        Ref<?> ref = item.ref();
+        Rect slot = valueSlot(item, rowY);
+        boolean text = ref instanceof StringRef;
+        editor.open(
+                this,
+                editorKey(item),
+                slot.x(),
+                slot.y(),
+                slot.w(),
+                text ? textValueOf(ref) : valueText(ref),
+                !text,
+                value -> {
+                    if (text) {
+                        commitText(ref, value);
+                    } else {
+                        commitNumber(ref, value);
+                    }
+                });
+    }
+
     private boolean apply(Item item, int rowY, int mx, int my, int button) {
         Ref<?> ref = item.ref();
         if (ref == null) {
@@ -862,29 +1172,35 @@ public class ConfigPage extends GenericScreen {
             return false;
         }
         if (isNumeric(ref)) {
-            if (my < rowY + 2 || my >= rowY + 2 + BTN) {
-                return false;
-            }
+            boolean band = my >= rowY + 2 && my < rowY + 2 + BTN;
             int minusX = right - BTN * 2 - 4;
             int plusX = right - BTN;
-            if (mx >= minusX && mx < minusX + BTN) {
+            if (band && mx >= minusX && mx < minusX + BTN) {
                 nudge(ref, -stepOf(ref));
                 return true;
             }
-            if (mx >= plusX && mx < plusX + BTN) {
+            if (band && mx >= plusX && mx < plusX + BTN) {
                 nudge(ref, stepOf(ref));
+                return true;
+            }
+            // 两个键之外还有值槽：槽右沿正好让到减号左边，点谁是谁
+            if (inValueSlot(item, rowY, mx, my)) {
+                openEditor(item, rowY);
                 return true;
             }
             return false;
         }
-        if (ref instanceof EnumRef<?> enumRef) {
+        if (ref instanceof EnumRef<?>) {
             int chipX = right - enumWidth(ref);
             if (mx >= chipX && mx <= right && my >= rowY + 3 && my < rowY + 15) {
-                try {
-                    enumRef.next();
-                } catch (Throwable e) {
-                    // 枚举类型还没注册完成时取值会抛，点一下不该把界面打断
-                }
+                dropdownKey = enumKey(item);
+                return true;
+            }
+            return false;
+        }
+        if (ref instanceof StringRef) {
+            if (inValueSlot(item, rowY, mx, my)) {
+                openEditor(item, rowY);
                 return true;
             }
             return false;
@@ -897,6 +1213,9 @@ public class ConfigPage extends GenericScreen {
         if (my < bodyTop() || my >= bodyBottom()) {
             return false;
         }
+        // 滚动会挪行：贴行的输入框与下拉都按旧坐标算，先收起来（文本顺手提交）
+        editor.close();
+        dropdownKey = null;
         buildLines();
         int step = (int) (Math.signum(amount) * 18.0D);
         if (mouseX >= winX && mouseX < winX + railW) {
