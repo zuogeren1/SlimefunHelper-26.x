@@ -240,6 +240,10 @@ public class TextFieldElement extends AbstractElement implements InputElement, T
         if (this.focusUnlocked || nextFocused) {
             if (this.focused != nextFocused) {
                 this.focused = nextFocused;
+                //#if MC >= 260300
+                //$$ // 26.3 的 SDL 只在 startTextInput 之后才派发 TEXT_INPUT；不通知就一个字符都收不到
+                //$$ Minecraft.getInstance().textInputManager().onTextInputFocusChange(this, nextFocused);
+                //#endif
                 if (nextFocused) {
                     this.lastSwitchFocusTime = Util.getMillis();
                 } else {
@@ -248,6 +252,18 @@ public class TextFieldElement extends AbstractElement implements InputElement, T
             }
         }
         this.updateTextPosition();
+        //#if MC >= 260300
+        //$$ if (this.focused) {
+        //$$     // 把候选窗锚到输入框上，中日韩输入法才不会飘到屏幕角落
+        //$$     Minecraft.getInstance()
+        //$$             .textInputManager()
+        //$$             .setTextInputArea(
+        //$$                     (int) element.x(),
+        //$$                     (int) element.y(),
+        //$$                     (int) (element.x() + element.getTextureWidth()),
+        //$$                     (int) (element.y() + element.getTextureHeight()));
+        //$$ }
+        //#endif
     }
 
     protected double translateMouseX(DrawableWidget element, double mouseX) {
