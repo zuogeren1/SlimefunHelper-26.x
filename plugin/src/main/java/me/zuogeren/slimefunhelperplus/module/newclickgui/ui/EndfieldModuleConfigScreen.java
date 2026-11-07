@@ -3,19 +3,23 @@ package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.lang.reflect.RecordComponent;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.Constants;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
+import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.config.WrapEnum;
@@ -39,8 +43,11 @@ import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.Registry;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TextColor;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.EntityType;
 
 /**
  * 模块配置页：把 {@code getEditableConfig()} 里的条目按真实配置前缀分组，画成一张表单。
@@ -64,6 +71,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int TEXT_W = 40;
     /** 行尾重置按钮占的宽度。 */
     private static final int RESET_W = 16;
+
+    /** 名单面板的尺寸上限：实际宽高再按窗口夹一次，面板必须整块落在窗口里。 */
+    private static final int LIST_W = 280;
+    private static final int LIST_H = 240;
+    /** 面板内边距与标题行高：搜索框排在标题下，列表排在搜索框下。 */
+    private static final int LIST_PAD = 8;
+    private static final int LIST_HEAD = 12;
+    /** 搜索框高与候选行高：行高同时是滚动的步长，绘制与命中按同一格数。 */
+    private static final int LIST_SEARCH_H = 14;
+    private static final int LIST_ROW = 16;
 
     /** 调色盘的格子步长：方块与色相条都按它铺，命中按同一格宽折算，点到哪格就是哪格。 */
     private static final int PAL_CELL = 4;
@@ -174,6 +191,25 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private int paletteAnchorW;
     private int paletteRowY;
 
+    /**
+     * 打开中的名单面板：目标项。
+     *
+     * <p>面板的位置每帧从目标行现算（见 {@link #listBox()}），不记锚点：
+     * 行会随滚动、筛选、改窗口挪位，记下的坐标一挪就错，而这几件事本来就会先收起面板。
+     */
+    private WrapperConfigRef<?> listPanel;
+    /** 面板里的搜索词：收起面板就作废，下次打开是全量。 */
+    private String listFilter = "";
+    /** 列表的像素滚动量：只按 {@link #LIST_ROW} 的整数倍挪，绘制与命中才能共用同一套行下标。 */
+    private int listScroll;
+    private EditBox listSearchBox;
+
+    /**
+     * 候选 id 索引，按注册表记一份：注册表在启动后基本不动，但数据包重载会改它，
+     * 所以连着建索引时的大小一起存，大小变了就重排。
+     */
+    private final Map<Registry<?>, IdIndex> idIndex = new IdentityHashMap<>();
+
     /** 每个配置项的文本读写句柄：createKeyValue 会挂监听，不能每帧重建。 */
     private final Map<WrapperConfigRef<?>, AttrKeyValue<?>> handles = new IdentityHashMap<>();
 
@@ -182,6 +218,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 一帧内布局出来的行，绘制时写入、点击时读取；坐标为屏幕绝对坐标。 */
     private record Row(int y, int height, WrapperConfigRef<?> ref, String section, boolean header) {}
+
+    /** 一块可点件的矩形。 */
+    private record Box(int x, int y, int w, int h) {}
+
+    /** 一份候选 id 索引，以及建它时的注册表大小。 */
+    private record IdIndex(int size, List<Identifier> ids) {}
 
     /**
      * 页面自己的动作：配置表之外的一个操作，整行可点。
@@ -330,6 +372,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         this.scroll = 0;
         // 布局重来（开屏、改窗口大小）时行会挪位：浮层的锚点跟着失效，先收起来
         this.palette = null;
+        this.listPanel = null;
         if (tabKey != null) {
             this.tabBar = new EndfieldTabBar();
         }
@@ -558,6 +601,20 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             colorBox = null;
             startColorBox();
         }
+        ListBox panelBox = listBox();
+        if (panelBox == null) {
+            if (listPanel != null) {
+                // 目标行不在这一屏上了（换页、筛选）：面板没有可列的集合
+                listPanel = null;
+            }
+            if (listSearchBox != null) {
+                listSearchBox.setResponder(null);
+                this.removeWidget(listSearchBox);
+                listSearchBox = null;
+            }
+        } else if (listSearchBox == null) {
+            startListSearch(panelBox);
+        }
         Iterator<Map.Entry<WrapperConfigRef<?>, DrawableWidget>> it = editors.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<WrapperConfigRef<?>, DrawableWidget> entry = it.next();
@@ -589,7 +646,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位 / 颜色，以及"一条记录里几个 double"（例如 {@code Vec2}）。
+     * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位 / 颜色 / 名单，以及"一条记录里几个 double"（例如 {@code Vec2}）。
      * 后者也必须在列，否则行里画的是自己的滑杆、点击却让给宿主控件，两头都没接上。
      */
     private boolean nativeControl(WrapperConfigRef<?> ref) {
@@ -602,6 +659,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value instanceof EnumRef<?>
                 || value instanceof KeyBindRef
                 || value.getValue() instanceof WrapColor
+                || value.getValue() instanceof EntrySet<?>
                 || value.getValue() instanceof OptionalPrimitive<?>
                 || recordParts(value.getValue()) != null;
     }
@@ -972,8 +1030,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         paintDropdown(ctx, p, mouseX, mouseY);
         paintFooter(ctx, p);
         paintFrame(ctx, p);
-        // 调色盘是浮层：它越过正文裁剪与页脚，所以画在最后，但仍让说明框盖在上面
+        // 调色盘与名单面板是浮层：它们越过正文裁剪与页脚，所以画在最后，但仍让说明框盖在上面
         paintPalette(ctx, p, mouseX, mouseY);
+        paintListPanel(ctx, p, mouseX, mouseY);
         paintTooltip(ctx, p, mouseX, mouseY);
     }
 
@@ -1151,6 +1210,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
         } else if (raw instanceof WrapColor) {
             paintColor(ctx, p, y, ref);
+        } else if (raw instanceof EntrySet<?> set) {
+            paintEntrySet(ctx, p, y, ref, set);
         } else {
             // 其余类型由宿主自带的编辑器负责绘制：这里只登记矩形并留白
             int boxW = Math.min(260, Math.max(120, contentWidth / 3));
@@ -1328,6 +1389,301 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.fill(ctx, cx, cy + h - 1, PAL_CELL, 1, color);
         Ef.fill(ctx, cx, cy, 1, h, color);
         Ef.fill(ctx, cx + PAL_CELL - 1, cy, 1, h, color);
+    }
+
+    // ------------------------------------------------------------------ 名单面板
+
+    /**
+     * 名单行：切角块里写「N 项」和展开箭头，块本身就是面板的开关。
+     *
+     * <p>行里只画计数不画内容：这一行固定 18px 高，名单动辄上百项，铺不开；
+     * 真正的勾选在点开的面板里做，计数留着让人一眼看出点下去有没有改到东西。
+     */
+    private void paintEntrySet(VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref, EntrySet<?> set) {
+        Box chip = entrySetChip(set, y);
+        boolean open = listPanel == ref;
+        Ef.cutFill(ctx, chip.x(), chip.y(), chip.w(), chip.h(), open ? p.ink() : p.chip(), Ef.CUT);
+        Ef.text(ctx, entrySetChipText(set), chip.x() + 5, chip.y() + 2, open ? p.paper() : p.ink());
+    }
+
+    private static String entrySetChipText(EntrySet<?> set) {
+        return set.set().size() + " 项   ▾";
+    }
+
+    /** 计数块的矩形：绘制与命中共用这一份，块宽跟着「N 项」的位数走，两边不会算岔。 */
+    private Box entrySetChip(EntrySet<?> set, int rowY) {
+        String text = entrySetChipText(set);
+        int width = Ef.textWidth(text) + 10;
+        return new Box(controlRight() - width, rowY + 3, width, 12);
+    }
+
+    /**
+     * 名单行的一击：只有计数块接，点它把名单面板开到这一页上。
+     *
+     * <p>面板开着时这一下会先被「面板外只关面板」吃掉，所以这里只负责打开——
+     * 再点一次同一块就是收起。打开时收起别的浮层：同一时刻只留一个。
+     */
+    private boolean hitEntrySet(
+            WrapperConfigRef<?> wrapper, EntrySet<?> set, int mouseX, int mouseY, int button, int rowY) {
+        Box chip = entrySetChip(set, rowY);
+        if (button != 0 || !inBox(chip.x(), chip.y(), chip.w(), chip.h(), mouseX, mouseY)) {
+            return false;
+        }
+        listPanel = wrapper;
+        listFilter = "";
+        listScroll = 0;
+        palette = null;
+        return true;
+    }
+
+    /**
+     * 名单面板的矩形与它里面三段（标题、搜索框、候选列表）的位置。
+     *
+     * <p>右边缘对到 {@link #controlRight()}，与计数块同一条线：项数从 9 变 10 时块会变宽，
+     * 面板要是贴着块走就会跟着挪。上下贴在目标行外侧，放不下翻到行上方，最后整体夹进窗口。
+     */
+    private record ListBox(
+            int x, int y, int w, int h, int searchX, int searchY, int searchW, int listX, int listY, int listW,
+            int listH) {}
+
+    private ListBox listBox() {
+        int rowY = -1;
+        if (listPanel != null) {
+            for (Row row : rows) {
+                if (!row.header && row.ref == listPanel) {
+                    rowY = row.y;
+                    break;
+                }
+            }
+        }
+        if (rowY < 0) {
+            return null;
+        }
+        int w = Math.max(120, Math.min(LIST_W, winW - 8));
+        int h = Math.max(80, Math.min(LIST_H, winH - 8));
+        int x = Math.max(winX + 4, Math.min(winX + winW - 4 - w, controlRight() - w));
+        int y = rowY + ROW_H + 2;
+        if (y + h > winY + winH - 4) {
+            y = rowY - h - 2;
+        }
+        y = Math.max(winY + 4, Math.min(winY + winH - 4 - h, y));
+        int innerW = w - LIST_PAD * 2;
+        int searchX = x + LIST_PAD;
+        int searchY = y + LIST_PAD + LIST_HEAD;
+        int listY = searchY + LIST_SEARCH_H + 5;
+        return new ListBox(x, y, w, h, searchX, searchY, innerW, x + LIST_PAD, listY, innerW,
+                y + h - LIST_PAD - listY);
+    }
+
+    /**
+     * 面板里的搜索框：一只原版 EditBox，只在 tick 里建、拆。
+     *
+     * <p>与数值、颜色两只同一套规矩：程序写值前先摘 responder，responder 认的是建它的那只框，
+     * 换框之后旧框再回调也写不到新面板里。
+     */
+    private void startListSearch(ListBox box) {
+        EditBox editor = new EditBox(
+                Minecraft.getInstance().font,
+                box.searchX() + 4,
+                box.searchY() + 4,
+                box.searchW() - 8,
+                9,
+                Component.empty());
+        editor.setBordered(false);
+        editor.setMaxLength(64);
+        this.listSearchBox = editor;
+        applyListText(editor);
+        this.addRenderableWidget(editor);
+        this.setFocused(editor);
+    }
+
+    private void applyListText(EditBox editor) {
+        editor.setResponder(null);
+        try {
+            if (!listFilter.equals(editor.getValue())) {
+                editor.setValue(listFilter);
+            }
+        } finally {
+            editor.setResponder(text -> {
+                if (editor == this.listSearchBox) {
+                    this.listFilter = text;
+                    // 换了过滤词就回到列表顶部，否则会停在越界的位置上
+                    this.listScroll = 0;
+                }
+            });
+        }
+    }
+
+    /**
+     * 名单面板：标题、搜索框、候选行与滚动条，整块画在面板自己这一层。
+     *
+     * <p>它和调色盘一样是浮层，所以画在帧与页脚之后；候选行由这里直接画，
+     * 不交给宿主控件——宿主的列表编辑会另开一屏，而勾选要能立刻看见行上的计数变化。
+     */
+    private void paintListPanel(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
+        if (listPanel == null || !(listPanel.ref().getValue() instanceof EntrySet<?> set)) {
+            listPanel = null;
+            return;
+        }
+        ListBox box = listBox();
+        if (box == null) {
+            // 目标行不在这一屏上了（换页、筛选）：面板没有可列的集合
+            listPanel = null;
+            return;
+        }
+        int cut = Ef.CUT_PANEL;
+        Ef.cutFill(ctx, box.x(), box.y(), box.w(), box.h(), p.panel(), cut);
+        // 斜边逐格 1px 画：12 档的描边贴图是 16→12 拉过来的，会摊成 2px 的糊带
+        Ef.fill(ctx, box.x(), box.y(), box.w(), 1, p.ink());
+        Ef.fill(ctx, box.x(), box.y(), 1, box.h(), p.ink());
+        Ef.fill(ctx, box.x() + box.w() - 1, box.y(), 1, box.h() - cut, p.ink());
+        Ef.fill(ctx, box.x(), box.y() + box.h() - 1, box.w() - cut, 1, p.ink());
+        for (int i = 0; i < cut; i++) {
+            Ef.fill(ctx, box.x() + box.w() - cut + i, box.y() + box.h() - 1 - i, 1, 1, p.ink());
+        }
+
+        int headY = box.y() + LIST_PAD - 3;
+        Ef.trackedWide(ctx, "// ENTITIES", box.x() + LIST_PAD, headY, p.ink2(), 1, 1.2F);
+        String stats = "已选 " + set.set().size() + " / 共 " + sortedIds(set).size();
+        Ef.text(ctx, stats, box.x() + box.w() - LIST_PAD - Ef.textWidth(stats), headY, p.ink());
+        Ef.rule(ctx, box.x() + LIST_PAD, box.searchY() - 4, box.w() - LIST_PAD * 2, Ef.alpha(p.rule(), 0.55F));
+
+        Ef.cutOutline(ctx, box.searchX(), box.searchY(), box.searchW(), LIST_SEARCH_H, p.rule(), Ef.CUT);
+        if (listSearchBox != null) {
+            // 输入框自己画字：不改颜色的话深色主题还行，浅色面板上几乎看不见
+            listSearchBox.setTextColor(p.ink());
+        }
+        if (listFilter.isEmpty()) {
+            // 输入框只在有字时自己画字，空的时候要这里补上提示
+            Ef.text(ctx, "搜索生物", box.searchX() + 4, box.searchY() + 4, p.ink2());
+        }
+
+        List<Identifier> shown = listShown(set);
+        int visible = Math.max(1, box.listH() / LIST_ROW);
+        int first = listScroll / LIST_ROW;
+        for (int i = 0; i < visible && first + i < shown.size(); i++) {
+            int rowY = box.listY() + i * LIST_ROW;
+            Identifier id = shown.get(first + i);
+            Object entry = set.registry().getValue(id);
+            if (inBox(box.listX(), rowY, box.listW(), LIST_ROW, mouseX, mouseY)) {
+                Ef.fill(ctx, box.listX(), rowY, box.listW(), LIST_ROW, Ef.mix(p.panel(), p.ink(), 0.06F));
+            }
+            if (set.set().contains(entry)) {
+                Ef.fill(ctx, box.listX(), rowY, 3, LIST_ROW, p.trace());
+            }
+            String idText = Ef.ellipsis(id.toString(), Math.max(40, box.listW() / 2));
+            int idWidth = Ef.textWidth(idText);
+            int nameWidth = Math.max(16, box.listW() - 9 - idWidth - 8);
+            Ef.text(ctx, Ef.ellipsis(entryName(entry, id), nameWidth), box.listX() + 7, rowY + 3, p.ink());
+            Ef.text(ctx, idText, box.listX() + box.listW() - idWidth, rowY + 3, p.ink2());
+        }
+        if (shown.isEmpty()) {
+            Ef.text(ctx, "没有匹配项", box.listX(), box.listY() + 3, p.ink2());
+        }
+        Ef.scrollbar(ctx, box.x() + box.w() - 4, box.listY(), box.listH(), listScroll,
+                shown.size() * LIST_ROW, box.listH(), p.rule(), p.ink2());
+        if (inBox(box.x(), box.y(), box.w(), box.h(), mouseX, mouseY)) {
+            // 鼠标此刻在面板上，指的不是底下那一行：不要顺带出它的说明
+            hovered = null;
+            hoveredAction = null;
+        }
+    }
+
+    /** 面板里点在第几行：滚动量是整行挪的，行下标直接由行号推出来。 */
+    private int listRowAt(ListBox box, int mouseX, int mouseY) {
+        if (mouseX < box.listX() || mouseX >= box.listX() + box.listW()
+                || mouseY < box.listY() || mouseY >= box.listY() + box.listH()) {
+            return -1;
+        }
+        return listScroll / LIST_ROW + (mouseY - box.listY()) / LIST_ROW;
+    }
+
+    /**
+     * 面板里的一击：按当时的过滤结果取第 {@code index} 项，切换选中状态并立刻写回。
+     *
+     * <p>写回的是复制出来的一份集合：宿主那份 {@code EntrySet} 可能正被别处读着，
+     * 原地改会改到别人手里的那一份，{@code idList()} 里缓存的 id 也不会跟着更新。
+     */
+    private void toggleListEntry(int index) {
+        if (listPanel == null || !(listPanel.ref().getValue() instanceof EntrySet<?> set)) {
+            return;
+        }
+        List<Identifier> shown = listShown(set);
+        if (index < 0 || index >= shown.size()) {
+            return;
+        }
+        Object entry = set.registry().getValue(shown.get(index));
+        if (entry == null) {
+            return;
+        }
+        Set<Object> next = new LinkedHashSet<>(set.set());
+        if (!next.remove(entry)) {
+            next.add(entry);
+        }
+        writeEntrySet(listPanel, set.registry(), next);
+    }
+
+    /** 把选好的那份集合写成新的 {@code EntrySet}：构造器自己会包一层 LinkedHashSet，勾选顺序留着。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void writeEntrySet(WrapperConfigRef<?> target, Registry<?> registry, Set<Object> selection) {
+        setValue(target.ref(), new EntrySet(registry, selection));
+    }
+
+    /**
+     * 候选 id：按 {@code 命名空间:路径} 排好序，注册表自己的遍历顺序不适合直接铺出来。
+     *
+     * <p>返回的是缓存本身，调用方只读。
+     */
+    private List<Identifier> sortedIds(EntrySet<?> set) {
+        Registry<?> registry = set.registry();
+        int size = registry.keySet().size();
+        IdIndex cached = idIndex.get(registry);
+        if (cached != null && cached.size() == size) {
+            return cached.ids();
+        }
+        List<Identifier> ids = new ArrayList<>(registry.keySet());
+        ids.sort(Comparator.comparing(Identifier::toString));
+        idIndex.put(registry, new IdIndex(size, ids));
+        return ids;
+    }
+
+    /** 这一屏要列哪些候选：给了搜索词就按 id 与显示名各筛一遍，大小写不敏感。 */
+    private List<Identifier> listShown(EntrySet<?> set) {
+        List<Identifier> ids = sortedIds(set);
+        if (listFilter.isEmpty()) {
+            return ids;
+        }
+        String needle = listFilter.toLowerCase(Locale.ROOT);
+        List<Identifier> out = new ArrayList<>();
+        for (Identifier id : ids) {
+            String name = entryName(set.registry().getValue(id), id);
+            if (id.toString().toLowerCase(Locale.ROOT).contains(needle)
+                    || name.toLowerCase(Locale.ROOT).contains(needle)) {
+                out.add(id);
+            }
+        }
+        return out;
+    }
+
+    /** 候选的显示名：实体用内置名（「僵尸」），其它注册表退回 id 的路径段。 */
+    private static String entryName(Object entry, Identifier id) {
+        if (entry instanceof EntityType<?> type) {
+            return type.getDescription().getString();
+        }
+        return id.getPath();
+    }
+
+    private int listMaxScroll(ListBox box) {
+        if (listPanel == null || !(listPanel.ref().getValue() instanceof EntrySet<?> set)) {
+            return 0;
+        }
+        int max = listShown(set).size() * LIST_ROW - box.listH();
+        // 上取整到整行：滚动量始终是行的整数倍，最后一屏才不会露出半行
+        return max <= 0 ? 0 : ((max + LIST_ROW - 1) / LIST_ROW) * LIST_ROW;
+    }
+
+    private static boolean inBox(int x, int y, int w, int h, int mouseX, int mouseY) {
+        return mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
     }
 
     /**
@@ -1668,6 +2024,25 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
         }
 
+        if (listPanel != null) {
+            ListBox box = listBox();
+            if (box != null && inBox(box.x(), box.y(), box.w(), box.h(), mx, my)) {
+                if (listSearchBox != null && listSearchBox.isMouseOver(mouseX, mouseY)) {
+                    // 落在搜索框里的这一下是去挪光标的：不接、也不收起面板
+                    return false;
+                }
+                if (button == 0) {
+                    toggleListEntry(listRowAt(box, mx, my));
+                }
+                return true;
+            }
+            // 面板外只关面板，不穿透；命令栏是导航，放行照常切页
+            listPanel = null;
+            if (my < winY || my >= winY + barH) {
+                return true;
+            }
+        }
+
         if (my >= winY && my < winY + barH) {
             if (tabKey != null) {
                 String hit = tabBar.click(winX, winY, winW, tabKey, light(), mx, my);
@@ -1757,6 +2132,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private boolean wheel(EfWidget self, double mouseX, double mouseY, double amount) {
+        if (listPanel != null) {
+            ListBox box = listBox();
+            int step = (int) (Math.signum(amount) * LIST_ROW);
+            if (box != null && inBox(box.x(), box.y(), box.w(), box.h(), (int) mouseX, (int) mouseY)) {
+                // 面板上的滚轮只滚列表，正文一行都不动
+                listScroll = Math.max(0, Math.min(listMaxScroll(box), listScroll - step));
+                return true;
+            }
+            listPanel = null;
+        }
         if (mouseY < bodyTop() || mouseY > bodyTop() + bodyHeight()) {
             return false;
         }
@@ -1812,6 +2197,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (ref.getValue() instanceof WrapColor) {
             return hitColor(wrapper, mouseX, mouseY, button, rowY);
         }
+        if (ref.getValue() instanceof EntrySet<?> set) {
+            return hitEntrySet(wrapper, set, mouseX, mouseY, button, rowY);
+        }
         Object[] parts = recordParts(ref.getValue());
         if (parts != null) {
             int index = Math.max(0, Math.min(parts.length - 1, (mouseY - rowY) / ROW_H));
@@ -1849,6 +2237,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         dropW = Math.min(180, Math.max(120, contentWidth / 3));
         dropX = controlRight() - dropW;
         dropY = rowY + Math.max(0, part) * ROW_H + ROW_H;
+        listPanel = null;
     }
 
     private void applyOption(WrapperConfigRef<?> wrapper, int part, Object option) {
@@ -1889,6 +2278,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             numberPart = part;
             numberRowY = rowY;
             numberSlotX = right - TEXT_W;
+            listPanel = null;
             if (numberBox != null) {
                 // 旧绑定立刻失效：tick 里会按新目标重写文本并重挂 responder
                 numberBox.setResponder(null);
@@ -1922,10 +2312,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             paletteAnchorW = box.swatchW();
             paletteRowY = rowY;
             colorTarget = null;
+            listPanel = null;
             return true;
         }
         if (mouseX >= box.hexX() && mouseX < box.hexX() + box.hexW()) {
             palette = null;
+            listPanel = null;
             colorTarget = wrapper;
             colorRowY = rowY;
             lastColorKey = "";
