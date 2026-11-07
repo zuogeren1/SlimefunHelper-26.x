@@ -11,6 +11,7 @@ import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
+import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.api.ModuleGroup;
 import me.matl114.hacks.api.ViewModuleGroup;
 import me.matl114.hacks.modules.HackModules;
@@ -50,8 +51,6 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     private static final int CHIP_GAP = 4;
     /** 记录行悬停时整行右移的距离。 */
     private static final int ROW_SHIFT = 6;
-    /** 记录行尾部留给状态块与箭头的那一截宽度。 */
-    private static final int ROW_TAIL = 96;
     /** 眉标与字标的横向拉伸：界面字体没有宽度轴，靠这一步做宽体拉丁。 */
     private static final float WIDE = 1.2F;
 
@@ -242,6 +241,44 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     private static boolean isOn(BaseModule module) {
         FlagRef flag = module.getBindFlag();
         return flag != null && flag.get();
+    }
+
+    /** 行尾那块写什么：有总开关写启停，没有就写这一页有多少项设置。 */
+    private String chipText(BaseModule module) {
+        FlagRef flag = module.getBindFlag();
+        return flag != null ? (flag.get() ? "启用" : "停用") : settingsLabel(module);
+    }
+
+    /** 没有总开关的模块，用「N 项设置」代替启停；行尾块与详情面板共用这一句。 */
+    private static String settingsLabel(BaseModule module) {
+        int count = configCount(module);
+        return count == 0 ? "无设置" : count + " 项设置";
+    }
+
+    /** 这一页实际能看到几项设置：和配置页用同一个可见性判据。 */
+    private static int configCount(BaseModule module) {
+        int count = 0;
+        for (WrapperConfigRef<?> ref : module.getEditableConfig()) {
+            if (ref.shouldShow()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** 行尾块的左边界，绘制与命中共用。 */
+    private int chipX(int width, BaseModule module) {
+        return width - 12 - (Ef.textWidth(chipText(module)) + 8);
+    }
+
+    /** 行尾块的动作：有总开关就切开关，没有就打开它的设置页。 */
+    private void activate(BaseModule module) {
+        FlagRef flag = module.getBindFlag();
+        if (flag != null) {
+            flag.toggle();
+        } else {
+            openConfig(module);
+        }
     }
 
     private int enabledOf(List<BaseModule> modules) {
@@ -753,8 +790,16 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             Ef.cutFill(ctx, tx, tagY, tagW, tagH, isSelected ? signal : tagBg, Ef.CUT);
             Ef.text(ctx, no, tx + 3, tagY + 1, isSelected ? onSignal : tagFg);
 
+            // 行尾那块：有总开关就是「启用/停用」，没有总开关就写这一页有多少项设置
+            String chip = chipText(module);
+            int chipW = Ef.textWidth(chip) + 8;
+            int chipH = lh + 2;
+            int chipX = w - 12 - chipW;
+            int chipY = y + (rh - chipH) / 2;
+            boolean chipHover = hover && mouseX >= chipX - 3 && mouseX <= chipX + chipW + 3;
+
             int nameX = tx + tagW + 6;
-            int nameW = Math.max(10, w - nameX - ROW_TAIL);
+            int nameW = Math.max(10, chipX - nameX - 10);
             String cn = moduleLabel(module);
             String en = module.getName();
             // 没有翻译的模块只画一行，否则两行字一模一样，看着像重影
@@ -767,18 +812,18 @@ public class EndfieldClickGuiScreen extends GenericScreen {
                 Ef.text(ctx, Ef.ellipsis(en, nameW), nameX, textTop + lh + gap, ink2);
             }
 
-            boolean on = isOn(module);
-            String state = on ? "启用" : "停用";
-            int stateW = Ef.textWidth(state) + 8;
-            int stateH = lh + 2;
-            int stateX = w - ROW_TAIL + 4;
-            int stateY = y + (rh - stateH) / 2;
-            if (on) {
-                Ef.fill(ctx, stateX, stateY, stateW, stateH, ink);
-                Ef.text(ctx, state, stateX + 4, stateY + 1, Ef.alpha(p.paper(), alpha));
+            FlagRef flag = module.getBindFlag();
+            if (flag == null) {
+                int bg = chipHover ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip();
+                Ef.cutFill(ctx, chipX, chipY, chipW, chipH, Ef.alpha(bg, alpha), Ef.CUT);
+                Ef.text(ctx, chip, chipX + 4, chipY + 1, ink2);
+            } else if (flag.get()) {
+                int bg = chipHover ? Ef.mix(ink, signal, 0.22F) : ink;
+                Ef.fill(ctx, chipX, chipY, chipW, chipH, bg);
+                Ef.text(ctx, chip, chipX + 4, chipY + 1, Ef.alpha(p.paper(), alpha));
             } else {
-                Ef.dashedOutline(ctx, stateX, stateY, stateW, stateH, rule);
-                Ef.text(ctx, state, stateX + 4, stateY + 1, ink2);
+                Ef.dashedOutline(ctx, chipX, chipY, chipW, chipH, rule);
+                Ef.text(ctx, chip, chipX + 4, chipY + 1, ink2);
             }
 
         } finally {
@@ -788,6 +833,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
 
     private boolean clickMain(EfWidget self, double mouseX, double mouseY, int button) {
         int my = (int) (mouseY - self.y());
+        int mx = (int) (mouseX - self.x());
         List<BaseModule> modules = shown();
         int start = firstRow(modules);
         if (my < HEAD_H) {
@@ -798,15 +844,28 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             return false;
         }
         BaseModule module = modules.get(index);
-        selected = module;
         if (button == 1) {
+            selected = module;
             openConfig(module);
             return true;
         }
-        FlagRef flag = module.getBindFlag();
-        if (flag != null) {
-            flag.toggle();
+        // 悬停时整行右移，行尾块跟着走，命中框也要跟着挪
+        int chipLeft = chipX(self.getTextureWidth(), module) + ROW_SHIFT;
+        boolean onChip = mx >= chipLeft - 3
+                && mx <= chipLeft + Ef.textWidth(chipText(module)) + 11
+                && my < HEAD_H + (index - start + 1) * rowH();
+        if (onChip) {
+            // 直接点行尾那块：有开关就切，没开关就进它的设置页
+            selected = module;
+            activate(module);
+            return true;
         }
+        if (module != selected) {
+            // 第一次点只选中，不动开关
+            selected = module;
+            return true;
+        }
+        activate(module);
         return true;
     }
 
@@ -863,10 +922,10 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         int stateH = lh + 2;
         FlagRef bindFlag = selected.getBindFlag();
         if (bindFlag == null) {
-            // 触发型模块没有开关状态，别显示成「停用」
-            String kind = "触发型";
+            // 没有总开关的模块不显示启停，改写成这一页有多少项设置
+            String kind = settingsLabel(selected);
             int kindW = Ef.textWidth(kind) + 8;
-            Ef.dashedOutline(ctx, cx, cy, kindW, stateH, p.rule());
+            Ef.cutFill(ctx, cx, cy, kindW, stateH, p.chip(), Ef.CUT);
             Ef.text(ctx, kind, cx + 4, cy + 1, p.ink2());
         } else {
             boolean on = bindFlag.get();
@@ -897,6 +956,10 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         }
         if (desc.isEmpty()) {
             desc = "这个模块没有写说明。";
+        }
+        if (bindFlag == null) {
+            // 没有总开关的模块，先说明开关在哪
+            desc = "没有总开关，功能在设置里逐项开关。" + desc;
         }
         List<String> lines = Ef.wrap(desc, innerW);
         int ly = cy;
@@ -968,7 +1031,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         Ef.text(ctx, left, 8, 3, p.ink2());
         String mid = displayGroupName(group) + "  │  " + modulesOf(group).size() + " 项";
         Ef.text(ctx, mid, 8 + Ef.textWidth(left) + 12, 3, p.ink2());
-        String right = "单击切换 │ 右键打开配置";
+        String right = "单击选中 │ 再点切换 │ 右键配置";
         if (w - 8 - Ef.textWidth(right) > 8 + Ef.textWidth(left) + 12 + Ef.textWidth(mid) + 8) {
             Ef.text(ctx, right, w - 8 - Ef.textWidth(right), 3, p.ink2());
         }
