@@ -8,6 +8,7 @@ import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.module.conflux.ConfluxMapHelper;
 import me.zuogeren.slimefunhelperplus.module.friendwine.FriendWine;
 import me.zuogeren.slimefunhelperplus.module.locator.LocatorTrackModule;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import net.fabricmc.loader.api.ModContainer;
 
 /**
@@ -63,6 +64,8 @@ public class PlusPlugin implements SlimefunHelperPlugin {
         context.modules().register(PLUGIN_ID, "Render", new LocatorTrackModule());
         // 朋友的酒：纯渲染层效果，同样挂 Render 组
         context.modules().register(PLUGIN_ID, "Render", new FriendWine());
+        // 新界面：壳子和配置都是插件自己的，但注册成模块才能在列表里看到 / 开关
+        context.modules().register(PLUGIN_ID, "Tasks", new NewClickGui());
         // 再把本插件的模块聚合到一个只读视图组，方便集中查找
         context.modules().registerViewGroup(PLUGIN_ID, "SlimeFunHelper+", () -> context.modules().modulesOf(PLUGIN_ID));
         Debug.info("[SFH+] onModuleBootstrap: ConfluxMapHelper 已注册");
