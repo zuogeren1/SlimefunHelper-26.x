@@ -290,11 +290,12 @@ public class DisablerManager extends BaseModule implements LegalMovementManager.
     // fix break before delayQueuePlace flush -> grim flag AirLiquidBreak
     public void onBreakAction(Event<ServerboundPlayerActionPacket> eventBreak) {
         if (eventBreak.isCancelled()) return;
-        switch (eventBreak.context.getAction()) {
-            case START_DESTROY_BLOCK, STOP_DESTROY_BLOCK -> {}
-            default -> {
-                return;
-            }
+        // 用 if 而不是 enum switch：switch 会生成合成的 $SwitchMap 内部类，
+        // 热重载/重新编译期间如果只加载到外层类，就会在发包路径上抛 NoClassDefFoundError。
+        var action = eventBreak.context.getAction();
+        if (action != ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK
+                && action != ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK) {
+            return;
         }
         if (enable.get() && hasAnyPlaceActionGrimQueue && autoFlushPlaceBreakQueue.get()) {
             flushACPlaceQueue0();
