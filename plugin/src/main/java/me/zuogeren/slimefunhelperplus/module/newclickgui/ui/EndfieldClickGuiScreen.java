@@ -558,6 +558,9 @@ public class EndfieldClickGuiScreen extends GenericScreen {
 
     /** 入场进度：每行错开一点点，缓动近似 snap（很快到位、稍后停稳）。 */
     private float rowProgress(int index, int count) {
+        if (!NewClickGui.animations()) {
+            return 1.0F;
+        }
         long elapsed = System.currentTimeMillis() - animStart;
         int stagger = Math.min(38, Math.max(8, 520 / Math.max(1, count)));
         float t = (elapsed - (long) index * stagger) / 260.0F;

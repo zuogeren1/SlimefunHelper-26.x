@@ -24,6 +24,8 @@
   "new-click-gui.open-key.tooltips": "点一下再按新键即可绑定；右键清除",
   "new-click-gui.takeover-multiplayer": "接管多人游戏界面的 ClickGui",
   "new-click-gui.takeover-multiplayer.tooltips": "打开后，多人游戏界面右上角那个 SlimefunHelper 按钮会打开本界面；关掉时仍开宿主的 ClickGui",
+  "new-click-gui.animations": "界面动效",
+  "new-click-gui.animations.tooltips": "关掉后所有过渡直接到位：不淡入、不擦入、不等时间",
   "widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
   "widget.click-gui.module-name.Render.FriendWine": "朋友的酒",
   "widget.click-gui.module-name.Render.FriendWine.tooltips": "网络梗：所有生物变成果冻一样 Q 弹并旋转",

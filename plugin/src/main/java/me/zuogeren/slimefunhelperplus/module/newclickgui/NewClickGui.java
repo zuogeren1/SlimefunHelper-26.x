@@ -43,6 +43,9 @@ public class NewClickGui extends BaseModule {
     /** 多人游戏界面右上角的 SlimefunHelper 按钮是否改成本界面；关掉时仍开宿主自己的 ClickGui。 */
     public final FlagRef takeoverMultiplayer;
 
+    /** 界面动效开关：关掉后所有过渡直接落到终态，不淡入、不擦入、不等时间。 */
+    public final FlagRef animations;
+
     public NewClickGui() {
         super("NewClickGui");
         instance = this;
@@ -55,6 +58,10 @@ public class NewClickGui extends BaseModule {
 
         this.takeoverMultiplayer = flagBuilder(base.add("takeover-multiplayer"))
                 .defaultValue(false)
+                .build();
+
+        this.animations = flagBuilder(base.add("animations"))
+                .defaultValue(true)
                 .build();
 
         this.openKey = hotkey(base.add("open-key"))
@@ -86,6 +93,11 @@ public class NewClickGui extends BaseModule {
     /** 是否接管多人游戏界面右上角那个按钮。 */
     public static boolean takeoverMultiplayer() {
         return instance != null && instance.takeoverMultiplayer != null && instance.takeoverMultiplayer.get();
+    }
+
+    /** 动效是否打开；没有实例时按打开处理，界面至少是完整的。 */
+    public static boolean animations() {
+        return instance == null || instance.animations == null || instance.animations.get();
     }
 
     /**

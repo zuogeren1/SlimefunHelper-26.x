@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import me.matl114.renderer.TextRenderers;
 import me.matl114.renderer.text.TextDrawer;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
@@ -80,6 +81,14 @@ public final class Ef {
                     tagFg);
         }
 
+        /**
+         * 铺在 trace 填充上的前景色：深色主题的 trace 是强调色，用墨色反白；
+         * 浅色主题的 trace 退成墨色（纸上黄线看不见），此时用纸色反白。
+         */
+        public int onTrace() {
+            return trace == ink ? paper : ON_SIGNAL;
+        }
+
         private static int fade(int color, int alpha) {
             return (alpha << 24) | (color & 0x00FFFFFF);
         }
@@ -135,7 +144,8 @@ public final class Ef {
      * 界面是每帧重绘的，所以动效只靠时间戳算，不额外维持状态机。
      */
     public static float progress(long startMillis, float durationMillis) {
-        if (durationMillis <= 0.0F) {
+        if (durationMillis <= 0.0F || !NewClickGui.animations()) {
+            // 关掉动效时，所有过渡直接落到终态
             return 1.0F;
         }
         float t = (System.currentTimeMillis() - startMillis) / durationMillis;
