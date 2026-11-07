@@ -1,5 +1,6 @@
 package me.matl114.gui.basic;
 
+import me.matl114.managers.input.KeyCode;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.components.events.GuiEventListener;
@@ -95,7 +96,8 @@ public class ContentDelegateWidget<W extends GuiEventListener & Renderable & Nar
                                 new MouseButtonEvent(
                                         translatedMouseX,
                                         translatedMouseY,
-                                        new MouseButtonInfo(button, DrawableWidget.THREAD_SAFE_MODIFIER_CACHE)),
+                                        new MouseButtonInfo(
+                                            KeyCode.toSdlMouseButton(button), DrawableWidget.THREAD_SAFE_MODIFIER_CACHE)),
                                 DrawableWidget.THREAD_SAFE_DOUBLE_CLICK)) {
                     return true;
                 }
@@ -125,7 +127,8 @@ public class ContentDelegateWidget<W extends GuiEventListener & Renderable & Nar
                         .mouseReleased(new MouseButtonEvent(
                                 translatedMouseX,
                                 translatedMouseY,
-                                new MouseButtonInfo(button, DrawableWidget.THREAD_SAFE_MODIFIER_CACHE)))) {
+                                new MouseButtonInfo(
+                                            KeyCode.toSdlMouseButton(button), DrawableWidget.THREAD_SAFE_MODIFIER_CACHE)))) {
                     return true;
                 }
             }
@@ -175,7 +178,8 @@ public class ContentDelegateWidget<W extends GuiEventListener & Renderable & Nar
                                 new MouseButtonEvent(
                                         translatedMouseX,
                                         translatedMouseY,
-                                        new MouseButtonInfo(button, DrawableWidget.THREAD_SAFE_MODIFIER_CACHE)),
+                                        new MouseButtonInfo(
+                                            KeyCode.toSdlMouseButton(button), DrawableWidget.THREAD_SAFE_MODIFIER_CACHE)),
                                 deltaX * textureScale,
                                 deltaY * textureScale)) {
                     return true;

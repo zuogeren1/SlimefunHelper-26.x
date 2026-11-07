@@ -214,10 +214,35 @@ public class KeyCode {
     /**
      * 26.3 的 {@code MouseButtonInfo.button()} 是 SDL 的 1 基序号（1=左 2=中 3=右），
      * 而 GUI 内部（{@code InputHandler}、拖拽、框选）一律按 GLFW 的 0 基比较，进出 GUI 时统一转换。
+     *
+     * <p>SDL 与 GLFW 的<b>中键/右键次序相反</b>（SDL 中=2、右=3；GLFW 右=1、中=2），
+     * 不能整体减一：那样右键会变成 2（被当成中键），右键拖拽、右键菜单全部失效。
      */
     public static int toGlfwMouseButton(int button) {
         //#if MC >= 260300
-        //$$ return button - 1;
+        //$$ return switch (button) {
+        //$$     case 1 -> 0;
+        //$$     case 2 -> 2;
+        //$$     case 3 -> 1;
+        //$$     default -> button - 1;
+        //$$ };
+        //#else
+        return button;
+        //#endif
+    }
+
+    /**
+     * 反向转换：把 GUI 内部的 GLFW 0 基键号还原成 26.3 的 SDL 1 基序号，
+     * 供重新构造 {@link net.minecraft.client.input.MouseButtonInfo} 或键码（SDL-100）时使用。
+     */
+    public static int toSdlMouseButton(int button) {
+        //#if MC >= 260300
+        //$$ return switch (button) {
+        //$$     case 0 -> 1;
+        //$$     case 1 -> 3;
+        //$$     case 2 -> 2;
+        //$$     default -> button + 1;
+        //$$ };
         //#else
         return button;
         //#endif

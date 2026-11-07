@@ -46,7 +46,7 @@ public class KeyBindConfigurateWidget extends SubScreenWidget {
                                 (ButtonAction) ((element, widget, mouseButton) -> {
                                     // select the widget for the first press, and set code for the second
                                     if (this.isSelected() && widget == this.selected) {
-                                        onAnyKeyPressed(KeyCode.getKeyCodeFromMouseAction(mouseButton));
+                                        onAnyKeyPressed(KeyCode.getKeyCodeFromMouseAction(KeyCode.toSdlMouseButton(mouseButton)));
                                     }
                                     return true;
                                 })))
