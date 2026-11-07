@@ -33,6 +33,7 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.LongRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.Ref;
+import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.MultiKeyBind;
 import net.minecraft.client.Minecraft;
@@ -44,6 +45,7 @@ import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.core.Registry;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TextColor;
@@ -73,14 +75,29 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 行尾重置按钮占的宽度。 */
     private static final int RESET_W = 16;
 
+    /**
+     * 字段框的高度与内边距：外侧 1px 边 + 内侧 2px 聚焦环，字从框外沿往里第 3 像素起。
+     * 9px 的行高要 15px 的框才放得下，再矮聚焦环就压到字上了。
+     */
+    private static final int FIELD_H = 15;
+    private static final int FIELD_PAD = 3;
+    /** 字段框在行内下移的像素：行高 18 放 15 的框，上下各留一点，框不贴着行间的细线。 */
+    private static final int FIELD_TOP = 2;
+    /** 聚焦环的粗细，以及它离边框内侧的距离（CSS 的 outline-offset: -1px）。 */
+    private static final int FIELD_RING = 2;
+    private static final int FIELD_RING_INSET = 1;
+
+    /** 文本值为空串时的显示：空是合法取值（例如音乐路径空 = 不播），画成一个字免得像坏掉的控件。 */
+    private static final String EMPTY_TEXT = "空";
+
     /** 名单面板的尺寸上限：实际宽高再按窗口夹一次，面板必须整块落在窗口里。 */
     private static final int LIST_W = 280;
     private static final int LIST_H = 240;
     /** 面板内边距与标题行高：搜索框排在标题下，列表排在搜索框下。 */
     private static final int LIST_PAD = 8;
     private static final int LIST_HEAD = 12;
-    /** 搜索框高与候选行高：行高同时是滚动的步长，绘制与命中按同一格数。 */
-    private static final int LIST_SEARCH_H = 14;
+    /** 搜索框就是一只字段，取同一份框高；候选行高同时是滚动的步长，绘制与命中按同一格数。 */
+    private static final int LIST_SEARCH_H = FIELD_H;
     private static final int LIST_ROW = 16;
 
     /** 调色盘的格子步长：方块与色相条都按它铺，命中按同一格宽折算，点到哪格就是哪格。 */
@@ -180,6 +197,19 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private int colorRowY;
     private EditBox colorBox;
     private String lastColorKey = "";
+
+    /**
+     * 手动编辑文本配置的输入框：目标、行位置、草稿与开框时那一份原值。
+     *
+     * <p>草稿只在提交时写回配置：打到一半的路径不该被当成新值存下去。
+     * 原值用来判断有没有真的改过——输入框有长度上限，原样提交会把超长值截短。
+     */
+    private WrapperConfigRef<?> textTarget;
+    private int textRowY;
+    private EditBox textBox;
+    private String lastTextKey = "";
+    private String textDraft;
+    private String textOriginal;
 
     /**
      * 打开中的调色盘：目标项与它的锚点。
@@ -379,6 +409,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         // 布局重来（开屏、改窗口大小）时行会挪位：浮层的锚点跟着失效，先收起来
         this.palette = null;
         this.listPanel = null;
+        // 输入框随旧控件树一起拆掉了：先把打的字提交掉，再作废目标（没在编辑时这一下什么都不做）
+        closeTextEdit();
         if (tabKey != null) {
             this.tabBar = new EndfieldTabBar();
         }
@@ -409,9 +441,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void startNumberBox() {
         EditBox box = new EditBox(
                 Minecraft.getInstance().font,
-                numberSlotX + 3,
-                numberRowY + Math.max(0, numberPart) * ROW_H + 4,
-                TEXT_W - 6,
+                numberSlotX + FIELD_PAD,
+                numberRowY + Math.max(0, numberPart) * ROW_H + FIELD_TOP + FIELD_PAD,
+                TEXT_W - FIELD_PAD * 2,
                 9,
                 Component.empty());
         box.setBordered(false);
@@ -496,7 +528,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         EditBox box = new EditBox(
                 Minecraft.getInstance().font,
                 geo.hexX(),
-                colorRowY + 4,
+                colorRowY + FIELD_TOP + FIELD_PAD,
                 geo.hexW(),
                 9,
                 Component.empty());
@@ -571,6 +603,127 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
+     * 文本配置的输入框：长在同一个值区矩形里，框由 {@link #paintFieldFrame} 画，这里只管字。
+     *
+     * <p>和数值、颜色两只同一条规矩：原版控件只在 tick 里增删，点击与渲染期间只改字段。
+     */
+    private void startTextBox() {
+        Box field = textValueBox(textRowY);
+        TextEditBox box = new TextEditBox(
+                field.x() + FIELD_PAD,
+                field.y() + FIELD_PAD,
+                field.w() - FIELD_PAD * 2,
+                9,
+                this::closeTextEdit);
+        box.setBordered(false);
+        // 路径可能很长，上限只挡手滑；原值超长时提交前会先比对，不会被这一项截短
+        box.setMaxLength(1024);
+        this.textBox = box;
+        this.lastTextKey = textKey(textTarget, textRowY);
+        applyTextBoxText(box, textTarget);
+        this.addRenderableWidget(box);
+        this.setFocused(box);
+    }
+
+    private static String textKey(WrapperConfigRef<?> target, int rowY) {
+        return System.identityHashCode(target) + ":" + rowY;
+    }
+
+    /**
+     * 把配置值写进输入框，并把 responder 重新绑到目标项上。
+     *
+     * <p>{@code EditBox.setValue} 会同步回调 responder，程序写值前必须先摘掉：
+     * 否则「换一行再开编辑」会被当成用户输入，把旧值写回新目标。
+     * 草稿只记下来、不动配置，提交那一步才写回，所以打到一半的字不会存盘。
+     */
+    private void applyTextBoxText(EditBox box, WrapperConfigRef<?> target) {
+        Object raw = target == null ? null : target.ref().getValue();
+        String text = raw == null ? "" : raw.toString();
+        this.textOriginal = text;
+        this.textDraft = text;
+        box.setResponder(null);
+        try {
+            if (!text.equals(box.getValue())) {
+                box.setValue(text);
+            }
+        } finally {
+            box.setResponder(value -> {
+                if (box == this.textBox) {
+                    this.textDraft = value;
+                }
+            });
+        }
+    }
+
+    /**
+     * 把草稿写回配置：提交的是 trim 之后的原文，空串照写（空路径 = 不播）。
+     *
+     * <p>没改过就不写回：输入框有长度上限，原样提交会把超长值截短一截。
+     */
+    private void commitText() {
+        WrapperConfigRef<?> target = textTarget;
+        String draft = textDraft;
+        if (target == null || draft == null) {
+            return;
+        }
+        String next = draft.trim();
+        if (!next.equals(textOriginal)) {
+            setValue(target.ref(), next);
+            this.textOriginal = next;
+        }
+    }
+
+    /**
+     * 收起文本编辑：先把打的字提交掉，再作废目标。
+     *
+     * <p>没在编辑时什么都不做——点击与滚动每一下都会叫到这里，不能顺手清掉别处的焦点
+     * （名单的搜索框也靠这一个焦点收字）。目标已经作废的那一段里先把框藏起来：
+     * 原版控件要等 tick 才能拆，不藏的话行里画的值与输入框里的字会叠在同一格上。
+     */
+    private void closeTextEdit() {
+        if (textTarget == null) {
+            return;
+        }
+        commitText();
+        this.textTarget = null;
+        this.textDraft = null;
+        this.textOriginal = null;
+        if (textBox != null) {
+            // 目标已经作废：原版控件要等 tick 才拆，这一小段里不能再让它接键
+            textBox.setResponder(null);
+            textBox.setVisible(false);
+        }
+        // 焦点留在已经作废的框上，按下的键会落进一只看不见的输入框里
+        this.setFocused(null);
+    }
+
+    /**
+     * 文本输入框：Enter 直接提交。
+     *
+     * <p>原版 {@code EditBox} 不接 Enter（它只处理退格、方向键与复制粘贴），
+     * 而按键只派给拿到焦点的那一个控件，所以提交只能在这一层拦下来。
+     * Esc 不拦：它仍走 {@code Screen}，照原样关整屏。
+     */
+    private static final class TextEditBox extends EditBox {
+        private final Runnable submit;
+
+        TextEditBox(int x, int y, int width, int height, Runnable submit) {
+            super(Minecraft.getInstance().font, x, y, width, height, Component.empty());
+            this.submit = submit;
+        }
+
+        @Override
+        public boolean keyPressed(KeyEvent event) {
+            int key = event.key();
+            if (key == KeyCode.KEY_ENTER || key == KeyCode.KEY_KP_ENTER) {
+                this.submit.run();
+                return true;
+            }
+            return super.keyPressed(event);
+        }
+    }
+
+    /**
      * 宿主控件的增删不能发生在点击/渲染的遍历里，所以每 tick 同步一次：
      * 这一帧还在的行跟着走，消失的行卸掉，新出现的行建出来。
      */
@@ -606,6 +759,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             this.removeWidget(colorBox);
             colorBox = null;
             startColorBox();
+        }
+        if (textTarget == null) {
+            if (textBox != null) {
+                textBox.setResponder(null);
+                this.removeWidget(textBox);
+                textBox = null;
+            }
+        } else if (textBox == null) {
+            startTextBox();
+        } else if (!textKey(textTarget, textRowY).equals(lastTextKey)) {
+            // 换一行就换一只输入框：不复用，也就没有"旧绑定写新值"的机会
+            textBox.setResponder(null);
+            this.removeWidget(textBox);
+            textBox = null;
+            startTextBox();
         }
         ListBox panelBox = listBox();
         if (panelBox == null) {
@@ -652,7 +820,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位 / 颜色 / 名单，以及"一条记录里几个 double"（例如 {@code Vec2}）。
+     * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位 / 颜色 / 名单 / 文本，以及"一条记录里几个 double"（例如 {@code Vec2}）。
      * 后者也必须在列，否则行里画的是自己的滑杆、点击却让给宿主控件，两头都没接上。
      */
     private boolean nativeControl(WrapperConfigRef<?> ref) {
@@ -667,6 +835,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof WrapColor
                 || value.getValue() instanceof EntrySet<?>
                 || value.getValue() instanceof OptionalPrimitive<?>
+                || value instanceof StringRef
                 || recordParts(value.getValue()) != null;
     }
 
@@ -1136,14 +1305,19 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Object[] rowParts = recordParts(ref.ref().getValue());
         int rowH = rowParts != null ? ROW_H * rowParts.length : ROW_H;
         boolean hover = mouseY >= y && mouseY < y + rowH && mouseX >= contentLeft - 4 && mouseX <= right + 4;
-        if (hover && dropdown == null) {
+        // 编辑文本时不出说明框：输入框是后加的 renderable，画在整块画布之上，说明框会被它压住
+        if (hover && dropdown == null && textTarget == null) {
             hovered = ref;
         }
         if (hover) {
             Ef.fill(ctx, contentLeft - 4, y, contentWidth + 8, rowH, Ef.mix(p.paper(), p.ink(), 0.04f));
             Ef.fill(ctx, contentLeft - 4, y, 3, rowH, p.trace());
         }
-        int labelW = slotRow(ref.ref().getValue()) ? Math.max(24, labelWidth() - 28) : labelWidth();
+        // 文本行的值区占住行右半段，行名按它让出的宽度截断，长路径压不到行名上
+        Box textValue = ref.ref() instanceof StringRef ? textValueBox(y) : null;
+        int labelW = textValue != null
+                ? Math.max(40, textValue.x() - contentLeft - 10)
+                : (slotRow(ref.ref().getValue()) ? Math.max(24, labelWidth() - 28) : labelWidth());
         Ef.text(ctx, Ef.ellipsis(label(ref), labelW), contentLeft, y + 5, p.ink());
         Ef.rule(ctx, contentLeft - 4, y + rowH - 1, contentWidth + 8, Ef.alpha(p.rule(), 0.55F));
 
@@ -1219,12 +1393,80 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             paintColor(ctx, p, y, ref);
         } else if (raw instanceof EntrySet<?> set) {
             paintEntrySet(ctx, p, y, ref, set);
+        } else if (value instanceof StringRef text) {
+            paintTextValue(ctx, p, textValue, ref, text, mouseX, mouseY);
         } else {
             // 其余类型由宿主自带的编辑器负责绘制：这里只登记矩形并留白
             int boxW = Math.min(260, Math.max(120, contentWidth / 3));
             editorRects.put(ref, new int[] {right - boxW, y + 2, boxW, ROW_H - 4});
             Ef.fill(ctx, right - boxW, y + 3, boxW, ROW_H - 6, Ef.alpha(p.chip(), 0.35F));
         }
+    }
+
+    /**
+     * 字段框：直角、panel 底、1px 边，聚焦时边框内侧再压一圈 2px 的当前位置线。
+     *
+     * <p>切角在这套外观里表示"可点击"，输入框是往里写东西的格子，所以是直角。
+     * 聚焦环画在边框内侧而不是向外扩：框的外沿尺寸不随状态变，行距与相邻控件不会因为聚焦挪位。
+     * 环取 {@code trace}：深色主题是强调色，浅色主题退成墨色——浅纸上黄线看不见。
+     *
+     * <p>数值、颜色、名单搜索与文本四处都走这一处，不再各画一套。
+     */
+    private static void paintFieldFrame(
+            VDrawContext ctx, Ef.Palette p, int x, int y, int w, int h, boolean focused, boolean hovered) {
+        Ef.fill(ctx, x, y, w, h, p.panel());
+        int edge = focused ? p.ink() : (hovered ? p.ink2() : p.rule());
+        Ef.fill(ctx, x, y, w, 1, edge);
+        Ef.fill(ctx, x, y + h - 1, w, 1, edge);
+        Ef.fill(ctx, x, y, 1, h, edge);
+        Ef.fill(ctx, x + w - 1, y, 1, h, edge);
+        if (!focused) {
+            return;
+        }
+        Ef.fill(ctx, x + FIELD_RING_INSET, y + FIELD_RING_INSET, w - FIELD_RING_INSET * 2, FIELD_RING, p.trace());
+        Ef.fill(ctx, x + FIELD_RING_INSET, y + h - FIELD_RING_INSET - FIELD_RING,
+                w - FIELD_RING_INSET * 2, FIELD_RING, p.trace());
+        Ef.fill(ctx, x + FIELD_RING_INSET, y + FIELD_RING_INSET, FIELD_RING, h - FIELD_RING_INSET * 2, p.trace());
+        Ef.fill(ctx, x + w - FIELD_RING_INSET - FIELD_RING, y + FIELD_RING_INSET,
+                FIELD_RING, h - FIELD_RING_INSET * 2, p.trace());
+    }
+
+    /**
+     * 文本值区的矩形：宽度取正文的一半并夹在 [120,280]，右边缘对齐到 {@link #controlRight()}。
+     *
+     * <p>宽度固定才好在同一段里截断：值长短不一时框不会忽宽忽窄，点击区与输入框也有准数。
+     * 右边缘到 {@code controlRight()} 为止，行尾那一列留给重置图标。
+     */
+    private Box textValueBox(int rowY) {
+        int w = Math.max(120, Math.min(280, contentWidth / 2));
+        return new Box(controlRight() - w, rowY + FIELD_TOP, w, FIELD_H);
+    }
+
+    /**
+     * 文本行：默认只写值，悬停时现出字段框表示这一格能改，编辑时框交给输入框。
+     *
+     * <p>值右对齐到框的内沿（不是 {@code controlRight()}）：框一出现字不会横向跳一格，
+     * 悬停也就不会让值左右挪。编辑期间字由输入框自己画，这里只给框，两边取同一份几何。
+     */
+    private void paintTextValue(
+            VDrawContext ctx, Ef.Palette p, Box box, WrapperConfigRef<?> ref, StringRef value,
+            int mouseX, int mouseY) {
+        if (textTarget == ref) {
+            paintFieldFrame(ctx, p, box.x(), box.y(), box.w(), box.h(), true, false);
+            if (textBox != null) {
+                // 输入框默认的白字在浅色主题的 panel 底上看不见
+                textBox.setTextColor(p.ink());
+            }
+            return;
+        }
+        if (inBox(box.x(), box.y(), box.w(), box.h(), mouseX, mouseY)) {
+            paintFieldFrame(ctx, p, box.x(), box.y(), box.w(), box.h(), false, true);
+        }
+        String raw = value.get();
+        boolean empty = raw == null || raw.isEmpty();
+        String shown = Ef.ellipsis(empty ? EMPTY_TEXT : raw, box.w() - FIELD_PAD * 2);
+        Ef.text(ctx, shown, box.x() + box.w() - FIELD_PAD - Ef.textWidth(shown), box.y() + FIELD_PAD,
+                empty ? p.ink2() : p.ink());
     }
 
     /**
@@ -1261,7 +1503,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void paintColor(VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref) {
         ColorGeometry box = colorGeometry();
         if (colorTarget == ref) {
-            Ef.cutOutline(ctx, box.chipX(), y + 3, box.chipW(), 12, p.ink(), Ef.CUT);
+            // 手输的只有十六进制那一段：左边色块是另一件可点件（开调色盘），框住它会把两段说成同一件事
+            paintFieldFrame(ctx, p, box.hexX() - FIELD_PAD, y + FIELD_TOP, box.hexW() + FIELD_PAD * 2,
+                    FIELD_H, true, false);
+            if (colorBox != null) {
+                colorBox.setTextColor(p.ink());
+            }
             return;
         }
         int rgb = colorOf(ref);
@@ -1482,6 +1729,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 y + h - LIST_PAD - listY);
     }
 
+    /** 搜索框前缀 {@code //} 占的宽度：输入框、占位文字与命中都按这一格让位。 */
+    private static int searchPrefixW() {
+        return Ef.trackedWidth("//", 1) + 4;
+    }
+
     /**
      * 面板里的搜索框：一只原版 EditBox，只在 tick 里建、拆。
      *
@@ -1491,9 +1743,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void startListSearch(ListBox box) {
         EditBox editor = new EditBox(
                 Minecraft.getInstance().font,
-                box.searchX() + 4,
-                box.searchY() + 4,
-                box.searchW() - 8,
+                box.searchX() + 4 + searchPrefixW(),
+                box.searchY() + FIELD_PAD,
+                Math.max(24, box.searchW() - 8 - searchPrefixW()),
                 9,
                 Component.empty());
         editor.setBordered(false);
@@ -1555,14 +1807,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.text(ctx, stats, box.x() + box.w() - LIST_PAD - Ef.textWidth(stats), headY, p.ink());
         Ef.rule(ctx, box.x() + LIST_PAD, box.searchY() - 4, box.w() - LIST_PAD * 2, Ef.alpha(p.rule(), 0.55F));
 
-        Ef.cutOutline(ctx, box.searchX(), box.searchY(), box.searchW(), LIST_SEARCH_H, p.rule(), Ef.CUT);
+        paintFieldFrame(ctx, p, box.searchX(), box.searchY(), box.searchW(), LIST_SEARCH_H,
+                listSearchBox != null && listSearchBox.isFocused(),
+                inBox(box.searchX(), box.searchY(), box.searchW(), LIST_SEARCH_H, mouseX, mouseY));
+        // 搜索变体的 // 前缀：输入框与占位文字都从它后面起，字不会压到前缀上
+        Ef.tracked(ctx, "//", box.searchX() + 4, box.searchY() + FIELD_PAD, p.ink2(), 1);
         if (listSearchBox != null) {
             // 输入框自己画字：不改颜色的话深色主题还行，浅色面板上几乎看不见
             listSearchBox.setTextColor(p.ink());
         }
         if (listFilter.isEmpty()) {
             // 输入框只在有字时自己画字，空的时候要这里补上提示
-            Ef.text(ctx, "搜索生物", box.searchX() + 4, box.searchY() + 4, p.ink2());
+            Ef.text(ctx, "搜索生物", box.searchX() + 4 + searchPrefixW(), box.searchY() + FIELD_PAD, p.ink2());
         }
 
         List<Identifier> shown = listShown(set);
@@ -1802,8 +2058,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.fill(ctx, sliderX, lineY, knob, 1, p.ink());
         Ef.fill(ctx, sliderX + knob - 1, lineY - 3, 2, 7, p.ink());
         if (editing) {
-            // 输入框自己画字，这里只给个框；框的位置和输入框完全对齐
-            Ef.cutOutline(ctx, right - TEXT_W, y + 3, TEXT_W, 11, p.ink(), Ef.CUT);
+            // 输入框自己画字，这里只给个框：框比字多出 FIELD_PAD，聚焦环压在边框内侧
+            paintFieldFrame(ctx, p, right - TEXT_W, y + FIELD_TOP, TEXT_W, FIELD_H, true, false);
+            if (numberBox != null) {
+                numberBox.setTextColor(p.ink());
+            }
         } else {
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink());
         }
@@ -2007,6 +2266,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int my = (int) mouseY;
         // 上一次拖动在这里收尾：重新点击就重新判定
         dragRef = null;
+        // 文本输入框盖在值区上：落在它框里的这一下是去挪光标的，不提交、也不收起编辑
+        // （画布不接，容器会把点击继续派给输入框自己；重建输入框则会把正在打的内容换回旧值）
+        if (textTarget != null && textBox != null && textBox.isMouseOver(mouseX, mouseY)) {
+            return false;
+        }
+        // 点到别处就是提交：文本只在提交时写回配置，不提交等于把打好的字丢掉
+        closeTextEdit();
         // 点别处收起数值/颜色输入框；真的点在它们的控件上时，各自的 hit 方法会把它重新设回来
         numberTarget = null;
         // 颜色输入框盖在行尾的值区上，落在它框里的这一下是去挪光标的：不接、也不收起编辑
@@ -2051,9 +2317,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (listPanel != null) {
             ListBox box = listBox();
             if (box != null && inBox(box.x(), box.y(), box.w(), box.h(), mx, my)) {
-                if (listSearchBox != null && listSearchBox.isMouseOver(mouseX, mouseY)) {
-                    // 落在搜索框里的这一下是去挪光标的：不接、也不收起面板
-                    return false;
+                if (listSearchBox != null) {
+                    if (listSearchBox.isMouseOver(mouseX, mouseY)) {
+                        // 落在输入框里：这一下是去挪光标的，不接、也不收起面板
+                        return false;
+                    }
+                    // 落在边框或 // 前缀上：整格都算这一格（搜索变体），点哪都该把焦点给它
+                    if (inBox(box.searchX(), box.searchY(), box.searchW(), LIST_SEARCH_H, mx, my)) {
+                        this.setFocused(listSearchBox);
+                        return true;
+                    }
                 }
                 if (button == 0) {
                     toggleListEntry(listRowAt(box, mx, my));
@@ -2156,6 +2429,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private boolean wheel(EfWidget self, double mouseX, double mouseY, double amount) {
+        // 滚动等于离开这一格：正在编辑的文本先提交，打的字不该丢
+        closeTextEdit();
         if (listPanel != null) {
             ListBox box = listBox();
             int step = (int) (Math.signum(amount) * LIST_ROW);
@@ -2250,6 +2525,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 keyTarget = wrapper;
             }
             return true;
+        }
+        if (ref instanceof StringRef) {
+            return hitText(wrapper, mouseX, mouseY, button, rowY);
         }
         return true;
     }
@@ -2351,6 +2629,39 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 文本行的命中：只有值区那一块接左键，点开就把输入框排上（由 tick 建）。
+     *
+     * <p>同一时刻只留一个编辑态：开这一格就把调色盘、名单、下拉与别的输入框都收掉，
+     * 否则后加的那个 renderable 会盖在浮层上。焦点只能在 tick 里给：
+     * 点击处理完，容器会把焦点交回铺满屏幕的这块画布。
+     */
+    private boolean hitText(WrapperConfigRef<?> wrapper, int mouseX, int mouseY, int button, int rowY) {
+        if (button != 0) {
+            return false;
+        }
+        Box field = textValueBox(rowY);
+        if (!inBox(field.x(), field.y(), field.w(), field.h(), mouseX, mouseY)) {
+            return false;
+        }
+        textTarget = wrapper;
+        textRowY = rowY;
+        textDraft = null;
+        textOriginal = null;
+        lastTextKey = "";
+        palette = null;
+        listPanel = null;
+        dropdown = null;
+        dropPart = -1;
+        numberTarget = null;
+        colorTarget = null;
+        if (textBox != null) {
+            // 旧绑定立刻失效：tick 里会按新目标重写文本并重挂 responder
+            textBox.setResponder(null);
+        }
+        return true;
     }
 
     /**
