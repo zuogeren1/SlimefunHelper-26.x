@@ -1,5 +1,6 @@
 package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
 
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -39,6 +40,7 @@ import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextColor;
 
 /**
  * 模块配置页：把 {@code getEditableConfig()} 里的条目按真实配置前缀分组，画成一张表单。
@@ -60,10 +62,22 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int PAD = 14;
     /** 数值槽位的固定宽度：宽度稳定，滑轨才不会随数值跳动。 */
     private static final int TEXT_W = 40;
-    /** 颜色输入框的宽度：装得下 {@code #RRGGBB}，又不至于把行名挤出去。 */
-    private static final int COLOR_W = 70;
     /** 行尾重置按钮占的宽度。 */
     private static final int RESET_W = 16;
+
+    /** 调色盘的格子步长：方块与色相条都按它铺，命中按同一格宽折算，点到哪格就是哪格。 */
+    private static final int PAL_CELL = 4;
+    /** 饱和度/明度方块：26×16 格；宽度贴着标题行的内宽取，方块右边才不留空。 */
+    private static final int PAL_SV_W = 104;
+    private static final int PAL_SV_H = 64;
+    /** 色相条：与方块同宽，一格一色相。 */
+    private static final int PAL_HUE_H = 12;
+    /** 方块与色相条之间的空档。 */
+    private static final int PAL_GAP = 4;
+    /** 面板内边距。 */
+    private static final int PAL_PAD = 8;
+    /** 标题行（{@code // COLOR} 与当前十六进制）的高度。 */
+    private static final int PAL_HEAD = 14;
     /** 动作节的分节键：不会与任何配置路径相同（配置路径里不可能出现 NUL）。 */
     private static final String ACTION_SECTION = "\u0000actions";
     /** 数值格的下标：-1 是整值，>= 0 是记录分量，-2 是「可选值」里那一层。 */
@@ -148,6 +162,17 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private int colorRowY;
     private EditBox colorBox;
     private String lastColorKey = "";
+
+    /**
+     * 打开中的调色盘：目标项与它的锚点。
+     *
+     * <p>锚点在打开那一刻定下，之后颜色怎么变都不挪面板——否则每取一次色面板就跟着跳，
+     * 手正按着的那一格就跑了。
+     */
+    private WrapperConfigRef<?> palette;
+    private int paletteAnchorX;
+    private int paletteAnchorW;
+    private int paletteRowY;
 
     /** 每个配置项的文本读写句柄：createKeyValue 会挂监听，不能每帧重建。 */
     private final Map<WrapperConfigRef<?>, AttrKeyValue<?>> handles = new IdentityHashMap<>();
@@ -303,6 +328,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         this.x = 0;
         this.y = 0;
         this.scroll = 0;
+        // 布局重来（开屏、改窗口大小）时行会挪位：浮层的锚点跟着失效，先收起来
+        this.palette = null;
         if (tabKey != null) {
             this.tabBar = new EndfieldTabBar();
         }
@@ -411,16 +438,17 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 颜色输入框：贴着色块长出来，落在 {@link #paintColor} 画的那个框里。
+     * 颜色输入框：长在 {@link #colorGeometry()} 算出的十六进制那一段上，与绘制共用同一份几何。
      *
      * <p>和数值框同一条规矩：原版控件只在 tick 里增删，点击与渲染期间只改字段。
      */
     private void startColorBox() {
+        ColorGeometry geo = colorGeometry();
         EditBox box = new EditBox(
                 Minecraft.getInstance().font,
-                controlRight() - COLOR_W + 3,
+                geo.hexX(),
                 colorRowY + 4,
-                COLOR_W - 6,
+                geo.hexW(),
                 9,
                 Component.empty());
         box.setBordered(false);
@@ -944,6 +972,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         paintDropdown(ctx, p, mouseX, mouseY);
         paintFooter(ctx, p);
         paintFrame(ctx, p);
+        // 调色盘是浮层：它越过正文裁剪与页脚，所以画在最后，但仍让说明框盖在上面
+        paintPalette(ctx, p, mouseX, mouseY);
         paintTooltip(ctx, p, mouseX, mouseY);
     }
 
@@ -1130,27 +1160,46 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 颜色行：切角块里一块 12×12 的色块加它的十六进制值，点一下就地换成输入框。
+     * 颜色行画出来的三段：整块切角底、色块、十六进制文本。
      *
-     * <p>整块右对齐到 {@link #controlRight()}：行尾那一列要留给重置图标，控件压过去就点不到了。
-     * 编辑期间只画框，字由输入框自己画，所以框与输入框的位置必须逐像素对齐。
+     * <p>绘制、手输输入框与命中都取这一份几何，三处不会各算一套：
+     * 命中区不会比画出来的块宽，也不会盖到行尾的重置图标上。
      */
-    private void paintColor(VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref) {
-        int right = controlRight();
-        if (colorTarget == ref) {
-            Ef.cutOutline(ctx, right - COLOR_W, y + 3, COLOR_W, 12, p.ink(), Ef.CUT);
-            return;
-        }
-        int rgb = colorOf(ref);
-        String hex = hexOf(rgb);
+    private record ColorGeometry(int chipX, int chipW, int swatchX, int swatchW, int hexX, int hexW) {}
+
+    /**
+     * 颜色行的几何：整块右对齐到 {@link #controlRight()}，行尾那一列留给重置图标。
+     *
+     * <p>十六进制段按定长的 {@code #RRGGBB} 量宽（值只换字符不换位数），
+     * 块宽因此不随取值跳动，调色盘锚在它上面也不会被推走。
+     */
+    private ColorGeometry colorGeometry() {
         int pad = 2;
         int swatch = 12;
         int gap = 5;
-        int chipW = pad + swatch + gap + Ef.textWidth(hex) + 3;
-        int chipX = right - chipW;
-        Ef.cutFill(ctx, chipX, y + 3, chipW, 12, p.chip(), Ef.CUT);
-        Ef.fill(ctx, chipX + pad, y + 3, swatch, swatch, 0xFF000000 | rgb);
-        Ef.text(ctx, hex, chipX + pad + swatch + gap, y + 5, p.ink());
+        // 段宽 = 七字符 + 2px 光标余量：输入框也用这段宽，光标才不会被框切掉
+        int hexW = Ef.textWidth("#RRGGBB") + 2;
+        int chipW = pad + swatch + gap + hexW + 3;
+        int chipX = controlRight() - chipW;
+        return new ColorGeometry(chipX, chipW, chipX + pad, swatch, chipX + pad + swatch + gap, hexW);
+    }
+
+    /**
+     * 颜色行：切角块里一块 12×12 的色块加它的十六进制值。
+     *
+     * <p>色块与文本是两段可点：色块开调色盘，文本进手输。手输期间只画框，
+     * 字由输入框自己画，所以框与输入框都从 {@link #colorGeometry()} 取位置。
+     */
+    private void paintColor(VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref) {
+        ColorGeometry box = colorGeometry();
+        if (colorTarget == ref) {
+            Ef.cutOutline(ctx, box.chipX(), y + 3, box.chipW(), 12, p.ink(), Ef.CUT);
+            return;
+        }
+        int rgb = colorOf(ref);
+        Ef.cutFill(ctx, box.chipX(), y + 3, box.chipW(), 12, p.chip(), Ef.CUT);
+        Ef.fill(ctx, box.swatchX(), y + 3, box.swatchW(), 12, 0xFF000000 | (rgb & 0xFFFFFF));
+        Ef.text(ctx, hexOf(rgb), box.hexX(), y + 5, p.ink());
     }
 
     /** 颜色行的当前值：取不到就按白画，绘制路径不能因为一个坏值停住。 */
@@ -1165,6 +1214,120 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 显示一律写成 {@code #RRGGBB}：输入框预填的就是这个串，而它本身能被再解析回同一个值。 */
     private static String hexOf(int rgb) {
         return String.format(Locale.ROOT, "#%06X", rgb & 0xFFFFFF);
+    }
+
+    /**
+     * 调色盘面板与它里面两块取色区的矩形。
+     *
+     * <p>绘制、命中、取格都读这一份：面板不管怎么翻，位置只有一个来源。
+     */
+    private record PaletteBox(int x, int y, int w, int h, int svX, int svY, int hueX, int hueY) {}
+
+    /**
+     * 面板贴在这一行的色块下方、右对齐色块；下方放不下就翻到行上方，再整体夹进窗口。
+     *
+     * <p>面板要整块留在窗口里：翻出去的那一条既看不见也点不到，
+     * 取色区少一格就等于少了那一片颜色。
+     */
+    private PaletteBox paletteBox() {
+        // 标题行要同时装下"// COLOR"和定长的 #RRGGBB：面板取两者之和与方块的较大者，
+        // 换成自定义字体也不会把这两段挤到一起
+        int headW = Ef.trackedWideWidth("// COLOR", 1, 1.2F) + PAL_GAP * 2 + Ef.textWidth("#RRGGBB");
+        int w = PAL_PAD * 2 + Math.max(PAL_SV_W, headW);
+        int h = PAL_PAD * 2 + PAL_HEAD + PAL_SV_H + PAL_GAP + PAL_HUE_H;
+        int x = Math.max(winX + 4, Math.min(winX + winW - 4 - w, paletteAnchorX + paletteAnchorW - w));
+        int y = paletteRowY + ROW_H + 2;
+        if (y + h > winY + winH - 4) {
+            y = paletteRowY - h - 2;
+        }
+        y = Math.max(winY + 4, Math.min(winY + winH - 4 - h, y));
+        int svX = x + PAL_PAD;
+        int svY = y + PAL_PAD + PAL_HEAD;
+        return new PaletteBox(x, y, w, h, svX, svY, svX, svY + PAL_SV_H + PAL_GAP);
+    }
+
+    private static boolean inPalette(PaletteBox box, int x, int y) {
+        return x >= box.x() && x <= box.x() + box.w() && y >= box.y() && y <= box.y() + box.h();
+    }
+
+    /**
+     * 调色盘：一块 26×16 的饱和度/明度方块加一条色相，当前色用 1px 框标出来。
+     *
+     * <p>就展开在这一页上，不换屏：颜色是边看行里边调的，换个屏就看不见它落回这一行的样子。
+     * 方块与色相条按 {@link #PAL_CELL} 铺格子，画的和点的都是同一格，
+     * 所以点哪一格、取到的就是那一格中心的颜色；锚点与选中格都由当前值反算，重开面板也对得上。
+     */
+    private void paintPalette(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
+        if (palette == null) {
+            return;
+        }
+        if (!visibleRefs().contains(palette)) {
+            // 目标行被筛掉或消失了（换页、搜索）：面板没有可调的对象
+            palette = null;
+            return;
+        }
+        PaletteBox box = paletteBox();
+        int rgb = colorOf(palette);
+        float[] hsb = hsbOf(rgb);
+
+        // 面板：底与边框走同一个切口，切角才真是缺一块，而不是在直角上划一道斜线
+        int cut = Ef.CUT_PANEL;
+        Ef.cutFill(ctx, box.x(), box.y(), box.w(), box.h(), p.panel(), cut);
+        // 斜边逐格 1px 画：12 档的描边贴图是 16→12 拉过来的，会摊成 2px 的糊带，与 1px 直边不同粗细
+        Ef.fill(ctx, box.x(), box.y(), box.w(), 1, p.ink());
+        Ef.fill(ctx, box.x(), box.y(), 1, box.h(), p.ink());
+        Ef.fill(ctx, box.x() + box.w() - 1, box.y(), 1, box.h() - cut, p.ink());
+        Ef.fill(ctx, box.x(), box.y() + box.h() - 1, box.w() - cut, 1, p.ink());
+        for (int i = 0; i < cut; i++) {
+            Ef.fill(ctx, box.x() + box.w() - cut + i, box.y() + box.h() - 1 - i, 1, 1, p.ink());
+        }
+        Ef.trackedWide(ctx, "// COLOR", box.x() + PAL_PAD, box.y() + PAL_PAD - 3, p.ink2(), 1, 1.2F);
+        String hex = hexOf(rgb);
+        Ef.text(ctx, hex, box.x() + box.w() - PAL_PAD - Ef.textWidth(hex), box.y() + PAL_PAD - 3, p.ink());
+
+        // 饱和度/明度：横向铺饱和度、纵向铺明度，色相取当前值
+        int cols = PAL_SV_W / PAL_CELL;
+        int rows = PAL_SV_H / PAL_CELL;
+        for (int row = 0; row < rows; row++) {
+            float v = 1.0F - (row + 0.5F) / rows;
+            for (int col = 0; col < cols; col++) {
+                float s = (col + 0.5F) / cols;
+                Ef.fill(ctx, box.svX() + col * PAL_CELL, box.svY() + row * PAL_CELL,
+                        PAL_CELL, PAL_CELL, opaque(Color.HSBtoRGB(hsb[0], s, v)));
+            }
+        }
+        markCell(ctx, p.ink(), box.svX(), box.svY(), cols, rows, PAL_CELL,
+                (int) (hsb[1] * cols), (int) ((1.0F - hsb[2]) * rows));
+
+        // 色相条：一格格换，下标与取格用同一套
+        int hues = PAL_SV_W / PAL_CELL;
+        for (int col = 0; col < hues; col++) {
+            float hue = (col + 0.5F) / hues;
+            Ef.fill(ctx, box.hueX() + col * PAL_CELL, box.hueY(), PAL_CELL, PAL_HUE_H,
+                    opaque(Color.HSBtoRGB(hue, 1.0F, 1.0F)));
+        }
+        markCell(ctx, p.ink(), box.hueX(), box.hueY(), hues, 1, PAL_HUE_H,
+                (int) (hsb[0] * hues), 0);
+
+        if (inPalette(box, mouseX, mouseY)) {
+            // 鼠标此刻指的是取色区，不是底下那一行：不要顺带出它的说明
+            hovered = null;
+            hoveredAction = null;
+        }
+    }
+
+    /** 把选中格框出来：1px 墨线框整格，两套主题下都看得出那格是当前色。 */
+    private void markCell(VDrawContext ctx, int color, int x, int y, int cols, int rows, int cellH,
+            int col, int row) {
+        int c = Math.max(0, Math.min(cols - 1, col));
+        int r = Math.max(0, Math.min(rows - 1, row));
+        int cx = x + c * PAL_CELL;
+        int cy = y + r * PAL_CELL;
+        int h = rows > 1 ? PAL_CELL : cellH;
+        Ef.fill(ctx, cx, cy, PAL_CELL, 1, color);
+        Ef.fill(ctx, cx, cy + h - 1, PAL_CELL, 1, color);
+        Ef.fill(ctx, cx, cy, 1, h, color);
+        Ef.fill(ctx, cx + PAL_CELL - 1, cy, 1, h, color);
     }
 
     /**
@@ -1489,6 +1652,22 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return true;
         }
 
+        if (palette != null) {
+            PaletteBox box = paletteBox();
+            if (inPalette(box, mx, my)) {
+                if (button == 0) {
+                    pickPalette(box, mx, my);
+                }
+                return true;
+            }
+            // 面板外的那一下只关面板：放它过去就会顺手改到底下的行。
+            // 命令栏是导航不是行，落在那里照常切页。
+            palette = null;
+            if (my < winY || my >= winY + barH) {
+                return true;
+            }
+        }
+
         if (my >= winY && my < winY + barH) {
             if (tabKey != null) {
                 String hit = tabBar.click(winX, winY, winW, tabKey, light(), mx, my);
@@ -1581,9 +1760,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (mouseY < bodyTop() || mouseY > bodyTop() + bodyHeight()) {
             return false;
         }
-        // 滚动会挪动行，下拉跟着旧坐标走就会错位：直接收起来
+        // 滚动会挪动行，下拉与浮层跟着旧坐标走就会错位：直接收起来
         dropdown = null;
         dropPart = -1;
+        palette = null;
         numberTarget = null;
         colorTarget = null;
         buildRows();
@@ -1630,7 +1810,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return false;
         }
         if (ref.getValue() instanceof WrapColor) {
-            return hitColor(wrapper, mouseX, button, rowY);
+            return hitColor(wrapper, mouseX, mouseY, button, rowY);
         }
         Object[] parts = recordParts(ref.getValue());
         if (parts != null) {
@@ -1721,23 +1901,90 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 点色块进入编辑：这里只记目标，输入框留给 tick 去建。
+     * 颜色行分两段可点：色块开调色盘，十六进制文本进手输。
      *
-     * <p>已经有一只输入框时先摘掉它的 responder，并让 tick 按新目标重新建一只：
-     * 复用旧框的话，摘掉的 responder 不会再挂回去，之后打字就不写回配置了。
-     * 焦点也只能在 tick 里给——点击处理完，容器会把焦点交回铺满屏幕的这块画布。
+     * <p>两段矩形都来自 {@link #colorGeometry()}：命中不会比画出来的块宽，也不会压到行尾的重置图标。
+     * 同一时刻只留一个编辑态，开一边就把另一边收掉。
+     *
+     * <p>进手输时这里只记目标，输入框留给 tick 去建——已经有一只时先摘掉它的 responder，
+     * 让 tick 按新目标重挂：复用旧框的话，摘掉的 responder 不会再挂回去，之后打字就不写回配置了。
+     * 焦点也只能在 tick 里给：点击处理完，容器会把焦点交回铺满屏幕的这块画布。
      */
-    private boolean hitColor(WrapperConfigRef<?> wrapper, int mouseX, int button, int rowY) {
-        if (button != 0 || mouseX < controlRight() - COLOR_W) {
+    private boolean hitColor(WrapperConfigRef<?> wrapper, int mouseX, int mouseY, int button, int rowY) {
+        if (button != 0 || mouseY < rowY + 3 || mouseY >= rowY + 15) {
             return false;
         }
-        colorTarget = wrapper;
-        colorRowY = rowY;
-        lastColorKey = "";
-        if (colorBox != null) {
-            colorBox.setResponder(null);
+        ColorGeometry box = colorGeometry();
+        if (mouseX >= box.swatchX() && mouseX < box.swatchX() + box.swatchW()) {
+            // 收起走的是"点面板外"——面板永远不盖住它自己锚定的这块色块
+            palette = wrapper;
+            paletteAnchorX = box.swatchX();
+            paletteAnchorW = box.swatchW();
+            paletteRowY = rowY;
+            colorTarget = null;
+            return true;
         }
-        return true;
+        if (mouseX >= box.hexX() && mouseX < box.hexX() + box.hexW()) {
+            palette = null;
+            colorTarget = wrapper;
+            colorRowY = rowY;
+            lastColorKey = "";
+            if (colorBox != null) {
+                colorBox.setResponder(null);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 面板里的一击：方块取该格的饱和度/明度并沿用当前色相，色相条只换色相、保留当前饱和度与明度。
+     *
+     * <p>取的是格子中心，与画出来的那一格对齐；每次点击立刻写回配置，
+     * 行里的色块与十六进制跟着变，不用关面板再看结果。
+     */
+    private void pickPalette(PaletteBox box, int mouseX, int mouseY) {
+        float[] hsb = hsbOf(colorOf(palette));
+        int cols = PAL_SV_W / PAL_CELL;
+        if (mouseY >= box.hueY() && mouseY < box.hueY() + PAL_HUE_H) {
+            int col = cellAt(mouseX - box.hueX(), cols);
+            if (col >= 0) {
+                writeColor(Color.HSBtoRGB((col + 0.5F) / cols, hsb[1], hsb[2]));
+            }
+            return;
+        }
+        int rows = PAL_SV_H / PAL_CELL;
+        if (mouseX < box.svX() || mouseX >= box.svX() + PAL_SV_W
+                || mouseY < box.svY() || mouseY >= box.svY() + PAL_SV_H) {
+            return;
+        }
+        int col = cellAt(mouseX - box.svX(), cols);
+        int row = cellAt(mouseY - box.svY(), rows);
+        if (col >= 0 && row >= 0) {
+            writeColor(Color.HSBtoRGB(hsb[0], (col + 0.5F) / cols, 1.0F - (row + 0.5F) / rows));
+        }
+    }
+
+    /** 落在第几格；点在取色区的留白上返回 -1，不拿边角的值去改颜色。 */
+    private static int cellAt(int offset, int cells) {
+        int cell = offset / PAL_CELL;
+        return offset >= 0 && cell < cells ? cell : -1;
+    }
+
+    private void writeColor(int rgb) {
+        if (palette != null) {
+            setValue(palette.ref(), new WrapColor(TextColor.fromRgb(rgb & 0xFFFFFF)));
+        }
+    }
+
+    /** 当前值换算成 HSB：选中格与色相位置都由它反算，重开面板时与当前颜色一致。 */
+    private static float[] hsbOf(int rgb) {
+        return Color.RGBtoHSB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, null);
+    }
+
+    /** HSB 转成能直接铺的不透明色：取色区不跟窗口透明度一起淡，否则看不出选中的是哪个颜色。 */
+    private static int opaque(int rgb) {
+        return 0xFF000000 | (rgb & 0xFFFFFF);
     }
 
     private void applyRatio(WrapperConfigRef<?> wrapper, int part, double current, double ratio) {
