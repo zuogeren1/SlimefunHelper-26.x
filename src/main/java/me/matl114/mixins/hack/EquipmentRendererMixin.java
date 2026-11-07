@@ -1,5 +1,6 @@
 package me.matl114.mixins.hack;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.mojang.blaze3d.vertex.PoseStack;
 import javax.annotation.Nullable;
@@ -21,6 +22,16 @@ import org.spongepowered.asm.mixin.injection.At;
 @Environment(EnvType.CLIENT)
 @Mixin(EquipmentLayerRenderer.class)
 public abstract class EquipmentRendererMixin {
+    // 26.3 的盔甲光效不再是一次独立的 submitModel：有纹饰时走 trimmedArmorGlint，
+    // 无纹饰时基础层直接换成 armorCutoutNoCullGlint（同一个提交点），所以只能从“这件物品有没有光效”这个源头掐。
+    //#if MC >= 260300
+    //$$ @ModifyExpressionValue(
+    //$$         method = "renderLayers",
+    //$$         at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;hasFoil()Z"))
+    //$$ private boolean noArmorGlint(boolean original) {
+    //$$     return NoRender.INSTANCE.noArmorGlintRender() ? false : original;
+    //$$ }
+    //#endif
     // 26.3: submitModel 去掉了 TextureAtlasSprite / CrumblingOverlay，贴图改由 UvMapping 承载；
     // 三处提交的先后变成 基础层 -> 纹饰 -> 纹饰光效（26.2 是 基础层 -> 光效 -> 纹饰），ordinal 因而逐版本绑定。
     @WrapWithCondition(

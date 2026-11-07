@@ -33,8 +33,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(GameRenderer.class)
 public abstract class GameRenderMixin {
 
-    // 26.3 的 renderLevel() 已无参、体内也不再插值恶心强度（PlayerRenderState 里存的已是最终值），没有等价注入点。
-    //#if MC < 260300
+    // 26.3 的恶心强度已算进 PlayerRenderState，renderLevel 读出来再与传送门强度取 max；
+    // 把这一处读到的值按开关清零即可，传送门带来的眩晕不受影响。
+    //#if MC >= 260300
+    //$$ @ModifyExpressionValue(
+    //$$         method = "renderLevel",
+    //$$         at =
+    //$$                 @At(
+    //$$                         value = "FIELD",
+    //$$                         target =
+    //$$                                 "Lnet/minecraft/client/renderer/state/level/PlayerRenderState;nauseaEffectIntensity:F"))
+    //$$ private float noNauseaWobble(float original) {
+    //$$     return NoRender.INSTANCE.noNausea() ? 0.0F : original;
+    //$$ }
+    //#else
     @ModifyExpressionValue(
             method = "renderLevel",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Mth;lerp(FFF)F"))
