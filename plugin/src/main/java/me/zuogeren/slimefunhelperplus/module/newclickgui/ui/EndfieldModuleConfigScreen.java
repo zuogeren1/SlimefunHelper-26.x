@@ -79,13 +79,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 字段框的高度与内边距：外侧 1px 边 + 内侧 2px 聚焦环，字从框外沿往里第 3 像素起。
      * 9px 的行高要 15px 的框才放得下，再矮聚焦环就压到字上了。
      */
-    private static final int FIELD_H = 15;
-    private static final int FIELD_PAD = 3;
+    private static final int FIELD_H = 16;
+    private static final int FIELD_PAD = 4;
     /** 字段框在行内下移的像素：行高 18 放 15 的框，上下各留一点，框不贴着行间的细线。 */
-    private static final int FIELD_TOP = 2;
+    private static final int FIELD_TOP = 1;
     /** 聚焦环的粗细，以及它离边框内侧的距离（CSS 的 outline-offset: -1px）。 */
     private static final int FIELD_RING = 2;
-    private static final int FIELD_RING_INSET = 1;
+    private static final int FIELD_RING_INSET = 0;
 
     /** 文本值为空串时的显示：空是合法取值（例如音乐路径空 = 不播），画成一个字免得像坏掉的控件。 */
     private static final String EMPTY_TEXT = "空";
@@ -1151,7 +1151,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      */
     private void layoutContent() {
         contentLeft = winX + PAD;
-        contentWidth = Math.min(winW - PAD * 2, 560);
+        contentWidth = winW - PAD * 2;
     }
 
     private void buildRows() {
@@ -1415,20 +1415,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static void paintFieldFrame(
             VDrawContext ctx, Ef.Palette p, int x, int y, int w, int h, boolean focused, boolean hovered) {
         Ef.fill(ctx, x, y, w, h, p.panel());
-        int edge = focused ? p.ink() : (hovered ? p.ink2() : p.rule());
+        if (focused) {
+            // 聚焦只留一圈 2px 的当前位置线：再叠 1px 边框就成了双线，框里给字的地方被吃掉一圈
+            Ef.fill(ctx, x + FIELD_RING_INSET, y + FIELD_RING_INSET, w - FIELD_RING_INSET * 2, FIELD_RING, p.trace());
+            Ef.fill(ctx, x + FIELD_RING_INSET, y + h - FIELD_RING_INSET - FIELD_RING,
+                    w - FIELD_RING_INSET * 2, FIELD_RING, p.trace());
+            Ef.fill(ctx, x + FIELD_RING_INSET, y + FIELD_RING_INSET, FIELD_RING, h - FIELD_RING_INSET * 2, p.trace());
+            Ef.fill(ctx, x + w - FIELD_RING_INSET - FIELD_RING, y + FIELD_RING_INSET,
+                    FIELD_RING, h - FIELD_RING_INSET * 2, p.trace());
+            return;
+        }
+        int edge = hovered ? p.ink2() : p.rule();
         Ef.fill(ctx, x, y, w, 1, edge);
         Ef.fill(ctx, x, y + h - 1, w, 1, edge);
         Ef.fill(ctx, x, y, 1, h, edge);
         Ef.fill(ctx, x + w - 1, y, 1, h, edge);
-        if (!focused) {
-            return;
-        }
-        Ef.fill(ctx, x + FIELD_RING_INSET, y + FIELD_RING_INSET, w - FIELD_RING_INSET * 2, FIELD_RING, p.trace());
-        Ef.fill(ctx, x + FIELD_RING_INSET, y + h - FIELD_RING_INSET - FIELD_RING,
-                w - FIELD_RING_INSET * 2, FIELD_RING, p.trace());
-        Ef.fill(ctx, x + FIELD_RING_INSET, y + FIELD_RING_INSET, FIELD_RING, h - FIELD_RING_INSET * 2, p.trace());
-        Ef.fill(ctx, x + w - FIELD_RING_INSET - FIELD_RING, y + FIELD_RING_INSET,
-                FIELD_RING, h - FIELD_RING_INSET * 2, p.trace());
     }
 
     /**
@@ -1461,6 +1462,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (inBox(box.x(), box.y(), box.w(), box.h(), mouseX, mouseY)) {
             paintFieldFrame(ctx, p, box.x(), box.y(), box.w(), box.h(), false, true);
+        } else {
+            // 静态态只画一条虚线底边：不抢视线，又能看出这一格能点开编辑。
+            // 比行的分隔线高 1px 且断成短划，两条线不会并成一条；悬停与聚焦时都不画
+            int lineY = box.y() + box.h() - 2;
+            for (int i = 0; i < box.w(); i += 3) {
+                Ef.fill(ctx, box.x() + i, lineY, Math.min(2, box.w() - i), 1, p.rule());
+            }
         }
         String raw = value.get();
         boolean empty = raw == null || raw.isEmpty();
