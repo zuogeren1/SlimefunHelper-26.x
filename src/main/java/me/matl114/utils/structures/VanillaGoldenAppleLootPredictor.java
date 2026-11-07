@@ -421,17 +421,16 @@ public final class VanillaGoldenAppleLootPredictor {
     }
 
     private static List<Pool> poolsFor(Identifier lootTable, LootVersion lootVersion) {
-        LootVersion effective = lootVersion.resolved();
         if (DESERT_PYRAMID.equals(lootTable)) {
-            return effective.hasCopperHorseArmor() ? DESERT_PYRAMID_POOLS : LEGACY_DESERT_PYRAMID_POOLS;
+            return lootVersion.hasCopperHorseArmor() ? DESERT_PYRAMID_POOLS : LEGACY_DESERT_PYRAMID_POOLS;
         }
         if (ANCIENT_CITY.equals(lootTable)) {
-            return switch (effective) {
+            return switch (lootVersion) {
                 case V1_21_1, V1_21_4 -> LEGACY_ANCIENT_CITY_POOLS;
                 case V1_21_11 -> V1_21_11_ANCIENT_CITY_POOLS;
                 case V26_1 -> V26_1_ANCIENT_CITY_POOLS;
                 case V26_2 -> V26_2_ANCIENT_CITY_POOLS;
-                case V26_3, AUTO -> V26_3_ANCIENT_CITY_POOLS;
+                case V26_3 -> V26_3_ANCIENT_CITY_POOLS;
             };
         }
         if (ANCIENT_CITY_ICE_BOX.equals(lootTable)) {
