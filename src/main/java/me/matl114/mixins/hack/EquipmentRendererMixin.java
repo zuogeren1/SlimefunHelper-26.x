@@ -26,7 +26,8 @@ public abstract class EquipmentRendererMixin {
     // 无纹饰时基础层直接换成 armorCutoutNoCullGlint（同一个提交点），所以只能从“这件物品有没有光效”这个源头掐。
     //#if MC >= 260300
     //$$ @ModifyExpressionValue(
-    //$$         method = "renderLayers",
+    //$$         method =
+    //$$                 "renderLayers(Lnet/minecraft/client/resources/model/EquipmentClientInfo$LayerType;Lnet/minecraft/resources/ResourceKey;Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lnet/minecraft/world/item/ItemStack;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;ILnet/minecraft/resources/Identifier;II)V",
     //$$         at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;hasFoil()Z"))
     //$$ private boolean noArmorGlint(boolean original) {
     //$$     return NoRender.INSTANCE.noArmorGlintRender() ? false : original;
