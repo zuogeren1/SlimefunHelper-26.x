@@ -2,6 +2,7 @@ package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
 
 import java.util.List;
 import java.util.Locale;
+import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.TextFont;
@@ -35,6 +36,29 @@ public class FontPage extends EndfieldModuleConfigScreen {
                     + " │ 字号 " + Math.round(font.fontSize.get());
             case FONT -> "当前字体 " + Ef.ellipsis(font.resourceFontType.get(), 120);
         };
+    }
+
+    /**
+     * 系统字体清单不是配置项（要遍历目录才拿得到），做成一行动作去专门的页面挑；
+     * 这一行右侧写当前状态，切到别的样式时写明为什么选了不会生效。
+     */
+    @Override
+    protected List<Action> actions() {
+        TextFont font = MainTasks.getTextFont();
+        if (font == null) {
+            return List.of();
+        }
+        String detail = switch (font.textStyle.get()) {
+            case SYSTEM -> localFontName(font.textFontType.get());
+            case FONT -> "当前用资源字体";
+            case VANILLA -> "当前用原版字体";
+        };
+        return List.of(new Action(
+                "选择系统字体",
+                detail,
+                "选择",
+                "列出本机字体目录里的 ttf；选中的字体只在「系统字体」样式下生效。",
+                () -> ScreenAccess.of(new FontPickerPage(settings)).openFromCurrent()));
     }
 
     /** 配置里可能是字体显示名，也可能是 ttf 的绝对路径；页脚只留辨识度最高的那一段。 */

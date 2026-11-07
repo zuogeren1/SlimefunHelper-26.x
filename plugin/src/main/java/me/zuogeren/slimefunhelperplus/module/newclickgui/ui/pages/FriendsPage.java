@@ -3,6 +3,7 @@ package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
 import java.util.List;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.combat.TargetSelector;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
 
@@ -32,5 +33,24 @@ public class FriendsPage extends EndfieldModuleConfigScreen {
         }
         int count = selector.playerList == null ? 0 : selector.playerList.friends().size();
         return "名单 " + count + " 人 │ " + (selector.attackFriend.get() ? "好友可攻击" : "好友受保护");
+    }
+
+    /**
+     * 名单本身不是配置项：它存在 {@code friends.nbt} 里，编辑入口是宿主那个列表界面。
+     * 这里给一行动作把它接过来，比在配置表里摆一个改了不保存的假项诚实。
+     */
+    @Override
+    protected List<Action> actions() {
+        TargetSelector selector = TargetSelector.INSTANCE;
+        if (selector == null || selector.playerList == null) {
+            return List.of();
+        }
+        int count = selector.playerList.friends().size();
+        return List.of(new Action(
+                "编辑好友名单",
+                count + " 人",
+                "编辑",
+                "打开宿主的好友名单界面：增删好友、设置别名。保存后这里的人数会跟着变。",
+                () -> selector.openEditFriendsScreen(NewClickGui.elementFactory())));
     }
 }

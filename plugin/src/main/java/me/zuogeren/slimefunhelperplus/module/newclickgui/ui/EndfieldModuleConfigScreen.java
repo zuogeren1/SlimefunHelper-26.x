@@ -58,6 +58,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int TEXT_W = 40;
     /** 行尾重置按钮占的宽度。 */
     private static final int RESET_W = 16;
+    /** 动作节的分节键：不会与任何配置路径相同（配置路径里不可能出现 NUL）。 */
+    private static final String ACTION_SECTION = "\u0000actions";
 
     /** 模块页就有它；好友/宏/快捷键/全配置这类"非模块页"为 null，命令栏不出启用块。 */
     private final BaseModule module;
@@ -108,6 +110,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private WrapperConfigRef<?> hovered;
     private final Map<WrapperConfigRef<?>, List<Component>> tooltipCache = new IdentityHashMap<>();
 
+    /** 页面自己的动作行：排在配置项之后，绘制与命中共用这份布局。 */
+    private final List<ActionRow> actionRows = new ArrayList<>();
+    private Action hoveredAction;
+
     /** 正在等待按键的键位项。 */
     private WrapperConfigRef<?> keyTarget;
 
@@ -134,6 +140,22 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 一帧内布局出来的行，绘制时写入、点击时读取；坐标为屏幕绝对坐标。 */
     private record Row(int y, int height, WrapperConfigRef<?> ref, String section, boolean header) {}
+
+    /**
+     * 页面自己的动作：配置表之外的一个操作，整行可点。
+     *
+     * <p>不是每一项设置都能装成 {@code Ref}（名单、字体文件都在宿主模块自己的存储里），
+     * 给它们造一个假 Ref 只会让配置表里出现`改动不会保存`的假项，所以另起一节。
+     *
+     * @param label  行名，写动作对应的对象
+     * @param detail 右侧那句现状（人数、当前字体……），没有就传空串
+     * @param chip   行尾可点块的文案，写动词
+     * @param tip    悬停说明，空串表示不出说明框
+     */
+    public record Action(String label, String detail, String chip, String tip, Runnable run) {}
+
+    /** 动作行的位置与它对应的动作。 */
+    private record ActionRow(int y, int height, Action action) {}
 
     public EndfieldModuleConfigScreen(BaseModule module, EndfieldSettings settings) {
         this(
@@ -233,6 +255,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 页脚左侧统计的补充文字（例如"共 42 项"），默认空。 */
     protected String extraStats() {
         return "";
+    }
+
+    /**
+     * 页面自己的动作行，默认没有。
+     *
+     * <p>每次布局与点击都会取一遍，所以实现里只做便宜的事（读一个计数、当前值）；
+     * 真正重的活（扫字体目录这类）留给动作本身，点下去才做。
+     */
+    protected List<Action> actions() {
+        return List.of();
     }
 
     protected boolean light() {
@@ -637,6 +669,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     private void buildRows() {
         rows.clear();
+        actionRows.clear();
         contentLeft = winX + PAD;
         contentWidth = Math.min(winW - PAD * 2, 560);
 
@@ -654,6 +687,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             rows.add(new Row(y, height, ref, section, false));
             y += height;
         }
+        List<Action> actions = actions();
+        if (!actions.isEmpty()) {
+            rows.add(new Row(y, SECTION_H, null, ACTION_SECTION, true));
+            y += SECTION_H;
+            for (Action action : actions) {
+                if (action == null) {
+                    continue;
+                }
+                actionRows.add(new ActionRow(y, ROW_H, action));
+                y += ROW_H;
+            }
+        }
         totalHeight = (y + scroll) - bodyTop();
     }
 
@@ -668,6 +713,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         buildRows();
         editorRects.clear();
         hovered = null;
+        hoveredAction = null;
 
         paintBar(ctx, p, mouseX, mouseY);
         paintBody(ctx, p, mouseX, mouseY);
@@ -734,6 +780,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                     }
                 }
             }
+            for (ActionRow row : actionRows) {
+                if (row.y + row.height < top || row.y > top + height) {
+                    continue;
+                }
+                paintAction(ctx, p, row, mouseX, mouseY);
+            }
             if (toolHeight() > 0) {
                 // 工具条是固定的：先铺一层纸面盖住滚过去的行，再画它自己
                 Ef.fill(ctx, contentLeft - 4, top, contentWidth + 8, toolHeight(), p.paper());
@@ -746,11 +798,15 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private void paintSection(VDrawContext ctx, Ef.Palette p, int y, String section) {
-        String leaf = section.isEmpty() ? "MAIN" : leaf(section).replace('-', ' ').toUpperCase(Locale.ROOT);
-        String eyebrow = "// " + leaf;
+        // 动作节不是配置路径，没有翻译键可用，眉标与标题都写死
+        boolean actions = ACTION_SECTION.equals(section);
+        String head = actions
+                ? "ACTIONS"
+                : (section.isEmpty() ? "MAIN" : leaf(section).replace('-', ' ').toUpperCase(Locale.ROOT));
+        String eyebrow = "// " + head;
         Ef.trackedWide(ctx, eyebrow, contentLeft, y + 7, p.ink2(), 1, 1.2F);
         int titleX = contentLeft + Math.max(72, Ef.trackedWideWidth(eyebrow, 1, 1.2F) + 10);
-        Ef.text(ctx, sectionTitle(section), titleX, y + 7, p.ink());
+        Ef.text(ctx, actions ? "操作" : sectionTitle(section), titleX, y + 7, p.ink());
         Ef.rule(ctx, contentLeft, y + SECTION_H - 6, contentWidth, p.rule());
     }
 
@@ -836,6 +892,43 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
     }
 
+    /**
+     * 一条动作行：左边写操作对象，右边写现状，行尾一块可点的动词。
+     *
+     * <p>整行都能点，所以悬停时和配置行走同一套反馈（浅底 + 左侧当前位置线），
+     * 行尾那块只是把「这里能按」画出来——切角 = 可点。
+     */
+    private void paintAction(VDrawContext ctx, Ef.Palette p, ActionRow row, int mouseX, int mouseY) {
+        Action action = row.action;
+        int right = contentLeft + contentWidth;
+        boolean hover = mouseY >= row.y
+                && mouseY < row.y + row.height
+                && mouseX >= contentLeft - 4
+                && mouseX <= right + 4;
+        if (hover) {
+            hoveredAction = action;
+            Ef.fill(ctx, contentLeft - 4, row.y, contentWidth + 8, row.height, Ef.mix(p.paper(), p.ink(), 0.04f));
+            Ef.fill(ctx, contentLeft - 4, row.y, 3, row.height, p.trace());
+        }
+
+        String chip = action.chip() == null ? "" : action.chip();
+        int chipW = chip.isEmpty() ? 0 : Ef.textWidth(chip) + 10;
+        int chipX = right - chipW;
+        int textW = Math.max(40, chipX - 14 - contentLeft);
+        Ef.text(ctx, Ef.ellipsis(action.label(), textW), contentLeft, row.y + 5, p.ink());
+
+        String detail = action.detail() == null ? "" : action.detail();
+        if (!detail.isEmpty()) {
+            int detailW = Math.max(24, textW - Ef.textWidth(action.label()) - 8);
+            String shown = Ef.ellipsis(detail, detailW);
+            Ef.text(ctx, shown, chipX - 10 - Ef.textWidth(shown), row.y + 5, p.ink2());
+        }
+        if (!chip.isEmpty()) {
+            Ef.cutFill(ctx, chipX, row.y + 3, chipW, 11, hover ? p.ink() : p.chip(), Ef.CUT);
+            Ef.text(ctx, chip, chipX + 5, row.y + 5, hover ? p.paper() : p.ink());
+        }
+        Ef.rule(ctx, contentLeft - 4, row.y + row.height - 1, contentWidth + 8, Ef.alpha(p.rule(), 0.55F));
+    }
 
     /** 说明文字：和原界面同一个约定，取 {@code <键名>.tooltips}。 */
     private List<Component> tooltips(WrapperConfigRef<?> ref) {
@@ -846,6 +939,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final String DUMMY_TOOLTIP = "\u0000none";
 
     private void paintTooltip(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
+        if (hoveredAction != null) {
+            String tip = hoveredAction.tip();
+            if (tip != null && !tip.isEmpty()) {
+                Ef.tooltip(ctx, p, Ef.wrap(tip, 230), mouseX, mouseY, this.width, this.height);
+            }
+            return;
+        }
         if (hovered == null) {
             return;
         }
@@ -1062,6 +1162,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (toolHeight() > 0 && clickTool(mx, my, button)) {
             return true;
+        }
+        if (button == 0) {
+            for (ActionRow row : actionRows) {
+                if (my < row.y || my >= row.y + row.height) {
+                    continue;
+                }
+                if (mx < contentLeft - 4 || mx > contentLeft + contentWidth + 4) {
+                    return false;
+                }
+                row.action.run().run();
+                return true;
+            }
         }
         for (Row row : rows) {
             if (row.header || my < row.y || my >= row.y + row.height) {
