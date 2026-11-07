@@ -95,8 +95,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     private final List<Row> rows = new ArrayList<>();
 
-    /** 打开中的枚举下拉：绘制与命中都用记录下来的矩形。 */
+    /** 打开中的枚举下拉：绘制与命中都用记录下来的矩形；{@code dropPart >= 0} 表示下拉的是记录里的那一格。 */
     private WrapperConfigRef<?> dropdown;
+    private int dropPart = -1;
     private int dropX;
     private int dropY;
     private int dropW;
@@ -341,8 +342,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (part < 0) {
             return valueText(target.ref());
         }
-        double[] parts = components(target.ref().getValue());
-        return parts != null && part < parts.length ? formatNumber(parts[part]) : "";
+        Object[] parts = recordParts(target.ref().getValue());
+        if (parts == null || part >= parts.length || !(parts[part] instanceof Number number)) {
+            return "";
+        }
+        return formatNumber(number.doubleValue());
     }
 
     /**
@@ -377,7 +381,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             if (part < 0) {
                 setNumeric(target.ref(), value);
             } else {
-                setValue(target.ref(), withComponent(target.ref().getValue(), part, value));
+                setValue(target.ref(), withNumericPart(target.ref().getValue(), part, value));
             }
         } catch (NumberFormatException ignored) {
             // 打到一半（"-"、"."）解析不了是正常的
@@ -449,7 +453,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value instanceof FloatRef
                 || value instanceof EnumRef<?>
                 || value instanceof KeyBindRef
-                || components(value.getValue()) != null;
+                || recordParts(value.getValue()) != null;
     }
 
     // ------------------------------------------------------------------ 数据
@@ -581,23 +585,28 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return new double[] {min, max};
     }
 
-    /** 复合数值（记录里的两三个 double）拆成几个滑杆，读不出来就返回 null 交回宿主控件。 */
-    private static double[] components(Object value) {
+    /**
+     * 一条记录里的几格：数值各自走滑杆，枚举走下拉，别的类型返回 null 交回宿主控件。
+     *
+     * <p>两格到四格都接：宿主里两个数值的记录（{@code Vec2}）和
+     * 「两个数值 + 一个枚举」的记录（{@code PredictArgument}）都很常见。
+     */
+    private static Object[] recordParts(Object value) {
         if (value == null || !value.getClass().isRecord()) {
             return null;
         }
         RecordComponent[] parts = value.getClass().getRecordComponents();
-        if (parts.length < 2 || parts.length > 3) {
+        if (parts.length < 2 || parts.length > 4) {
             return null;
         }
-        double[] out = new double[parts.length];
+        Object[] out = new Object[parts.length];
         try {
             for (int i = 0; i < parts.length; i++) {
-                Class<?> type = parts[i].getType();
-                if (type != double.class && type != float.class) {
+                Object part = parts[i].getAccessor().invoke(value);
+                if (!(part instanceof Number) && !(part instanceof Enum<?>)) {
                     return null;
                 }
-                out[i] = ((Number) parts[i].getAccessor().invoke(value)).doubleValue();
+                out[i] = part;
             }
         } catch (Throwable e) {
             return null;
@@ -605,14 +614,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return out;
     }
 
-    private static Object withComponent(Object value, int index, double next) {
+    /** 换掉记录里的一格；数值会先按那一格的声明类型还原（int / float / long…），枚举原样放回。 */
+    private static Object withPart(Object value, int index, Object next) {
         try {
             RecordComponent[] parts = value.getClass().getRecordComponents();
             Object[] args = new Object[parts.length];
             for (int i = 0; i < parts.length; i++) {
-                Object current = parts[i].getAccessor().invoke(value);
-                double raw = i == index ? next : ((Number) current).doubleValue();
-                args[i] = parts[i].getType() == float.class ? (Object) (float) raw : (Object) raw;
+                args[i] = i == index ? next : parts[i].getAccessor().invoke(value);
             }
             Class<?>[] types = new Class<?>[parts.length];
             for (int i = 0; i < parts.length; i++) {
@@ -624,9 +632,57 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
     }
 
-    private static Object[] enumOptions(Ref<?> ref) {
-        Object value = ref.getValue();
+    private static Object withNumericPart(Object value, int index, double next) {
+        try {
+            RecordComponent[] parts = value.getClass().getRecordComponents();
+            if (index >= 0 && index < parts.length) {
+                return withPart(value, index, coerce(parts[index].getType(), next));
+            }
+        } catch (Throwable ignored) {
+            // 读不出记录结构就保持原值
+        }
+        return value;
+    }
+
+    private static Object coerce(Class<?> type, double value) {
+        if (type == double.class) {
+            return value;
+        }
+        if (type == float.class) {
+            return (float) value;
+        }
+        if (type == int.class) {
+            return (int) Math.round(value);
+        }
+        if (type == long.class) {
+            return Math.round(value);
+        }
+        if (type == short.class) {
+            return (short) Math.round(value);
+        }
+        if (type == byte.class) {
+            return (byte) Math.round(value);
+        }
+        return value;
+    }
+
+    /** 下拉里要列哪些取值：普通枚举项看整个 Ref，记录里的枚举项看那一格自己的类型。 */
+    private static Object[] optionsFor(WrapperConfigRef<?> ref, int part) {
+        Object value = ref.ref().getValue();
+        if (part >= 0) {
+            Object[] parts = recordParts(value);
+            value = parts != null && part < parts.length ? parts[part] : null;
+        }
         return value instanceof Enum<?> e ? e.getDeclaringClass().getEnumConstants() : new Object[0];
+    }
+
+    private static Object currentOf(WrapperConfigRef<?> ref, int part) {
+        Object value = ref.ref().getValue();
+        if (part >= 0) {
+            Object[] parts = recordParts(value);
+            return parts != null && part < parts.length ? parts[part] : null;
+        }
+        return value;
     }
 
     private static String enumLabel(Object option) {
@@ -693,7 +749,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 rows.add(new Row(y, SECTION_H, ref, section, true));
                 y += SECTION_H;
             }
-            double[] parts = components(ref.ref().getValue());
+            Object[] parts = recordParts(ref.ref().getValue());
             int height = parts != null ? ROW_H * parts.length : ROW_H;
             rows.add(new Row(y, height, ref, section, false));
             y += height;
@@ -824,7 +880,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void paintRow(
             VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref, int mouseX, int mouseY) {
         int right = controlRight();
-        double[] rowParts = components(ref.ref().getValue());
+        Object[] rowParts = recordParts(ref.ref().getValue());
         int rowH = rowParts != null ? ROW_H * rowParts.length : ROW_H;
         boolean hover = mouseY >= y && mouseY < y + rowH && mouseX >= contentLeft - 4 && mouseX <= right + 4;
         if (hover && dropdown == null) {
@@ -849,7 +905,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
         Ref<?> value = ref.ref();
         Object raw = value.getValue();
-        double[] parts = components(raw);
+        Object[] parts = recordParts(raw);
 
         if (value instanceof FlagRef flag) {
             int sw = 20;
@@ -887,13 +943,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 Ef.text(ctx, text, chipX + 6, y + 5, p.ink());
             }
         } else if (parts != null) {
-            // 一条记录里的几个数值：每个分量占一行，标签用字段名
+            // 一条记录里的几格：每格占一行，行名用字段名；数值拖滑杆，枚举点开下拉
             String[] names = componentNames(raw);
             for (int i = 0; i < parts.length; i++) {
-                double[] range = bounds(ref, parts[i], i);
-                paintSlider(ctx, p, y + i * ROW_H, right, formatNumber(parts[i]),
-                        parts[i], range[0], range[1], names[i],
-                        numberTarget == ref && numberPart == i);
+                int partY = y + i * ROW_H;
+                Object part = parts[i];
+                if (part instanceof Number number) {
+                    double numeric = number.doubleValue();
+                    double[] range = bounds(ref, numeric, i);
+                    paintSlider(ctx, p, partY, right, formatNumber(numeric),
+                            numeric, range[0], range[1], names[i],
+                            numberTarget == ref && numberPart == i);
+                } else if (part instanceof Enum<?>) {
+                    boolean open = dropdown == ref && dropPart == i;
+                    paintPartEnum(ctx, p, partY, right, names[i], enumLabel(part), open);
+                }
             }
         } else {
             // 其余类型由宿主自带的编辑器负责绘制：这里只登记矩形并留白
@@ -988,9 +1052,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int sliderX = right - TEXT_W - 8 - sliderW;
         int lineY = y + ROW_H / 2;
 
-        if (!name.isEmpty()) {
-            Ef.tracked(ctx, name, sliderX - 16 - Ef.textWidth(name), y + 5, p.ink2(), 1);
-        }
+        paintPartName(ctx, p, y, sliderX - 12, name);
         Ef.fill(ctx, sliderX, lineY, sliderW, 1, p.rule());
         double ratio = max > min ? (value - min) / (max - min) : 0;
         int knob = (int) (sliderW * Math.max(0, Math.min(1, ratio)));
@@ -1002,6 +1064,30 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         } else {
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink());
         }
+    }
+
+    /** 分量行名：右对齐贴着控件，宽度按可用空间截断，长字段名不会压到行名上。 */
+    private void paintPartName(VDrawContext ctx, Ef.Palette p, int y, int rightEdge, String name) {
+        if (name == null || name.isEmpty()) {
+            return;
+        }
+        int available = Math.max(0, Math.min(150, rightEdge - contentLeft - 8));
+        if (available < 18) {
+            return;
+        }
+        String shown = Ef.ellipsis(name, available);
+        Ef.tracked(ctx, shown, rightEdge - Ef.trackedWidth(shown, 1), y + 5, p.ink2(), 1);
+    }
+
+    /** 记录里的一格枚举：切角块 + 下拉箭头，点击展开取值表。 */
+    private void paintPartEnum(
+            VDrawContext ctx, Ef.Palette p, int y, int right, String name, String text, boolean open) {
+        String label = text + "   ▾";
+        int textW = Ef.textWidth(label);
+        int chipX = right - textW - 10;
+        Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
+        Ef.text(ctx, label, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        paintPartName(ctx, p, y, chipX - 12, name);
     }
 
     private static boolean isNumeric(Ref<?> value) {
@@ -1040,9 +1126,22 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         RecordComponent[] parts = value.getClass().getRecordComponents();
         String[] names = new String[parts.length];
         for (int i = 0; i < parts.length; i++) {
-            names[i] = parts[i].getName().toUpperCase(Locale.ROOT);
+            names[i] = spacedUpper(parts[i].getName());
         }
         return names;
+    }
+
+    /** 字段名是驼峰（{@code ticksLater}），行名要的是两个大写词（{@code TICKS LATER}）。 */
+    private static String spacedUpper(String raw) {
+        StringBuilder out = new StringBuilder(raw.length() + 4);
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (i > 0 && Character.isUpperCase(c) && out.length() > 0) {
+                out.append(' ');
+            }
+            out.append(Character.toUpperCase(c));
+        }
+        return out.toString();
     }
 
     /** 下拉面板的上沿：放不下就翻到行上方，绘制与命中共用同一个判断。 */
@@ -1058,9 +1157,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (dropdown == null) {
             return;
         }
-        Object[] options = enumOptions(dropdown.ref());
+        Object[] options = optionsFor(dropdown, dropPart);
         if (options.length == 0) {
             dropdown = null;
+            dropPart = -1;
             return;
         }
         int rowH = 13;
@@ -1069,7 +1169,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.fill(ctx, dropX, top, dropW, height, p.panel());
         Ef.cutOutline(ctx, dropX, top, dropW, height, p.ink(), Ef.CUT);
 
-        Object current = dropdown.ref().getValue();
+        Object current = currentOf(dropdown, dropPart);
         for (int i = 0; i < options.length; i++) {
             int oy = top + 2 + i * rowH;
             boolean hover = mouseX >= dropX && mouseX <= dropX + dropW && mouseY >= oy && mouseY < oy + rowH;
@@ -1120,16 +1220,17 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         buildRows();
 
         if (dropdown != null) {
-            Object[] options = enumOptions(dropdown.ref());
+            Object[] options = optionsFor(dropdown, dropPart);
             int rowH = 13;
             int top = dropTop(options.length * rowH + 4);
             if (mx >= dropX && mx <= dropX + dropW && my >= top && my <= top + options.length * rowH + 4) {
                 int index = (my - top - 2) / rowH;
                 if (index >= 0 && index < options.length) {
-                    setValue(dropdown.ref(), options[index]);
+                    applyOption(dropdown, dropPart, options[index]);
                 }
             }
             dropdown = null;
+            dropPart = -1;
             return true;
         }
 
@@ -1227,6 +1328,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         // 滚动会挪动行，下拉跟着旧坐标走就会错位：直接收起来
         dropdown = null;
+        dropPart = -1;
         numberTarget = null;
         buildRows();
         scroll = Math.max(0, Math.min(maxScroll(), scroll - (int) (Math.signum(amount) * 18)));
@@ -1247,16 +1349,22 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (isNumeric(ref)) {
             return hitNumber(wrapper, -1, mouseX, button, rowY, valueText(ref), numericOf(ref));
         }
-        double[] parts = components(ref.getValue());
+        Object[] parts = recordParts(ref.getValue());
         if (parts != null) {
             int index = Math.max(0, Math.min(parts.length - 1, (mouseY - rowY) / ROW_H));
-            return hitNumber(wrapper, index, mouseX, button, rowY, formatNumber(parts[index]), parts[index]);
+            Object part = parts[index];
+            if (part instanceof Number number) {
+                double current = number.doubleValue();
+                return hitNumber(wrapper, index, mouseX, button, rowY, formatNumber(current), current);
+            }
+            if (part instanceof Enum<?> && button == 0) {
+                openDropdown(wrapper, index, rowY);
+                return true;
+            }
+            return false;
         }
         if (ref instanceof EnumRef<?>) {
-            dropdown = wrapper;
-            dropW = Math.min(180, Math.max(120, contentWidth / 3));
-            dropX = right - dropW;
-            dropY = rowY + ROW_H;
+            openDropdown(wrapper, -1, rowY);
             return true;
         }
         if (ref instanceof KeyBindRef bindRef) {
@@ -1269,6 +1377,23 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return true;
         }
         return true;
+    }
+
+    /** 记下这次下拉盖住的是哪一格：普通枚举项 {@code part = -1}，记录分量传它的下标。 */
+    private void openDropdown(WrapperConfigRef<?> wrapper, int part, int rowY) {
+        dropdown = wrapper;
+        dropPart = part;
+        dropW = Math.min(180, Math.max(120, contentWidth / 3));
+        dropX = controlRight() - dropW;
+        dropY = rowY + Math.max(0, part) * ROW_H + ROW_H;
+    }
+
+    private void applyOption(WrapperConfigRef<?> wrapper, int part, Object option) {
+        if (part < 0) {
+            setValue(wrapper.ref(), option);
+        } else {
+            setValue(wrapper.ref(), withPart(wrapper.ref().getValue(), part, option));
+        }
     }
 
     /** 数字行的一击：滑轨起拖，数值槽开输入框，右键退一档。 */
@@ -1323,7 +1448,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (part < 0) {
             setNumeric(wrapper.ref(), next);
         } else {
-            setValue(wrapper.ref(), withComponent(wrapper.ref().getValue(), part, next));
+            setValue(wrapper.ref(), withNumericPart(wrapper.ref().getValue(), part, next));
         }
     }
 
