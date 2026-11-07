@@ -773,8 +773,7 @@ public class ConfigPage extends GenericScreen {
         // 标题块最后画：设置项滚上来时从它底下穿过去，不用再套一层裁剪
         int top = bodyTop() + 6;
         Ef.fill(ctx, winX + railW, bodyTop(), winW - railW, listTop() - bodyTop(), p.paper());
-        int codeW = Math.round(itemsWidth() / WIDE);
-        Ef.trackedWide(ctx, Ef.ellipsis("// " + codeOf(selected), codeW), ix, top, p.ink2(), 1, WIDE);
+        Ef.trackedWide(ctx, Ef.ellipsisWide("// " + codeOf(selected), itemsWidth(), 1, WIDE), ix, top, p.ink2(), 1, WIDE);
         int titleY = top + Ef.lineH() + 2;
         List<Item> items = all();
         String meta = items.size() + " 项  │  " + sectionsOf(items) + " 组";

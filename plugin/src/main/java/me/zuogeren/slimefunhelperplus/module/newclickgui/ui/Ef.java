@@ -519,7 +519,11 @@ public final class Ef {
 
     /** 当前生效字体的行高。用户可能换了自定义字体，写死 9 会让两行字贴在一起。 */
     public static int lineH() {
-        return Math.max(9, font().fontHeight());
+        if (!NewClickGui.fontOptimize()) {
+            return Math.max(9, font().fontHeight());
+        }
+        // fontHeight 是原版字体的 9，自定义字体的实际行高在 getTextHeight 上
+        return Math.max(9, (int) Math.ceil(font().getTextHeight()));
     }
 
     public static int textWidth(String text) {
@@ -537,7 +541,66 @@ public final class Ef {
      * 拉开字距的拉丁小字：标签与模块名之间的层次感主要靠它，换成别的外观时也是通用手段。
      * 中文字距固定为 0，只有全大写的西文才加。
      */
+    /**
+     * 前缀宽度缓存：先量整段前缀、再按前缀定位下一个字。
+     *
+     * <p>逐字 {@code getWidth} 每次都向上取整，几十个字母就能累计多出 3~6px，
+     * 画出来的字距忽宽忽窄、量出来的宽度又比画的窄；前缀宽度把误差压在 1px 内。
+     * 缓存跟着字体实现走：换字体时 {@code resolve} 出来的实例变了就整表清掉。
+     */
+    private static final Map<String, int[]> PREFIX_WIDTHS = new HashMap<>();
+
+    private static Object prefixWidthsOwner;
+
+    private static int[] prefixWidths(String text) {
+        TextDrawer d = font();
+        Object owner = TextRenderers.resolve(d);
+        if (owner != prefixWidthsOwner) {
+            PREFIX_WIDTHS.clear();
+            prefixWidthsOwner = owner;
+        }
+        int[] cached = PREFIX_WIDTHS.get(text);
+        if (cached != null) {
+            return cached;
+        }
+        int[] widths = new int[text.length() + 1];
+        for (int i = 1; i <= text.length(); i++) {
+            widths[i] = d.getWidth(text.substring(0, i));
+        }
+        if (PREFIX_WIDTHS.size() > 512) {
+            PREFIX_WIDTHS.clear();
+        }
+        PREFIX_WIDTHS.put(text, widths);
+        return widths;
+    }
+
     public static int trackedWidth(String text, int tracking) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        if (!NewClickGui.fontOptimize()) {
+            return legacyTrackedWidth(text, tracking);
+        }
+        int[] widths = prefixWidths(text);
+        return Math.max(0, widths[text.length()] + tracking * (text.length() - 1));
+    }
+
+    public static void tracked(VDrawContext ctx, String text, int x, int y, int color, int tracking) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        if (!NewClickGui.fontOptimize()) {
+            legacyTracked(ctx, text, x, y, color, tracking);
+            return;
+        }
+        TextDrawer d = font();
+        int[] widths = prefixWidths(text);
+        for (int i = 0; i < text.length(); i++) {
+            ctx.drawText(d, String.valueOf(text.charAt(i)), x + widths[i] + tracking * i, y, color, false);
+        }
+    }
+
+    private static int legacyTrackedWidth(String text, int tracking) {
         TextDrawer d = font();
         int w = 0;
         for (int i = 0; i < text.length(); i++) {
@@ -546,7 +609,7 @@ public final class Ef {
         return Math.max(0, w - tracking);
     }
 
-    public static void tracked(VDrawContext ctx, String text, int x, int y, int color, int tracking) {
+    private static void legacyTracked(VDrawContext ctx, String text, int x, int y, int color, int tracking) {
         TextDrawer d = font();
         int cx = x;
         for (int i = 0; i < text.length(); i++) {
@@ -646,5 +709,35 @@ public final class Ef {
             w += cw;
         }
         return sb + dots;
+    }
+
+    /**
+     * 按 tracked+wide 之后的实际屏幕宽度做省略。
+     *
+     * <p>{@link #ellipsis} 量的是未加字距、未拉宽的宽度；拿它去裁一个还要加 tracking、再 ×stretch 的串，
+     * 每两个字母多 1px 字距、整体再拉宽 1.2 倍，长名字就会越过右边界。
+     */
+    public static String ellipsisWide(String text, int maxWidth, int tracking, float stretch) {
+        if (text == null) {
+            return "";
+        }
+        if (drawnWideWidth(text, tracking, stretch) <= maxWidth) {
+            return text;
+        }
+        String dots = "...";
+        int limit = maxWidth - drawnWideWidth(dots, tracking, stretch);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            String next = sb.toString() + text.charAt(i);
+            if (drawnWideWidth(next, tracking, stretch) > limit) {
+                break;
+            }
+            sb.append(text.charAt(i));
+        }
+        return sb + dots;
+    }
+
+    private static int drawnWideWidth(String text, int tracking, float stretch) {
+        return Math.round(trackedWidth(text, tracking) * stretch);
     }
 }

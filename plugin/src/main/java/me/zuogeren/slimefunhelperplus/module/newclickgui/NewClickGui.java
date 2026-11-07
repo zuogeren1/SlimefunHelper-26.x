@@ -46,6 +46,9 @@ public class NewClickGui extends BaseModule {
     /** 界面动效开关：关掉后所有过渡直接落到终态，不淡入、不擦入、不等时间。 */
     public final FlagRef animations;
 
+    /** 字体排版优化：按前缀量宽、行高跟随字号，避免逐字取整累积出忽宽忽窄的字距。 */
+    public final FlagRef fontOptimize;
+
     public NewClickGui() {
         super("NewClickGui");
         instance = this;
@@ -61,6 +64,10 @@ public class NewClickGui extends BaseModule {
                 .build();
 
         this.animations = flagBuilder(base.add("animations"))
+                .defaultValue(true)
+                .build();
+
+        this.fontOptimize = flagBuilder(base.add("font-optimize"))
                 .defaultValue(true)
                 .build();
 
@@ -98,6 +105,11 @@ public class NewClickGui extends BaseModule {
     /** 动效是否打开；没有实例时按打开处理，界面至少是完整的。 */
     public static boolean animations() {
         return instance == null || instance.animations == null || instance.animations.get();
+    }
+
+    /** 字体排版优化是否打开；没有实例时按打开处理（默认就是优化过的排版）。 */
+    public static boolean fontOptimize() {
+        return instance == null || instance.fontOptimize == null || instance.fontOptimize.get();
     }
 
     /**

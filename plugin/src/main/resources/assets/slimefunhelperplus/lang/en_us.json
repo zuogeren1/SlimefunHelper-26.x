@@ -26,6 +26,8 @@
   "new-click-gui.takeover-multiplayer.tooltips": "When on, the SlimefunHelper button on the multiplayer screen opens this GUI instead of the host's ClickGui",
   "new-click-gui.animations": "Interface animations",
   "new-click-gui.animations.tooltips": "Turn off to skip transitions: no fade, no wipe, no waiting",
+  "new-click-gui.font-optimize": "Font layout optimization",
+  "new-click-gui.font-optimize.tooltips": "Measure whole prefixes and follow the font's line height: tracked titles stop drifting a pixel per letter, and long names stay inside the row; turn off to use the old per-character layout",
   "widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
   "widget.click-gui.module-name.Render.FriendWine": "Friend's Wine",
   "widget.click-gui.module-name.Render.FriendWine.tooltips": "Meme: every living entity wobbles like jelly and spins in place",
