@@ -113,13 +113,7 @@ public class StructureLabel extends BaseModule {
             .build();
 
     public final EnumRef<LootVersion> lootVersion = builder(root.add("loot-version"), LootVersion.class)
-            //#if MC >= 260300
-            //$$ .defaultValue(LootVersion.V26_3)
-            //#elseif MC >= 260200
-            .defaultValue(LootVersion.V26_2)
-            //#else
-            //$$ .defaultValue(LootVersion.V26_1)
-            //#endif
+            .defaultValue(LootVersion.AUTO)
             .updateListener(version -> resetState())
             .build();
 
@@ -363,7 +357,8 @@ public class StructureLabel extends BaseModule {
                 if (!isCurrent(request)) {
                     return;
                 }
-                Populator populator = new Populator(seed, structureIndices, lootVersion.get());
+                Populator populator =
+                        new Populator(seed, structureIndices, lootVersion.get().resolved());
                 context = new GenerationContext(
                         request.generation(), seed, worldKey, Map.copyOf(configs), populator, biomeSampler);
                 pendingContextRequest = null;
