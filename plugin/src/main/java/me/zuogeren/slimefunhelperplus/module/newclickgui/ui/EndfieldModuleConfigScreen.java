@@ -20,6 +20,7 @@ import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
+import me.matl114.hacks.modules.task.ConfigManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.WrapColor;
@@ -341,7 +342,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 空列表时那句完整的话。模块页与非模块页说法不同。 */
     protected String emptyText() {
-        return module == null ? "这一页还没有可编辑的设置。" : "这个模块还没有可编辑的设置。";
+        if (module == null) {
+            return "这一页还没有可编辑的设置。";
+        }
+        return actions().isEmpty()
+                ? "这个模块还没有可编辑的设置。"
+                : "这个模块没有可编辑的设置；下面这一节是它自己的操作。";
     }
 
     /** 子类可以再筛一遍（搜索框用）：返回 false 的项不进列表。 */
@@ -384,6 +390,23 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 真正重的活（扫字体目录这类）留给动作本身，点下去才做。
      */
     protected List<Action> actions() {
+        // 「Config」没有配置项，它的页面就是宿主的快照保存/读取；这里把它接成两条动作行，
+        // 否则模块页会是一张空表。
+        if (module instanceof ConfigManager manager) {
+            return List.of(
+                    new Action(
+                            "保存配置快照",
+                            "把当前配置写成一份快照",
+                            "保存",
+                            "选一个位置保存快照：当前所有配置一起写成文件，以后可以整份读回来。",
+                            () -> manager.openSnapshotScreen(NewClickGui.elementFactory(), true)),
+                    new Action(
+                            "读取配置快照",
+                            "从快照文件整份恢复",
+                            "读取",
+                            "选一个快照文件读回来：文件里的配置会整份套到当前配置上。",
+                            () -> manager.openSnapshotScreen(NewClickGui.elementFactory(), false)));
+        }
         return List.of();
     }
 
