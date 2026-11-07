@@ -1,8 +1,11 @@
 package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import me.matl114.gui.FilterService;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.api.ModuleGroup;
@@ -34,6 +37,10 @@ public class HotkeysPage extends EndfieldModuleConfigScreen {
 
     private String query = "";
     private EditBox searchBox;
+
+    /** 命中结果按配置项缓存：行名要过一遍拼音转换，每帧对全部键位重算会拖慢界面。 */
+    private String acceptQuery = "";
+    private final Map<WrapperConfigRef<?>, Boolean> acceptCache = new IdentityHashMap<>();
 
     private static List<WrapperConfigRef<?>> all() {
         if (all == null) {
@@ -100,15 +107,29 @@ public class HotkeysPage extends EndfieldModuleConfigScreen {
         return Math.max(120, Math.min(240, contentWidthPx() / 3));
     }
 
-    /** 搜索同时匹配配置键名与行名（行名可能是中文，键名一定是英文 id）。 */
+    /**
+     * 搜索同时匹配配置键名与行名：键名按原样匹配，行名交给宿主的 {@link FilterService#nameMatch}，
+     * 于是中文行名也能用全拼与首字母搜。
+     */
     @Override
     protected boolean accept(WrapperConfigRef<?> ref) {
-        String q = query.trim().toLowerCase(Locale.ROOT);
+        String q = query.trim();
         if (q.isEmpty()) {
             return true;
         }
-        return ref.keyName().toLowerCase(Locale.ROOT).contains(q)
-                || rowLabel(ref).toLowerCase(Locale.ROOT).contains(q);
+        if (!acceptQuery.equals(q)) {
+            acceptCache.clear();
+            acceptQuery = q;
+        }
+        Boolean cached = acceptCache.get(ref);
+        if (cached != null) {
+            return cached;
+        }
+        String needle = q.toLowerCase(Locale.ROOT);
+        boolean hit = ref.keyName().toLowerCase(Locale.ROOT).contains(needle)
+                || FilterService.nameMatch(rowLabel(ref), needle);
+        acceptCache.put(ref, hit);
+        return hit;
     }
 
     private int shownCount() {

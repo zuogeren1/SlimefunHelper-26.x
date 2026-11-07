@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
+import me.matl114.gui.FilterService;
 import me.matl114.gui.GenericScreen;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigEnum;
@@ -78,6 +79,11 @@ public class ConfigPage extends GenericScreen {
     private String query = "";
     private int railScroll;
     private int itemScroll;
+
+    /** 搜索结果的缓存：拼音转换不便宜，同一个词每帧对全表重算会拖慢界面。 */
+    private Config shownConfig;
+    private String shownQuery = "";
+    private List<Item> shownCache;
 
     /** 原版输入框，只负责收字与画字；框体由 paintSearch 画。 */
     private EditBox searchBox;
@@ -265,20 +271,33 @@ public class ConfigPage extends GenericScreen {
         return itemsOf(selected);
     }
 
-    /** 搜索后的清单：路径与中文名都参与匹配。 */
+    /**
+     * 搜索后的清单：路径按原样匹配，中文名交给宿主的 {@link FilterService#nameMatch}，
+     * 所以能用全拼与首字母搜（「pengyou」也能命中「朋友的酒」）。
+     *
+     * <p>结果按「配置文件 + 搜索词」缓存：拼音转换不便宜，全配置页有近千条，
+     * 每帧重算会把界面拖慢，只有换了配置文件或搜索词才重算。
+     */
     private List<Item> shown() {
         List<Item> items = all();
-        String q = query.trim().toLowerCase(Locale.ROOT);
+        String q = query.trim();
         if (q.isEmpty()) {
             return items;
         }
+        if (shownCache != null && shownConfig == selected && shownQuery.equals(q)) {
+            return shownCache;
+        }
+        String needle = q.toLowerCase(Locale.ROOT);
         List<Item> out = new ArrayList<>();
         for (Item item : items) {
-            if (item.path().toLowerCase(Locale.ROOT).contains(q)
-                    || labelOf(item).toLowerCase(Locale.ROOT).contains(q)) {
+            if (item.path().toLowerCase(Locale.ROOT).contains(needle)
+                    || FilterService.nameMatch(labelOf(item), needle)) {
                 out.add(item);
             }
         }
+        shownConfig = selected;
+        shownQuery = q;
+        shownCache = out;
         return out;
     }
 

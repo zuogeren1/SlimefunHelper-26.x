@@ -3,6 +3,7 @@ package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import me.matl114.gui.FilterService;
 import me.matl114.gui.GenericScreen;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.modules.task.TextFont;
@@ -55,6 +56,10 @@ public class FontPickerPage extends GenericScreen {
     private final List<Row> rows = new ArrayList<>();
     private int totalHeight;
 
+    /** 搜索结果缓存：同一个词每帧对全部字体重算没有意义。 */
+    private String shownQuery = "";
+    private List<LocalFontTextDrawer.FontFile> shownCache;
+
     /** 悬停行，只用来出说明框。 */
     private LocalFontTextDrawer.FontFile hovered;
 
@@ -102,18 +107,28 @@ public class FontPickerPage extends GenericScreen {
         return value == null ? "" : value.trim();
     }
 
+    /**
+     * 搜到的字体：文件路径按原样匹配，字体名交给宿主的 {@link FilterService#nameMatch}，
+     * 中文家族名因此可以打拼音（「siyuanheiti」也能命中「思源黑体」）。
+     */
     private List<LocalFontTextDrawer.FontFile> shown() {
-        String q = query.trim().toLowerCase(Locale.ROOT);
+        String q = query.trim();
         if (q.isEmpty()) {
             return fonts();
         }
+        if (shownCache != null && shownQuery.equals(q)) {
+            return shownCache;
+        }
+        String needle = q.toLowerCase(Locale.ROOT);
         List<LocalFontTextDrawer.FontFile> out = new ArrayList<>();
         for (LocalFontTextDrawer.FontFile font : fonts()) {
-            if (font.displayName().toLowerCase(Locale.ROOT).contains(q)
-                    || font.path().toString().toLowerCase(Locale.ROOT).contains(q)) {
+            if (font.path().toString().toLowerCase(Locale.ROOT).contains(needle)
+                    || FilterService.nameMatch(font.displayName(), needle)) {
                 out.add(font);
             }
         }
+        shownQuery = q;
+        shownCache = out;
         return out;
     }
 
