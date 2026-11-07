@@ -44,8 +44,6 @@ import net.minecraft.network.chat.Component;
  */
 public class EndfieldClickGuiScreen extends GenericScreen {
     private static final int BAR_H = 22;
-    /** 命令栏装不下时换行，行距就是这个数。 */
-    private static final int TAB_STEP = 17;
     private static final int FOOT_H = 14;
     private static final int HEAD_H = 34;
     private static final int CHIP_H = 15;
@@ -80,12 +78,10 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     private int winY;
     private int winW;
     private int winH;
-    /** 命令栏的实际高度：装不下时换成两行。 */
+    /** 命令栏的实际高度：分类换行时变高。 */
     private int barH = BAR_H;
-    /** 每帧布局出来的分类页签，绘制与命中共用。 */
-    private List<Tab> tabLayout = List.of();
-    private String hoverTabKey;
-    private long hoverTabStart;
+    /** 顶部命令栏：主屏与各分类页共用一条，切分类不再开新屏。 */
+    private EndfieldTabBar tabBar = new EndfieldTabBar();
     private boolean hoverDetail;
     private long hoverDetailStart;
     private boolean hoverButton;
@@ -93,9 +89,6 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     private long buttonPressAt;
     /** 这一帧鼠标停在哪个记录行上，用来出说明框。 */
     private BaseModule hoveredModule;
-
-    /** 一行的分类页签：坐标是命令栏的局部坐标。 */
-    private record Tab(int x, int y, int w, String label, String key, boolean active) {}
 
     public EndfieldClickGuiScreen(EndfieldSettings settings) {
         super(Component.empty(), 0, 0);
@@ -202,19 +195,6 @@ public class EndfieldClickGuiScreen extends GenericScreen {
                 : "widget.click-gui.module-name." + manager + ".";
         return prefix + module.getName() + suffix;
     }
-
-    /** 顶部分类：模块页是本界面，其余交给宿主原有的页面。 */
-    private static final String[][] TABS = {
-        {"模块", "Module"},
-        {"好友", "Friends"},
-        {"宏", "CmdMacros"},
-        {"快捷键", "Hotkeys"},
-        {"基础", "BaseSettings"},
-        {"GUI", "GuiSettings"},
-        {"字体", "Font"},
-        {"全部", "Config"},
-        {"Baritone", "Baritone"},
-    };
 
     private Map<String, Function<Screen, DrawableWidget>> extras;
 
@@ -346,50 +326,6 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         return Math.max(1, (bodyHeight() - HEAD_H) / rowH());
     }
 
-    /** 窄窗口里省掉字标，只留徽记，把宽度让给分类页签。 */
-    private boolean showBrand() {
-        return winW >= 520;
-    }
-
-    /** 徽记到第一个页签之间的距离；绘制与布局共用，改这里就够了。 */
-    private int brandWidth() {
-        return showBrand() ? Ef.trackedWidth("CLICKGUI", 1) + 36 : 18;
-    }
-
-    private int themeToggleX(int width) {
-        String esc = "Esc 关闭";
-        String theme = light() ? "深色" : "浅色";
-        return width - 8 - Ef.textWidth(esc) - 10 - Ef.textWidth(theme);
-    }
-
-    /**
-     * 分类页签按可用宽度排；装不下就换行，命令栏跟着变高。
-     * 这样窄窗口不会把页签画到主题开关和 Esc 提示上，也不会藏起某个页面。
-     */
-    private void layoutTabs() {
-        List<Tab> tabs = new ArrayList<>();
-        int x = 6 + brandWidth();
-        int y = 4;
-        int limit = winW >= 320 ? themeToggleX(winW) - 6 : winW - 6;
-        for (String[] tab : TABS) {
-            boolean module = "Module".equals(tab[1]);
-            if (!module && !extraSelections().containsKey(tab[1])) {
-                continue;
-            }
-            int w = Ef.textWidth(tab[0]) + 10;
-            if (x + w > limit) {
-                x = 6;
-                y += TAB_STEP;
-                limit = winW - 6;
-                w = Math.min(w, Math.max(20, limit - x));
-            }
-            tabs.add(new Tab(x, y, w, tab[0], tab[1], module));
-            x += w + 4;
-        }
-        this.tabLayout = tabs;
-        this.barH = Math.max(BAR_H, y + 19);
-    }
-
     // ------------------------------------------------------------------ 控件
 
     @Override
@@ -399,6 +335,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         this.y = 0;
         this.animStart = System.currentTimeMillis();
         this.openStart = System.currentTimeMillis();
+        this.tabBar = new EndfieldTabBar(this.openStart);
         this.extras = null;
         this.moduleCache.clear();
         this.tipCache.clear();
@@ -411,7 +348,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         winH = Math.min(this.height - 8, Math.max(200, Math.round(this.height * 0.78F)));
         winX = (this.width - winW) / 2;
         winY = (this.height - winH) / 2;
-        layoutTabs();
+        barH = tabBar.measure(winW, light());
 
         int railW = railWidth();
         int detailW = detailWidth();
@@ -478,102 +415,40 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     }
 
     // ------------------------------------------------------------------ 命令栏
-
-    /** 三色条扫过：打开界面时从左往右画出来，之后一直静止。 */
-    private void paintTriBar(VDrawContext ctx, int w) {
-        int drawn = Math.round(w * Ef.ease(Ef.progress(openStart, 600.0F)));
-        int third = Math.max(1, w / 3);
-        int a = Math.min(third, drawn);
-        if (a > 0) {
-            Ef.fill(ctx, 0, 0, a, 3, Ef.TRI_A);
-        }
-        int b = Math.min(third, drawn - third);
-        if (b > 0) {
-            Ef.fill(ctx, third, 0, b, 3, Ef.SIGNAL);
-        }
-        int c = drawn - third * 2;
-        if (c > 0) {
-            Ef.fill(ctx, third * 2, 0, c, 3, Ef.TRI_C);
-        }
-    }
-
+    /** 命令栏：主屏与各分类页共用一条，切分类在同一屏里完成。 */
     private void paintBar(EfWidget self, VDrawContext ctx, int mouseX, int mouseY) {
-        int w = self.getTextureWidth();
-        int h = self.getTextureHeight();
         int mx = (int) (mouseX - self.x());
         int my = (int) (mouseY - self.y());
-        Ef.fill(ctx, 0, 0, w, h, Ef.BAR_BG);
-        paintTriBar(ctx, w);
-
-        Ef.cutFill(ctx, 6, 5, 12, 12, Ef.SIGNAL, Ef.CUT);
-        Ef.text(ctx, "S", 9, 7, Ef.ON_SIGNAL);
-        if (showBrand()) {
-            Ef.trackedWide(ctx, "CLICKGUI", 24, 7, Ef.BAR_INK, 1, WIDE);
-            Ef.fill(ctx, 24 + Ef.trackedWideWidth("CLICKGUI", 1, WIDE) + 8, 5, 1, 12, Ef.BAR_RULE);
-        }
-
-        // 悬停的分区在底边擦一条强调色线：命令栏是深色的，这里用线不违反"只做填充"的用意
-        String hot = null;
-        for (Tab tab : tabLayout) {
-            if (mx >= tab.x && mx <= tab.x + tab.w && my >= tab.y && my <= tab.y + CHIP_H) {
-                hot = tab.key;
-            }
-        }
-        if (hot != null && !hot.equals(hoverTabKey)) {
-            hoverTabKey = hot;
-            hoverTabStart = System.currentTimeMillis();
-        } else if (hot == null) {
-            hoverTabKey = null;
-        }
-
-        for (Tab tab : tabLayout) {
-            if (tab.active) {
-                Ef.cutFill(ctx, tab.x, tab.y, tab.w, CHIP_H, Ef.SIGNAL, Ef.CUT);
-                Ef.text(ctx, tab.label, tab.x + 5, tab.y + 3, Ef.ON_SIGNAL);
-                continue;
-            }
-            boolean over = tab.key.equals(hoverTabKey);
-            Ef.text(ctx, tab.label, tab.x + 5, tab.y + 3, over ? Ef.BAR_INK : Ef.BAR_INK2);
-            if (over) {
-                float t = Ef.mech(Ef.progress(hoverTabStart, 280.0F));
-                Ef.fill(ctx, tab.x, tab.y + CHIP_H, Math.round(tab.w * t), 2, Ef.SIGNAL);
-            }
-        }
-
-        if (winW < 360) {
-            // 极窄时右侧提示让位给分类
-            return;
-        }
-        String esc = "Esc 关闭";
-        Ef.text(ctx, esc, w - 8 - Ef.textWidth(esc), 7, Ef.BAR_INK2);
-        int themeX = themeToggleX(w);
-        Ef.fill(ctx, themeX - 6, 6, 1, 10, Ef.BAR_RULE);
-        Ef.text(ctx, light() ? "深色" : "浅色", themeX, 7, Ef.BAR_INK);
+        tabBar.paint(ctx, 0, 0, self.getTextureWidth(), "Module", light(), mx, my);
     }
 
     private boolean clickBar(EfWidget self, double mouseX, double mouseY, int button) {
         int mx = (int) (mouseX - self.x());
         int my = (int) (mouseY - self.y());
-        for (Tab tab : tabLayout) {
-            if (mx >= tab.x && mx <= tab.x + tab.w && my >= tab.y && my <= tab.y + CHIP_H) {
-                if (!tab.active) {
-                    openHostPage(tab.key);
-                }
-                return true;
-            }
-        }
-        if (winW < 360) {
-            return false;
-        }
-        int themeX = themeToggleX(self.getTextureWidth());
-        if (mx >= themeX - 8 && mx <= themeX + Ef.textWidth("浅色") + 2 && my <= BAR_H) {
+        String hit = tabBar.click(0, 0, self.getTextureWidth(), "Module", light(), mx, my);
+        if (EndfieldTabBar.THEME.equals(hit)) {
             if (settings != null) {
                 settings.light(!settings.light());
             }
             return true;
         }
-        return false;
+        if (hit == null || "Module".equals(hit)) {
+            return false;
+        }
+        switchToPage(hit);
+        return true;
     }
+
+    /** 切到另一个分类：同一个窗口里换内容，不是再叠一层屏。 */
+    private void switchToPage(String key) {
+        Screen next = EndfieldPages.create(key, settings);
+        if (next != null) {
+            ScreenAccess.of(this).switchToScreen(next);
+            return;
+        }
+        openHostPage(key);
+    }
+
 
     // ------------------------------------------------------------------ 分组列
 

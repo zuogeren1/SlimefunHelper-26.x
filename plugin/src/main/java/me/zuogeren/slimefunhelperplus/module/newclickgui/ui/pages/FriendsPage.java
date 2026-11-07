@@ -17,6 +17,20 @@ public class FriendsPage extends EndfieldModuleConfigScreen {
     }
 
     public FriendsPage(EndfieldSettings settings) {
-        super("FRIENDS", "好友", null, FriendsPage::refs, settings);
+        super("FRIENDS", "好友", null, FriendsPage::refs, settings, "Friends");
+    }
+
+    /**
+     * 名单人数来自 {@code playerList}（随 friends.nbt 单独存盘，不在配置项里），
+     * 好友是否可攻击来自 {@code attack.att-friend}。两项都不碰玩家实体，主菜单里也报得出真实值。
+     */
+    @Override
+    protected String extraStats() {
+        TargetSelector selector = TargetSelector.INSTANCE;
+        if (selector == null) {
+            return "";
+        }
+        int count = selector.playerList == null ? 0 : selector.playerList.friends().size();
+        return "名单 " + count + " 人 │ " + (selector.attackFriend.get() ? "好友可攻击" : "好友受保护");
     }
 }

@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.Constants;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
@@ -31,6 +32,8 @@ import me.matl114.utils.config.NumberClamp;
 import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -66,6 +69,15 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 这一页要渲染哪些配置项：模块页是模块自己的，其它页由调用方拼。 */
     private final java.util.function.Supplier<List<WrapperConfigRef<?>>> source;
+
+    /** 作为顶部分类页时，命令栏画整条分类条并把这一项标成当前；模块配置页为 null（画返回 + 标题）。 */
+    private final String tabKey;
+
+    /** 命令栏：分类页与其他页共用同一条，切分类在同一屏里完成。 */
+    private EndfieldTabBar tabBar;
+
+    /** 命令栏实际高度（分类换行时会变高）。 */
+    private int barH = BAR_H;
 
     protected final EndfieldSettings settings;
 
@@ -129,7 +141,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 EndfieldClickGuiScreen.moduleLabel(module),
                 module,
                 module::getEditableConfig,
-                settings);
+                settings,
+                null);
     }
 
     /**
@@ -144,12 +157,27 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             BaseModule module,
             java.util.function.Supplier<List<WrapperConfigRef<?>>> source,
             EndfieldSettings settings) {
+        this(latin, title, module, source, settings, null);
+    }
+
+    /**
+     * 作为顶部分类页打开：命令栏换成整条分类条，{@code tabKey} 是这一页自己的键。
+     * 这样从一页切到另一页是"同一个窗口里换内容"，不会叠出一层新的屏幕。
+     */
+    public EndfieldModuleConfigScreen(
+            String latin,
+            String title,
+            BaseModule module,
+            java.util.function.Supplier<List<WrapperConfigRef<?>>> source,
+            EndfieldSettings settings,
+            String tabKey) {
         super(Component.empty(), 0, 0);
         this.latin = latin;
         this.title = title;
         this.module = module;
         this.source = source;
         this.settings = settings;
+        this.tabKey = tabKey;
     }
 
     // ------------------------------------------------------------------ 子类钩子
@@ -167,6 +195,34 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 工具区点击；{@code contentY} 已换算成内容坐标。 */
     protected boolean clickTool(double mouseX, double contentY, int button) {
         return false;
+    }
+
+    /** 空列表时那句完整的话。模块页与非模块页说法不同。 */
+    protected String emptyText() {
+        return module == null ? "这一页还没有可编辑的设置。" : "这个模块还没有可编辑的设置。";
+    }
+
+    /** 子类可以再筛一遍（搜索框用）：返回 false 的项不进列表。 */
+    protected boolean accept(WrapperConfigRef<?> ref) {
+        return true;
+    }
+
+    /** 行名：翻译键取不到就退到路径最后一段，和行里显示的一致。 */
+    protected static String rowLabel(WrapperConfigRef<?> ref) {
+        String key = ref.keyName();
+        return Component.translatableWithFallback(key, leaf(key)).getString();
+    }
+
+    protected int bodyTopPx() {
+        return bodyTop();
+    }
+
+    protected int contentLeftPx() {
+        return contentLeft;
+    }
+
+    protected int contentWidthPx() {
+        return contentWidth;
     }
 
     /** 页脚右侧的提示，默认是数值控件的操作说明。 */
@@ -198,15 +254,19 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         this.x = 0;
         this.y = 0;
         this.scroll = 0;
+        if (tabKey != null) {
+            this.tabBar = new EndfieldTabBar();
+        }
     }
 
     @Override
     protected void refreshWidgets() {
         super.refreshWidgets();
-        winW = Math.min(this.width - 8, Math.max(280, Math.round(this.width * 0.62F)));
+        winW = Math.min(this.width - 8, Math.max(280, Math.round(this.width * 0.78F)));
         winH = Math.min(this.height - 8, Math.max(200, Math.round(this.height * 0.78F)));
         winX = (this.width - winW) / 2;
         winY = (this.height - winH) / 2;
+        barH = tabBar == null ? BAR_H : tabBar.measure(winW, light());
 
         EfWidget.of(0, 0, this.width, this.height, this::paint)
                 .click(this::click)
@@ -364,7 +424,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private List<WrapperConfigRef<?>> visibleRefs() {
         List<WrapperConfigRef<?>> out = new ArrayList<>();
         for (WrapperConfigRef<?> ref : source.get()) {
-            if (ref.shouldShow()) {
+            if (ref.shouldShow() && accept(ref)) {
                 out.add(ref);
             }
         }
@@ -568,11 +628,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     // ------------------------------------------------------------------ 布局
 
     private int bodyTop() {
-        return winY + BAR_H + 2;
+        return winY + barH + 2;
     }
 
     private int bodyHeight() {
-        return winH - BAR_H - FOOT_H - 4;
+        return winH - barH - FOOT_H - 4;
     }
 
     private void buildRows() {
@@ -618,7 +678,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private void paintBar(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
-        Ef.fill(ctx, winX, winY, winW, BAR_H, Ef.BAR_BG);
+        if (tabKey != null) {
+            // 作为顶部分类的一页：命令栏就是整条分类条，当前项高亮
+            tabBar.paint(ctx, winX, winY, winW, tabKey, light(), mouseX, mouseY);
+            return;
+        }
+        Ef.fill(ctx, winX, winY, winW, barH, Ef.BAR_BG);
 
         boolean backHot = mouseX >= winX + 6 && mouseX <= winX + 40 && mouseY >= winY + 5 && mouseY <= winY + 17;
         if (backHot) {
@@ -655,22 +720,24 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
         ctx.enableScissor(winX, top, winX + winW, top + height);
         try {
-            if (toolHeight() > 0) {
-                paintTool(ctx, p, contentLeft, top - scroll, contentWidth, mouseX, mouseY);
-            }
             if (rows.isEmpty()) {
-                Ef.text(ctx, "这个模块还没有可编辑的设置。", contentLeft, top + 6, p.ink2());
-                return;
+                Ef.text(ctx, emptyText(), contentLeft, top + toolHeight() + 6, p.ink2());
+            } else {
+                for (Row row : rows) {
+                    if (row.y + row.height < top || row.y > top + height) {
+                        continue;
+                    }
+                    if (row.header) {
+                        paintSection(ctx, p, row.y, row.section);
+                    } else {
+                        paintRow(ctx, p, row.y, row.ref, mouseX, mouseY);
+                    }
+                }
             }
-            for (Row row : rows) {
-                if (row.y + row.height < top || row.y > top + height) {
-                    continue;
-                }
-                if (row.header) {
-                    paintSection(ctx, p, row.y, row.section);
-                } else {
-                    paintRow(ctx, p, row.y, row.ref, mouseX, mouseY);
-                }
+            if (toolHeight() > 0) {
+                // 工具条是固定的：先铺一层纸面盖住滚过去的行，再画它自己
+                Ef.fill(ctx, contentLeft - 4, top, contentWidth + 8, toolHeight(), p.paper());
+                paintTool(ctx, p, contentLeft, top, contentWidth, mouseX, mouseY);
             }
         } finally {
             ctx.disableScissor();
@@ -871,7 +938,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private int dropTop(int height) {
         int top = dropY;
         if (top + height > winY + winH - FOOT_H) {
-            top = Math.max(winY + BAR_H, dropY + ROW_H - height);
+            top = Math.max(winY + barH, dropY + ROW_H - height);
         }
         return top;
     }
@@ -955,7 +1022,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return true;
         }
 
-        if (my >= winY && my < winY + BAR_H) {
+        if (my >= winY && my < winY + barH) {
+            if (tabKey != null) {
+                String hit = tabBar.click(winX, winY, winW, tabKey, light(), mx, my);
+                if (EndfieldTabBar.THEME.equals(hit)) {
+                    if (settings != null) {
+                        settings.light(!settings.light());
+                    }
+                    return true;
+                }
+                if (hit != null && !hit.equals(tabKey)) {
+                    switchPage(hit);
+                    return true;
+                }
+                return false;
+            }
             if (mx >= winX + 6 && mx <= winX + 42) {
                 back();
                 return true;
@@ -979,7 +1060,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (my < bodyTop() || my > bodyTop() + bodyHeight()) {
             return false;
         }
-        if (toolHeight() > 0 && clickTool(mx, my + scroll, button)) {
+        if (toolHeight() > 0 && clickTool(mx, my, button)) {
             return true;
         }
         for (Row row : rows) {
@@ -1145,6 +1226,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 标签可用宽度：控件区左侧那一段，别让长名字压到滑轨上。 */
     private int labelWidth() {
         return Math.max(40, controlRight() - TEXT_W - 8 - sliderWidth() - 10 - contentLeft);
+    }
+
+    /** 切到另一个分类：同一个窗口里换内容，不再叠一层屏。 */
+    private void switchPage(String key) {
+        Screen next = "Module".equals(key)
+                ? new EndfieldClickGuiScreen(settings)
+                : EndfieldPages.create(key, settings);
+        if (next != null) {
+            ScreenAccess.of(this).switchToScreen(next);
+        }
     }
 
     private void back() {

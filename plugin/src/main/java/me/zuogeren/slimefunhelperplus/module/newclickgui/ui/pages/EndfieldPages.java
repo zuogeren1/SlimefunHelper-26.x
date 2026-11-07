@@ -20,6 +20,8 @@ public final class EndfieldPages {
             case "BaseSettings" -> new BaseSettingsPage(settings);
             case "GuiSettings" -> new GuiSettingsPage(settings);
             case "Font" -> new FontPage(settings);
+            case "Config" -> new ConfigPage(settings);
+            case "Baritone" -> new BaritonePage(settings);
             default -> null;
         };
     }

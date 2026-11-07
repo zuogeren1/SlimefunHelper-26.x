@@ -1,6 +1,8 @@
 {
   "config.index.friend-wine": "Friend's Wine",
   "config.index.locator-bar": "Locator Bar",
+  "config.index.bind-command": "Bind Commands",
+  "config.index.event-command": "Event Macros",
   "config.index.new-click-gui": "New GUI",
   "config.index.sfhelperplus": "SlimeFunHelper+",
   "friend-wine.enable": "Friend's Wine",
