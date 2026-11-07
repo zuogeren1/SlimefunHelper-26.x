@@ -18,6 +18,7 @@ import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldClickGuiScreen;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldTabBar;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.FieldEditor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -78,6 +79,9 @@ public class BaritonePage extends GenericScreen {
     private int dropX;
     private int dropY;
     private int dropW;
+
+    /** 数值槽就地手输：开着的这一行让出自己的文本，交给原版输入框画。 */
+    private final FieldEditor editor = new FieldEditor();
 
     private Entry hovered;
 
@@ -271,6 +275,14 @@ public class BaritonePage extends GenericScreen {
         this.x = 0;
         this.y = 0;
         this.scroll = 0;
+        // 重建控件会把屏幕上的输入框全清掉，手里那一格跟着作废
+        editor.close();
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        editor.tick();
     }
 
     @Override
@@ -315,6 +327,16 @@ public class BaritonePage extends GenericScreen {
     /** 标签可用宽度：别让长名字压到滑轨上。 */
     private int labelWidth() {
         return Math.max(40, contentRight() - TEXT_W - 8 - sliderWidth() - 10 - textX());
+    }
+
+    /** 右端数值槽的左边：这一格既显示数值，点它也能就地手输。 */
+    private int fieldX() {
+        return contentRight() - TEXT_W;
+    }
+
+    /** 输入框的身份：同一条设置在任何一帧都是同一格。 */
+    private static String fieldKey(Entry entry) {
+        return "num:" + entry.name();
     }
 
     private void buildRows() {
@@ -413,7 +435,7 @@ public class BaritonePage extends GenericScreen {
         } else if (value instanceof Number number) {
             double current = number.doubleValue();
             double[] bounds = range(row.entry(), current, integral(value));
-            paintSlider(ctx, p, y, formatNumber(current), current, bounds[0], bounds[1]);
+            paintSlider(ctx, p, row, mouseX, mouseY, formatNumber(current), current, bounds[0], bounds[1]);
         } else if (value instanceof Enum<?> option) {
             paintEnum(ctx, p, y, dropdown == row.entry(), option.name());
         } else {
@@ -437,9 +459,11 @@ public class BaritonePage extends GenericScreen {
         }
     }
 
-    /** 数值滑杆：细线轨道 + 2px 手柄 + 右端数值。 */
+    /** 数值滑杆：细线轨道 + 2px 手柄 + 右端数值槽。 */
     private void paintSlider(
-            VDrawContext ctx, Ef.Palette p, int y, String text, double value, double min, double max) {
+            VDrawContext ctx, Ef.Palette p, Row row, int mouseX, int mouseY, String text,
+            double value, double min, double max) {
+        int y = row.y();
         int right = contentRight();
         int width = sliderWidth();
         int left = right - TEXT_W - 8 - width;
@@ -450,6 +474,20 @@ public class BaritonePage extends GenericScreen {
         int knob = (int) (width * Math.max(0.0D, Math.min(1.0D, ratio)));
         Ef.fill(ctx, left, lineY, knob, 1, p.ink());
         Ef.fill(ctx, left + knob - 1, lineY - 3, 2, 7, p.ink());
+
+        int fx = fieldX();
+        int fy = y + FieldEditor.FIELD_TOP;
+        if (editor.isOpenFor(fieldKey(row.entry()))) {
+            // 输入框自己画字，这里只把框让出来
+            FieldEditor.paintFrame(ctx, p, fx, fy, TEXT_W, FieldEditor.FIELD_H, true, false);
+            editor.setTextColor(p.ink());
+            return;
+        }
+        boolean over = mouseX >= fx && mouseX < fx + TEXT_W
+                && mouseY >= fy && mouseY < fy + FieldEditor.FIELD_H;
+        if (over) {
+            FieldEditor.paintFrame(ctx, p, fx, fy, TEXT_W, FieldEditor.FIELD_H, false, true);
+        }
         Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink());
     }
 
@@ -518,7 +556,12 @@ public class BaritonePage extends GenericScreen {
         String left = available ? entries.size() + " 项设置  │  已开启 " + enabledCount() + " 项" : "Baritone 不可用";
         Ef.text(ctx, left, winX + 8, y + 3, p.ink2());
         if (available) {
-            String hint = "点开关切换 │ 拖滑杆改数值";
+            String hint = "点开关切换 │ 拖滑杆改数值 │ 点数字手输";
+            int room = winW - 16 - Ef.textWidth(left);
+            if (Ef.textWidth(hint) > room) {
+                // 窄窗先省掉"点开关切换"：右侧提示压到左侧统计上比少一句提示更糟
+                hint = "拖滑杆 │ 点数字可手输";
+            }
             Ef.text(ctx, hint, winX + winW - 8 - Ef.textWidth(hint), y + 3, p.ink2());
         }
     }
@@ -558,6 +601,12 @@ public class BaritonePage extends GenericScreen {
     private boolean click(EfWidget self, double mouseX, double mouseY, int button) {
         int mx = (int) mouseX;
         int my = (int) mouseY;
+        // 输入框是原版控件：落在它上面的这一下要还给输入框，否则光标都挪不动
+        if (editor.contains(mouseX, mouseY)) {
+            return false;
+        }
+        // 点到别处就收起：输入框挂在旧行坐标上会盖到别的设置
+        editor.close();
         // 上一次拖动在这里收尾：重新点击就重新判定
         dragEntry = null;
         buildRows();
@@ -621,6 +670,12 @@ public class BaritonePage extends GenericScreen {
         if (value instanceof Number number) {
             double current = number.doubleValue();
             double[] bounds = range(entry, current, integral(value));
+            int fx = fieldX();
+            // 数值槽与滑轨的命中区不重叠：槽从右端 TEXT_W 起，滑轨到它左边 8px 为止
+            if (button == 0 && mouseX >= fx && mouseX <= fx + TEXT_W) {
+                openField(row, entry, value, current);
+                return true;
+            }
             int width = sliderWidth();
             int left = contentRight() - TEXT_W - 8 - width;
             if (button == 0 && mouseX >= left - 3 && mouseX <= left + width + 3) {
@@ -647,6 +702,39 @@ public class BaritonePage extends GenericScreen {
         return false;
     }
 
+    /**
+     * 点数值槽：就地手输，逐字写回；"-"、"." 这类半截输入解析不了就保持原值。
+     *
+     * <p>写回类型取按下那一刻的运行时类型，经 {@link #coerce} 还原：Baritone 的 Setting
+     * 按泛型取值，类型不对下一次取值就会抛异常。
+     */
+    private void openField(Row row, Entry entry, Object current, double value) {
+        editor.open(
+                this,
+                fieldKey(entry),
+                fieldX(),
+                row.y() + FieldEditor.FIELD_TOP,
+                TEXT_W,
+                formatNumber(value),
+                true,
+                text -> {
+                    double next;
+                    try {
+                        next = Double.parseDouble(text.trim().replace(',', '.'));
+                    } catch (NumberFormatException ignored) {
+                        return;
+                    }
+                    // "NaN"/"Infinity" 也解析得出来，但写进设置就是坏值
+                    if (!Double.isFinite(next)) {
+                        return;
+                    }
+                    Object coerced = coerce(current, next);
+                    if (coerced != null) {
+                        write(entry, coerced);
+                    }
+                });
+    }
+
     private void applyRatio(Entry entry, Object current, double ratio) {
         double clamped = Math.max(0.0D, Math.min(1.0D, ratio));
         double next = dragMin + clamped * (dragMax - dragMin);
@@ -669,8 +757,9 @@ public class BaritonePage extends GenericScreen {
         if (mouseY < bodyTop() || mouseY > bodyTop() + bodyHeight()) {
             return false;
         }
-        // 滚动会挪动行，下拉跟着旧坐标走就会错位，直接收起来
+        // 滚动会挪动行，下拉与输入框跟着旧坐标走就会错位，直接收起来
         dropdown = null;
+        editor.close();
         buildRows();
         scroll = Math.max(0, Math.min(maxScroll(), scroll - (int) (Math.signum(amount) * 18)));
         return true;
