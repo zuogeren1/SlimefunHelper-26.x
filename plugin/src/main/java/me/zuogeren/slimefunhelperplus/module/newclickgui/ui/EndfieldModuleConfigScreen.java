@@ -2397,6 +2397,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             if (row.header || my < row.y || my >= row.y + row.height) {
                 continue;
             }
+            // 行只在正文这一条里接点击：右侧留白在窗口内但没有控件，落在那里的点击不该打中左边的开关
+            if (mx < contentLeft - 4 || mx > contentLeft + contentWidth + 4) {
+                return false;
+            }
             int resetX = contentLeft + contentWidth - 14;
             if (row.ref().ref().hasDefaultValue()
                     && mx >= resetX
@@ -2460,7 +2464,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int right = controlRight();
 
         if (ref instanceof FlagRef flag) {
-            if (mouseX >= right - 24) {
+            // 开关只吃行尾那一段：右边更远的地方没有控件，别让留白里的点击也算到它头上
+            if (mouseX >= right - 24 && mouseX <= right) {
                 flag.set(!flag.get());
                 return true;
             }
@@ -2471,7 +2476,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof OptionalPrimitive<?> optional) {
             // 行尾开关：只切「这一项是否生效」，不碰内层值
-            if (mouseX >= right - 24) {
+            if (mouseX >= right - 24 && mouseX <= right) {
                 setValue(ref, optional.withPresent(!optional.isPresent()));
                 return true;
             }
@@ -2575,7 +2580,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             applyRatio(wrapper, part, current, (mouseX - trackX) / (double) trackW);
             return true;
         }
-        if (mouseX >= right - TEXT_W - 4) {
+        if (mouseX >= right - TEXT_W - 4 && mouseX <= right) {
             numberTarget = wrapper;
             numberPart = part;
             numberRowY = rowY;
