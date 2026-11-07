@@ -21,6 +21,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.ChatUtils;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -228,6 +229,12 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     }
 
     private void openHostPage(String key) {
+        // 先走插件自己的新页面；还没做的分类再退回宿主那一页
+        Screen ours = EndfieldPages.create(key, settings);
+        if (ours != null) {
+            ScreenAccess.of(ours).openFromCurrent();
+            return;
+        }
         Function<Screen, DrawableWidget> page = extraSelections().get(key);
         if (page == null) {
             return;

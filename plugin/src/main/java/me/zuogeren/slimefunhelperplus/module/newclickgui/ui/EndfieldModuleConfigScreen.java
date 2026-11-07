@@ -56,8 +56,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 行尾重置按钮占的宽度。 */
     private static final int RESET_W = 16;
 
+    /** 模块页就有它；好友/宏/快捷键/全配置这类"非模块页"为 null，命令栏不出启用块。 */
     private final BaseModule module;
-    private final EndfieldSettings settings;
+
+    /** 命令栏的英文眉标与中文标题。 */
+    private final String latin;
+
+    private final String title;
+
+    /** 这一页要渲染哪些配置项：模块页是模块自己的，其它页由调用方拼。 */
+    private final java.util.function.Supplier<List<WrapperConfigRef<?>>> source;
+
+    protected final EndfieldSettings settings;
 
     private int winX;
     private int winY;
@@ -114,16 +124,66 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private record Row(int y, int height, WrapperConfigRef<?> ref, String section, boolean header) {}
 
     public EndfieldModuleConfigScreen(BaseModule module, EndfieldSettings settings) {
+        this(
+                module.getName().toUpperCase(Locale.ROOT),
+                EndfieldClickGuiScreen.moduleLabel(module),
+                module,
+                module::getEditableConfig,
+                settings);
+    }
+
+    /**
+     * 通用配置页：标题与配置项由调用方给，模块可以没有。
+     *
+     * <p>顶部分类里的「好友 / 宏 / 快捷键 / 基础 / GUI / 字体」本质上都是"一串配置项"，
+     * 只是来源不同（某个模块、两个模块拼起来、所有模块里的键位……），所以共用这一屏。
+     */
+    public EndfieldModuleConfigScreen(
+            String latin,
+            String title,
+            BaseModule module,
+            java.util.function.Supplier<List<WrapperConfigRef<?>>> source,
+            EndfieldSettings settings) {
         super(Component.empty(), 0, 0);
+        this.latin = latin;
+        this.title = title;
         this.module = module;
+        this.source = source;
         this.settings = settings;
     }
 
-    private boolean light() {
+    // ------------------------------------------------------------------ 子类钩子
+    // 各分类页共用这一屏的排版与控件；下面几个钩子是给页面自己加"标题下的工具条"和页脚文字的。
+
+    /** 工具区高度：页面要放搜索框、筛选块时就报一个高度，第一行会整体下移这么多。 */
+    protected int toolHeight() {
+        return 0;
+    }
+
+    /** 画工具区；坐标是内容坐标（已经扣过滚动），宽是正文宽度。 */
+    protected void paintTool(
+            VDrawContext ctx, Ef.Palette p, int x, int y, int width, int mouseX, int mouseY) {}
+
+    /** 工具区点击；{@code contentY} 已换算成内容坐标。 */
+    protected boolean clickTool(double mouseX, double contentY, int button) {
+        return false;
+    }
+
+    /** 页脚右侧的提示，默认是数值控件的操作说明。 */
+    protected String hint() {
+        return "拖滑杆 │ 右键减一";
+    }
+
+    /** 页脚左侧统计的补充文字（例如"共 42 项"），默认空。 */
+    protected String extraStats() {
+        return "";
+    }
+
+    protected boolean light() {
         return settings != null && settings.light();
     }
 
-    private Ef.Palette pal() {
+    protected Ef.Palette pal() {
         return Ef.palette(light()).withAlpha(NewClickGui.opacity());
     }
 
@@ -303,7 +363,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     private List<WrapperConfigRef<?>> visibleRefs() {
         List<WrapperConfigRef<?>> out = new ArrayList<>();
-        for (WrapperConfigRef<?> ref : module.getEditableConfig()) {
+        for (WrapperConfigRef<?> ref : source.get()) {
             if (ref.shouldShow()) {
                 out.add(ref);
             }
@@ -520,7 +580,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         contentLeft = winX + PAD;
         contentWidth = Math.min(winW - PAD * 2, 560);
 
-        int y = bodyTop() - scroll;
+        int y = bodyTop() + toolHeight() - scroll;
         String current = null;
         for (WrapperConfigRef<?> ref : visibleRefs()) {
             String section = sectionKey(ref);
@@ -569,12 +629,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.text(ctx, "< 返回", winX + 9, winY + 6, Ef.BAR_INK);
 
         int titleX = winX + 48;
-        String name = EndfieldClickGuiScreen.moduleLabel(module);
-        Ef.text(ctx, name, titleX, winY + 6, Ef.BAR_INK);
-        String id = module.getName().toUpperCase(Locale.ROOT);
-        Ef.trackedWide(ctx, id, titleX + Ef.textWidth(name) + 8, winY + 7, Ef.BAR_INK2, 1, 1.2F);
+        Ef.text(ctx, title, titleX, winY + 6, Ef.BAR_INK);
+        Ef.trackedWide(ctx, latin, titleX + Ef.textWidth(title) + 8, winY + 7, Ef.BAR_INK2, 1, 1.2F);
 
-        if (module.getBindFlag() == null) {
+        if (module == null || module.getBindFlag() == null) {
             return;
         }
         boolean on = module.getBindFlag().get();
@@ -597,6 +655,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
         ctx.enableScissor(winX, top, winX + winW, top + height);
         try {
+            if (toolHeight() > 0) {
+                paintTool(ctx, p, contentLeft, top - scroll, contentWidth, mouseX, mouseY);
+            }
             if (rows.isEmpty()) {
                 Ef.text(ctx, "这个模块还没有可编辑的设置。", contentLeft, top + 6, p.ink2());
                 return;
@@ -850,10 +911,14 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.fill(ctx, winX, y, winW, FOOT_H, p.panel());
         Ef.rule(ctx, winX, y, winW, p.rule());
         String left = visibleRefs().size() + " 项设置";
+        String extra = extraStats();
+        if (!extra.isEmpty()) {
+            left = left + "  │  " + extra;
+        }
         Ef.text(ctx, left, winX + 8, y + 3, p.ink2());
-        String mid = module.getModuleManager() == null ? "" : module.getModuleManager().getName();
+        String mid = module == null || module.getModuleManager() == null ? "" : module.getModuleManager().getName();
         Ef.text(ctx, mid, winX + 8 + Ef.textWidth(left) + 12, y + 3, p.ink2());
-        String hint = "拖滑杆 │ 右键减一";
+        String hint = hint();
         Ef.text(ctx, hint, winX + winW - 8 - Ef.textWidth(hint), y + 3, p.ink2());
     }
 
@@ -895,14 +960,17 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 back();
                 return true;
             }
-            boolean on = module.getBindFlag() != null && module.getBindFlag().get();
+            // 非模块页（好友/宏/快捷键…）没有启用块，命令栏只处理返回
+            FlagRef bindFlag = module == null ? null : module.getBindFlag();
+            if (bindFlag == null) {
+                return false;
+            }
+            boolean on = bindFlag.get();
             String state = on ? "启用" : "停用";
             int stateW = Ef.textWidth(state) + 8;
             int stateX = winX + winW - 8 - stateW;
             if (mx >= stateX && mx <= stateX + stateW) {
-                if (module.getBindFlag() != null) {
-                    module.getBindFlag().toggle();
-                }
+                bindFlag.toggle();
                 return true;
             }
             return false;
@@ -910,6 +978,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
         if (my < bodyTop() || my > bodyTop() + bodyHeight()) {
             return false;
+        }
+        if (toolHeight() > 0 && clickTool(mx, my + scroll, button)) {
+            return true;
         }
         for (Row row : rows) {
             if (row.header || my < row.y || my >= row.y + row.height) {
