@@ -960,11 +960,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     // ------------------------------------------------------------------ 布局
 
     private int bodyTop() {
-        return winY + barH + 2;
+        return winY + barH;
     }
 
+    /** 正文一直铺到页脚上沿：中间留空的那几像素没有任何绘制，会透出背后的世界。 */
     private int bodyHeight() {
-        return winH - barH - FOOT_H - 4;
+        return winH - barH - FOOT_H;
     }
 
     /**
