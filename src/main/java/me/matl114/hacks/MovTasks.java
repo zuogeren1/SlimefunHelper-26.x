@@ -1035,11 +1035,26 @@ public class MovTasks {
         //        }
     }
 
+    //#if MC >= 260300
+    //$$ // 26.3 的服务端每 tick 只接受一个带位置移动包，第二个就按非法移动包断开；
+    //$$ // 出站这一层只放行每个 tick 的第一个，模块多发的伪造包不会和原版包叠在一起。
+    //$$ private static int lastPositionPacketTick = -1;
+    //#endif
+
     private static boolean doIntercepteMovingPacketsWhileTp(ServerboundMovePlayerPacket packet) {
         if (doingTp) {
             // capture no-tp packets
             return false;
         }
+        //#if MC >= 260300
+        //$$ if (packet.hasPosition()) {
+        //$$     int tick = Tasks.getTick();
+        //$$     if (lastPositionPacketTick == tick) {
+        //$$         return false;
+        //$$     }
+        //$$     lastPositionPacketTick = tick;
+        //$$ }
+        //#endif
         return true;
     }
 

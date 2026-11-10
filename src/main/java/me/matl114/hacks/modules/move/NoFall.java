@@ -145,18 +145,6 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
 
     public void onPlayerMovePacketSend(Event<ServerboundMovePlayerPacket> movePacket) {
         var packet = movePacket.context();
-        //#if MC >= 260300
-        //$$ if (selfPositionPackets.remove(packet)) {
-        //$$     if (packet.hasPosition()) {
-        //$$         lastServerY = packet.getY(0.0D);
-        //$$     }
-        //$$     return;
-        //$$ }
-        //$$ if (selfPositionPacketSent && selfPositionPacketTick == Tasks.getTick() && packet.hasPosition()) {
-        //$$     movePacket.cancel();
-        //$$     return;
-        //$$ }
-        //#endif
         if (packet.hasPosition()) {
             lastServerY = packet.getY(0.0D);
         }
@@ -164,10 +152,10 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
 
     //#if MC >= 260300
     //$$ /**
-    //$$  * 发送 NoFall 的伪造位置包，并保证服务端每 tick 最多收到一个带位置移动包。
-    //$$  * 返回 true 表示这一 tick 用伪造包顶替了原版位置包（随后原版那个会被丢弃），
-    //$$  * 返回 false 表示这一 tick 走原版位置包；伪造包与真实包按 tick 交替，
-    //$$  * 否则服务端只看到原地悬停，会按“悬浮”断开。
+    //$$  * 发送 NoFall 的伪造位置包。出站拦截只放行每个 tick 的第一个位置包，
+    //$$  * 所以伪造包与真实包必须按 tick 交替：返回 true 表示这一 tick 已由伪造包顶替，
+    //$$  * 返回 false 表示这一 tick 让原版位置包通过；一直顶替会让服务端只看到原地悬停，
+    //$$  * 约 80 tick 后按“悬浮”断开。
     //$$  */
     //$$ public boolean sendLazyPositionPacket(double x, double y, double z, boolean onGround, boolean collision) {
     //$$     int tick = Tasks.getTick();
@@ -183,9 +171,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
     //$$     }
     //$$     selfPositionPacketTick = tick;
     //$$     selfPositionPacketSent = true;
-    //$$     ServerboundMovePlayerPacket packet = VPacket.newPositionAndOnGround(x, y, z, onGround, collision);
-    //$$     selfPositionPackets.add(packet);
-    //$$     mc.getConnection().send(packet);
+    //$$     mc.getConnection().send(VPacket.newPositionAndOnGround(x, y, z, onGround, collision));
     //$$     return true;
     //$$ }
     //#endif
@@ -208,10 +194,6 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
     double lastServerY = 0.0D;
 
     //#if MC >= 260300
-    //$$ // 26.3 的服务端同一 tick 只接受一个带位置移动包，多一个就按非法移动包断开；
-    //$$ // 本 tick 自己发过伪造位置后，原版那一个必须丢掉，保证净发送量仍是 1。
-    //$$ private final java.util.Set<ServerboundMovePlayerPacket> selfPositionPackets =
-    //$$         java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     //$$ private int selfPositionPacketTick = -1;
     //$$ private boolean selfPositionPacketSent;
     //#endif
