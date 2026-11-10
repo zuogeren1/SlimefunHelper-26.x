@@ -300,9 +300,15 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         return count;
     }
 
+    /** 真实分组（不含 ALL 伪分组）：统计总数时不能把摊平后的清单再算一遍。 */
+    private List<String> realGroupNames() {
+        List<String> names = groupNames();
+        return names.size() > 1 ? names.subList(1, names.size()) : List.of();
+    }
+
     private int totalEnabled() {
         int count = 0;
-        for (String name : groupNames()) {
+        for (String name : realGroupNames()) {
             count += enabledOf(modulesOf(name));
         }
         return count;
@@ -310,7 +316,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
 
     private int totalModules() {
         int count = 0;
-        for (String name : groupNames()) {
+        for (String name : realGroupNames()) {
             count += modulesOf(name).size();
         }
         return count;
@@ -485,7 +491,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
 
         Ef.trackedWide(ctx, "// GROUPS", 8, 8, p.ink2(), 1, WIDE);
         Ef.text(ctx, "分组", 8, 17, p.ink());
-        String total = groupNames().size() + " 组";
+        String total = realGroupNames().size() + " 组";
         Ef.text(ctx, total, 8, 29, p.ink2());
 
         int y = 42;
