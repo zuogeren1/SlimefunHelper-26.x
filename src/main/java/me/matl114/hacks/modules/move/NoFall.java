@@ -145,10 +145,50 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
 
     public void onPlayerMovePacketSend(Event<ServerboundMovePlayerPacket> movePacket) {
         var packet = movePacket.context();
+        //#if MC >= 260300
+        //$$ if (selfPositionPackets.remove(packet)) {
+        //$$     if (packet.hasPosition()) {
+        //$$         lastServerY = packet.getY(0.0D);
+        //$$     }
+        //$$     return;
+        //$$ }
+        //$$ if (selfPositionPacketSent && selfPositionPacketTick == Tasks.getTick() && packet.hasPosition()) {
+        //$$     movePacket.cancel();
+        //$$     return;
+        //$$ }
+        //#endif
         if (packet.hasPosition()) {
             lastServerY = packet.getY(0.0D);
         }
     }
+
+    //#if MC >= 260300
+    //$$ /**
+    //$$  * 发送 NoFall 的伪造位置包，并保证服务端每 tick 最多收到一个带位置移动包。
+    //$$  * 返回 true 表示这一 tick 用伪造包顶替了原版位置包（随后原版那个会被丢弃），
+    //$$  * 返回 false 表示这一 tick 走原版位置包；伪造包与真实包按 tick 交替，
+    //$$  * 否则服务端只看到原地悬停，会按“悬浮”断开。
+    //$$  */
+    //$$ public boolean sendLazyPositionPacket(double x, double y, double z, boolean onGround, boolean collision) {
+    //$$     int tick = Tasks.getTick();
+    //$$     if (selfPositionPacketTick == tick) {
+    //$$         return selfPositionPacketSent;
+    //$$     }
+    //$$     // 伪造包与服务端的真实位置包隔 tick 交替：伪造包负责清掉摔落距离，
+    //$$     // 真实位置包让服务端看到实际下落，避免被判悬浮。
+    //$$     if (selfPositionPacketTick == tick - 1 && selfPositionPacketSent) {
+    //$$         selfPositionPacketTick = tick;
+    //$$         selfPositionPacketSent = false;
+    //$$         return false;
+    //$$     }
+    //$$     selfPositionPacketTick = tick;
+    //$$     selfPositionPacketSent = true;
+    //$$     ServerboundMovePlayerPacket packet = VPacket.newPositionAndOnGround(x, y, z, onGround, collision);
+    //$$     selfPositionPackets.add(packet);
+    //$$     mc.getConnection().send(packet);
+    //$$     return true;
+    //$$ }
+    //#endif
 
     public void onPlayerJump(Event<Integer> jumpEvent) {
         getDelegate().onJump(jumpEvent);
@@ -166,6 +206,15 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
     // current tick status
     boolean holdingMace = false;
     double lastServerY = 0.0D;
+
+    //#if MC >= 260300
+    //$$ // 26.3 的服务端同一 tick 只接受一个带位置移动包，多一个就按非法移动包断开；
+    //$$ // 本 tick 自己发过伪造位置后，原版那一个必须丢掉，保证净发送量仍是 1。
+    //$$ private final java.util.Set<ServerboundMovePlayerPacket> selfPositionPackets =
+    //$$         java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    //$$ private int selfPositionPacketTick = -1;
+    //$$ private boolean selfPositionPacketSent;
+    //#endif
 
     private static final int ENTITY_STAGE_INITIALIZING = 0;
     private static final int ENTITY_STAGE_ALIVE = 1;
@@ -390,6 +439,12 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                 counter = 0;
                 module.lastOnGroundHeight = module.lastServerY;
 
+                //#if MC >= 260300
+                //$$ if (module.sendLazyPositionPacket(
+                //$$         args.getX(), module.lastServerY + DELTA_Y, args.getZ(), false, args.horizontalCollision)) {
+                //$$     noFallSetbackResponse = true;
+                //$$ }
+                //#else
                 mc.getConnection()
                         .send(VPacket.newPositionAndOnGround(
                                 args.getX(),
@@ -398,6 +453,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                                 false,
                                 args.horizontalCollision));
                 noFallSetbackResponse = true;
+                //#endif
                 ClientPlayerAccess.of(args).setForceNoFall(false);
             } else if (module.isActive()) {
                 counter += 1;
@@ -426,6 +482,12 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                             counter = 0;
                             // use history y
                             module.lastOnGroundHeight = entity.pos.y();
+                            //#if MC >= 260300
+                            //$$ if (!module.sendLazyPositionPacket(
+                            //$$         entity.pos.x(), entity.pos.y() + DELTA_Y, entity.pos.z(), false, entity.horizontalCollision)) {
+                            //$$     return;
+                            //$$ }
+                            //#else
                             mc.getConnection()
                                     .send(VPacket.newPositionAndOnGround(
                                             entity.pos.x(),
@@ -433,6 +495,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                                             entity.pos.z(),
                                             false,
                                             entity.horizontalCollision));
+                            //#endif
                             noFallSetbackResponse = true;
 
                             return;
