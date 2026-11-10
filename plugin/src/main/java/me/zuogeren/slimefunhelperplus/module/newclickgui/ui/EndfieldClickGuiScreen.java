@@ -99,9 +99,14 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         super(Component.empty(), 0, 0);
         this.settings = settings;
         List<String> groups = groupNames();
-        this.group = groups.isEmpty() ? "" : groups.get(0);
-        if (ALL_MODULES.equals(this.group) && groups.size() > 1) {
-            this.group = groups.get(1);
+        String saved = settings == null ? "" : settings.lastGroup();
+        if (groups.contains(saved)) {
+            this.group = saved;
+        } else {
+            this.group = groups.isEmpty() ? "" : groups.get(0);
+            if (ALL_MODULES.equals(this.group) && groups.size() > 1) {
+                this.group = groups.get(1);
+            }
         }
         List<BaseModule> first = modulesOf(this.group);
         this.selected = first.isEmpty() ? null : first.get(0);
@@ -550,6 +555,9 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             if (my >= y && my < y + CHIP_H) {
                 if (!name.equals(group)) {
                     group = name;
+                    if (settings != null) {
+                        settings.lastGroup(name);
+                    }
                     query = "";
                     animStart = System.currentTimeMillis();
                     if (searchBox != null) {
