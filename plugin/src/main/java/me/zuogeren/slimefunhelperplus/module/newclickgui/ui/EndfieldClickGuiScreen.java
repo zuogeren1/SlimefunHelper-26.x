@@ -3,9 +3,11 @@ package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
@@ -43,6 +45,9 @@ import net.minecraft.network.chat.Component;
  * 鼠标给的是屏幕坐标，判定前必须先减去元素自身的 {@code x()/y()}。
  */
 public class EndfieldClickGuiScreen extends GenericScreen {
+    /** 伪分组：把宿主所有分组里的模块摊平成一张表，只给顶部「ALL」分类用。 */
+    public static final String ALL_MODULES = "\u0000all";
+
     private static final int BAR_H = 22;
     private static final int FOOT_H = 14;
     private static final int HEAD_H = 34;
@@ -95,6 +100,9 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         this.settings = settings;
         List<String> groups = groupNames();
         this.group = groups.isEmpty() ? "" : groups.get(0);
+        if (ALL_MODULES.equals(this.group) && groups.size() > 1) {
+            this.group = groups.get(1);
+        }
         List<BaseModule> first = modulesOf(this.group);
         this.selected = first.isEmpty() ? null : first.get(0);
     }
@@ -133,18 +141,32 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         if (cached != null) {
             return cached;
         }
-        ModuleGroup moduleGroup = groupOf(name);
-        List<BaseModule> list = moduleGroup == null
-                ? List.of()
-                : moduleGroup.getModules().stream().filter(BaseModule::shouldShowInGui).toList();
+        List<BaseModule> list;
+        if (ALL_MODULES.equals(name)) {
+            Set<BaseModule> flat = new LinkedHashSet<>();
+            for (ModuleGroup moduleGroup : HackModules.main.getModuleGroups().values()) {
+                flat.addAll(moduleGroup.getModules());
+            }
+            for (ViewModuleGroup view : HackModules.getViewGroups()) {
+                flat.addAll(view.getModules());
+            }
+            list = flat.stream().filter(BaseModule::shouldShowInGui).toList();
+        } else {
+            ModuleGroup moduleGroup = groupOf(name);
+            list = moduleGroup == null
+                    ? List.of()
+                    : moduleGroup.getModules().stream().filter(BaseModule::shouldShowInGui).toList();
+        }
         moduleCache.put(name, list);
         return list;
     }
 
-    /** 分组清单来自宿主模块表，但只读一遍：每帧重建会白白分配。 */
+    /** 分组清单来自宿主模块表，但只读一遍：每帧重建会白白分配。首项是伪分组 ALL。 */
     private List<String> groupNames() {
         if (groupNames == null) {
-            List<String> names = new ArrayList<>(HackModules.main.getModuleGroups().keySet());
+            List<String> names = new ArrayList<>();
+            names.add(ALL_MODULES);
+            names.addAll(HackModules.main.getModuleGroups().keySet());
             for (ViewModuleGroup view : HackModules.getViewGroups()) {
                 names.add(view.getName());
             }
@@ -490,6 +512,9 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     }
 
     private String displayGroupName(String name) {
+        if (ALL_MODULES.equals(name)) {
+            return "ALL";
+        }
         return switch (name) {
             case "Chat" -> "聊天";
             case "Combat" -> "战斗";
@@ -600,7 +625,8 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             searchBox.setTextColor(p.ink());
         }
 
-        Ef.trackedWide(ctx, "// " + group.toUpperCase(Locale.ROOT), 10, 8, p.ink2(), 1, WIDE);
+        String caption = ALL_MODULES.equals(group) ? "ALL" : group.toUpperCase(Locale.ROOT);
+        Ef.trackedWide(ctx, "// " + caption, 10, 8, p.ink2(), 1, WIDE);
         Ef.text(ctx, displayGroupName(group), 10, 17, p.ink());
 
         String meta = enabledOf(all) + " / " + all.size() + " 启用";
