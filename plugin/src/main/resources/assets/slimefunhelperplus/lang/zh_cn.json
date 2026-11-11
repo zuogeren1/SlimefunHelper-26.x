@@ -36,14 +36,6 @@
   "config.index.carbon-render": "碳 · 物品实例化",
   "carbon-render.enable": "物品模型实例化",
   "carbon-render.enable.tooltips": "缓存重复物品的模型几何并按实例合并绘制；关闭后完全交还原版",
-  "carbon-render.optimize-dropped-items": "掉落物专用管线",
-  "carbon-render.optimize-dropped-items.tooltips": "只对世界里的掉落物做批处理",
-  "carbon-render.physical-dropped-items": "掉落物翻滚",
-  "carbon-render.physical-dropped-items.tooltips": "按速度让掉落物沿模型轴翻滚，纯观感",
-  "carbon-render.skip-visibility-checks": "跳过可见性检查",
-  "carbon-render.skip-visibility-checks.tooltips": "不做视锥与遮挡剔除，只保留距离限制",
-  "carbon-render.cache-update-budget-ms": "缓存更新预算（毫秒/帧）",
-  "carbon-render.cache-update-budget-ms.tooltips": "每帧最多花在模型缓存更新上的时间；0 表示当帧做完",
   "widget.click-gui.module-name.Render.CarbonRender": "碳 · 物品实例化",
   "widget.click-gui.module-name.Render.CarbonRender.tooltips": "把重复物品的模型几何缓存到 GPU、按实例合并绘制（以掉落物为主）"
 }
