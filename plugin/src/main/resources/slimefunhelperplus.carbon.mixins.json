@@ -1,0 +1,15 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "me.zuogeren.slimefunhelperplus.module.carbon.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"GlBufferAccessor",
+		"CarbonSubmitCaptureMixin",
+		"CarbonFrameMixin",
+		"CarbonFlushMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

@@ -5,6 +5,7 @@ import me.matl114.plugins.api.PluginContext;
 import me.matl114.plugins.api.PluginHosts;
 import me.matl114.plugins.api.SlimefunHelperPlugin;
 import me.matl114.utils.Debug;
+import me.zuogeren.slimefunhelperplus.module.carbon.CarbonModule;
 import me.zuogeren.slimefunhelperplus.module.conflux.ConfluxMapHelper;
 import me.zuogeren.slimefunhelperplus.module.friendwine.FriendWine;
 import me.zuogeren.slimefunhelperplus.module.locator.LocatorTrackModule;
@@ -53,6 +54,8 @@ public class PlusPlugin implements SlimefunHelperPlugin {
     @Override
     public void onModuleBootstrap() {
         PluginContext context = PluginHosts.context();
+        // 放在 Survival 判定之前：那个判定找不到组时会 return，排在它后面的模块会被连带跳过
+        context.modules().register(PLUGIN_ID, "Render", new CarbonModule());
         ModuleGroup survival = context.modules().group("Survival");
         if (survival == null) {
             Debug.info("[SFH+] 未找到 Survival 模块组，跳过 Conflux 注册");

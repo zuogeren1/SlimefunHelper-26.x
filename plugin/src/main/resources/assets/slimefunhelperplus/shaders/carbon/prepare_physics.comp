@@ -1,0 +1,73 @@
+#version 430 core
+// Ported from Carbon (https://github.com/CHUJIAN-afk/Carbon), branch 26.1.2-neoforge @ 22a8a26.
+// Copyright (c) 2026 FirstSight. Licensed under the MIT License.
+// Modified for SlimeFunHelper+ (namespace and resource path only).
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Source { uint source[]; };
+layout(std430, binding = 1) writeonly buffer Target { uint target[]; };
+uniform uint Count;
+uniform float Clock;
+uniform vec3 Center;
+uniform vec3 HalfSize;
+uniform int Flat;
+vec4 multiplyRotation(vec4 a, vec4 b) {
+    return vec4(a.w * b.xyz + b.w * a.xyz + cross(a.xyz, b.xyz), a.w * b.w - dot(a.xyz, b.xyz));
+}
+vec3 rotatePoint(vec4 q, vec3 p) {
+    return p + 2.0 * cross(q.xyz, cross(q.xyz, p) + q.w * p);
+}
+vec4 physicalRotation(float phase, float roll, float rate) {
+    vec4 yaw = vec4(0.0, sin(phase * 0.5), 0.0, cos(phase * 0.5));
+    vec4 resting = Flat != 0 ? multiplyRotation(yaw, vec4(0.70710678118, 0.0, 0.0, 0.70710678118)) : yaw;
+    float angle = roll + rate * fract(Clock);
+    resting = multiplyRotation(resting, vec4(0.0, sin(angle * 0.5), 0.0, cos(angle * 0.5)));
+    return normalize(resting);
+}
+vec3 physicalOffset(vec4 q, vec3 copy) {
+    vec3 right = rotatePoint(q, vec3(1.0, 0.0, 0.0));
+    vec3 up = rotatePoint(q, vec3(0.0, 1.0, 0.0));
+    vec3 forward = rotatePoint(q, vec3(0.0, 0.0, 1.0));
+    float height = dot(abs(vec3(right.y, up.y, forward.y)), HalfSize);
+    bool pile = copy.z < 0.0;
+    vec3 spread = rotatePoint(q, vec3(copy.xy, pile ? copy.z + 1.0 : 0.0));
+    spread.y = height + (pile ? abs(spread.y) : copy.z * (height * 2.0 + 0.002)) + 0.002;
+    return spread - rotatePoint(q, Center);
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= Count) return;
+    uint inputOffset = index * 10u;
+    uint outputOffset = index * 10u;
+    float phase = uintBitsToFloat(source[inputOffset + 5u]);
+    float rate = uintBitsToFloat(source[inputOffset + 9u]);
+    vec3 copy = vec3(uintBitsToFloat(source[inputOffset + 6u]), uintBitsToFloat(source[inputOffset + 7u]), uintBitsToFloat(source[inputOffset + 8u]));
+    vec3 position = vec3(uintBitsToFloat(source[inputOffset]), uintBitsToFloat(source[inputOffset + 1u]), uintBitsToFloat(source[inputOffset + 2u]));
+    vec4 rotation;
+    uint light = source[inputOffset + 3u];
+    if (rate == 0.0 && uintBitsToFloat(source[inputOffset + 4u]) == 0.0) {
+        float s = sin(phase), c = cos(phase);
+        vec3 center = Flat != 0 ? vec3(Center.x, -Center.z, Center.y) : Center;
+        bool pile = copy.z < 0.0;
+        vec3 local = vec3(copy.xy, pile ? copy.z + 1.0 : 0.0);
+        vec3 spread = Flat != 0 ? vec3(local.x, -local.z, local.y) : local;
+        float height = Flat != 0 ? HalfSize.z : HalfSize.y;
+        vec3 offset = spread - center;
+        position += vec3(c * offset.x + s * offset.z, height + (pile ? abs(spread.y) : copy.z * (height * 2.0 + 0.002)) + 0.002 - center.y, -s * offset.x + c * offset.z);
+        rotation = vec4(s, c, 0.0, 0.0);
+    } else {
+        rotation = physicalRotation(phase, uintBitsToFloat(source[inputOffset + 4u]), rate);
+        position += physicalOffset(rotation, copy);
+        light |= 0x80000000u;
+    }
+    target[outputOffset] = floatBitsToUint(position.x);
+    target[outputOffset + 1u] = floatBitsToUint(position.y);
+    target[outputOffset + 2u] = floatBitsToUint(position.z);
+    target[outputOffset + 3u] = light;
+    target[outputOffset + 4u] = floatBitsToUint(rotation.x);
+    target[outputOffset + 5u] = floatBitsToUint(rotation.y);
+    target[outputOffset + 6u] = floatBitsToUint(rotation.z);
+    target[outputOffset + 7u] = floatBitsToUint(rotation.w);
+    target[outputOffset + 8u] = 0u;
+    target[outputOffset + 9u] = 0u;
+}
