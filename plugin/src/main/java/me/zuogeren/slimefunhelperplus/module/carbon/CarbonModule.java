@@ -48,19 +48,36 @@ public class CarbonModule extends BaseModule {
             .validator(Configs.doubleRange(0.0D, 20.0D))
             .build();
 
+    /** 临时诊断：跳过深度测试。用来判定「物品看不见」是不是深度附件不对导致的。 */
+    public final FlagRef debugNoDepth = flagBuilder(root.add("debug-no-depth")).build();
+
+    /** 临时诊断：金丝雀模式——忽略真实相机，用单位视投影把批次画在屏幕中心。 */
+    public final FlagRef debugCanary = flagBuilder(root.add("debug-canary")).build();
+
     public CarbonModule() {
         super("CarbonRender");
         bindFlag(enable);
     }
 
+    /** 诊断开关的值；渲染路径每帧读一次，避免把配置对象传进渲染层。 */
+    public static volatile boolean noDepth;
+    public static volatile boolean canary;
+
+    private void syncDebug() {
+        noDepth = debugNoDepth.get();
+        canary = debugCanary.get();
+    }
+
     @Override
     public void onEnableModule() {
+        syncDebug();
         CarbonRenderer.setEnabled(true);
         log("Carbon 物品实例化已启用");
     }
 
     @Override
     public void onDisableModule() {
+        syncDebug();
         CarbonRenderer.setEnabled(false);
         log("Carbon 物品实例化已停用");
     }

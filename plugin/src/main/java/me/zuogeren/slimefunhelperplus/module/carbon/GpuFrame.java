@@ -59,12 +59,18 @@ final class GpuFrame implements AutoCloseable {
     private final long lightStart = glGetInteger64i(GL_UNIFORM_BUFFER_START, 3), lightSize = glGetInteger64i(GL_UNIFORM_BUFFER_SIZE, 3);
     private final int[] sharedBuffers;
     private final long[] sharedStarts, sharedSizes;
-
-    GpuFrame(int target) {
-        this(target, false);
-    }
+    private final int status;
 
     GpuFrame(int target, boolean shared) {
+        this(target, shared, true);
+    }
+
+    /**
+     * @param attach 为 {@code false} 时不另建 FBO、不改编 viewport，直接画进当前绑定的目标。
+     *               26.x 的绘制出口在整帧世界渲染结束之后，此刻绑定的就是世界目标；
+     *               自己挂纹理反而可能挂到一张不参与呈现的纹理上（物品消失、其余画面正常）。
+     */
+    GpuFrame(int target, boolean shared, boolean attach) {
         sharedBuffers = shared ? new int[2] : null;
         sharedStarts = shared ? new long[2] : null;
         sharedSizes = shared ? new long[2] : null;
@@ -100,14 +106,35 @@ final class GpuFrame implements AutoCloseable {
         var color = RenderSystem.outputColorTextureOverride != null ? RenderSystem.outputColorTextureOverride.texture() : renderTarget.getColorTexture();
         var depth = RenderSystem.outputDepthTextureOverride != null ? RenderSystem.outputDepthTextureOverride.texture() : renderTarget.getDepthTexture();
         //#endif
+        if (!attach) {
+            status = GL_FRAMEBUFFER_COMPLETE;
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL);
+            glDepthMask(true);
+            glColorMask(true, true, true, true);
+            glDisable(GL_BLEND);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, ((GlTexture) minecraft.gameRenderer.levelLightmap().texture()).glId());
+            glBindSampler(2, ((GlSampler) RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)).getId());
+            var lights = RenderSystem.getShaderLights();
+            if (lights != null) {
+                glBindBufferRange(GL_UNIFORM_BUFFER, 3, ((CarbonBufferAccess) lights.buffer()).carbon$handle(), lights.offset(), lights.length());
+            }
+            return;
+        }
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target);
         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ((GlTexture) color).glId(), 0);
-        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, ((GlTexture) depth).glId(), 0);
+        // 刻意不挂深度：主目标的深度纹理在这个时机挂上来，内容并不等于世界深度（实测所有片元被 LEQUAL 剔掉），
+        // 而清空它又会破坏后续通道要用的世界深度。先只挂颜色、不做深度测试，代价是掉落物不再被地形遮挡。
+        status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
         glDrawBuffer(GL_COLOR_ATTACHMENT0);
         glViewport(0, 0, color.getWidth(0), color.getHeight(0));
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LEQUAL);
-        glDepthMask(true);
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(false);
         glColorMask(true, true, true, true);
         glDisable(GL_BLEND);
         glDisable(GL_CULL_FACE);
@@ -121,6 +148,15 @@ final class GpuFrame implements AutoCloseable {
         if (lighting != null) {
             glBindBufferRange(GL_UNIFORM_BUFFER, 3, ((CarbonBufferAccess) lighting.buffer()).carbon$handle(), lighting.offset(), lighting.length());
         }
+    }
+
+    /** FBO 是否完整；不完整时调用方必须放弃绘制，否则只会静默丢帧。 */
+    boolean complete() {
+        return status == GL_FRAMEBUFFER_COMPLETE;
+    }
+
+    int status() {
+        return status;
     }
 
     void bindTexture(int unit, Identifier id) {
