@@ -60,6 +60,7 @@ final class GpuFrame implements AutoCloseable {
     private final int[] sharedBuffers;
     private final long[] sharedStarts, sharedSizes;
     private final int status;
+    private boolean depthReady;
 
     GpuFrame(int target, boolean shared) {
         this(target, shared, true);
@@ -128,13 +129,37 @@ final class GpuFrame implements AutoCloseable {
         }
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target);
         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ((GlTexture) color).glId(), 0);
-        // 刻意不挂深度：主目标的深度纹理在这个时机挂上来，内容并不等于世界深度（实测所有片元被 LEQUAL 剔掉），
-        // 而清空它又会破坏后续通道要用的世界深度。先只挂颜色、不做深度测试，代价是掉落物不再被地形遮挡。
+        // 挂主目标自己的深度纹理做遮挡。两个前提缺一不可：
+        //   ① 出图点必须在 render3dHud 清深度之前（见 CarbonFlushMixin），否则挂上来的是全 0 的远平面；
+        //   ② 26.x 是反向 Z（近=1 远=0），比较方向必须是 GEQUAL —— 用 LEQUAL 会把所有片元剔掉。
+        // 世界深度后面还有后处理与手部通道要用；这里只写自己的片元（远处被 GEQUAL 剔掉），手部通道之前会清深度。
+        boolean withDepth = false;
+        try {
+            if (depth instanceof GlTexture depthTexture) {
+                glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture.glId(), 0);
+                withDepth = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+                if (!withDepth) {
+                    // 多重采样 / 格式不匹配时退回「只挂颜色」，宁可穿墙也不要整块不完整
+                    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+                }
+            }
+        } catch (Throwable ignored) {
+            withDepth = false;
+        }
+        depthReady = withDepth;
         status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
         glDrawBuffer(GL_COLOR_ATTACHMENT0);
         glViewport(0, 0, color.getWidth(0), color.getHeight(0));
-        glDisable(GL_DEPTH_TEST);
-        glDepthMask(false);
+        // 深度必须可写：只测不写的话，同一物件自己的面之间没有先后，最后画的那面会盖住前面的，
+        // 表现为「侧面缺失、内壁可见」。原版 item 管线本来就是 GEQUAL + writeDepth，这里与它一致。
+        if (withDepth) {
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_GEQUAL);
+            glDepthMask(true);
+        } else {
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(false);
+        }
         glColorMask(true, true, true, true);
         glDisable(GL_BLEND);
         glDisable(GL_CULL_FACE);
@@ -148,6 +173,11 @@ final class GpuFrame implements AutoCloseable {
         if (lighting != null) {
             glBindBufferRange(GL_UNIFORM_BUFFER, 3, ((CarbonBufferAccess) lighting.buffer()).carbon$handle(), lighting.offset(), lighting.length());
         }
+    }
+
+    /** 这次绘制是否拿到了可用的世界深度（拿不到就退回「不遮挡」）。 */
+    boolean depth() {
+        return depthReady;
     }
 
     /** FBO 是否完整；不完整时调用方必须放弃绘制，否则只会静默丢帧。 */

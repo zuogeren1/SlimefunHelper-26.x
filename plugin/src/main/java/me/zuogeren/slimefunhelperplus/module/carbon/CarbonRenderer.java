@@ -357,6 +357,7 @@ public final class CarbonRenderer {
                         + " prog=" + glGetInteger(GL_CURRENT_PROGRAM)
                         + " vp=" + viewport[0] + "x" + viewport[1] + "/" + viewport[2] + "x" + viewport[3]
                         + " depth=" + glGetBoolean(GL_DEPTH_TEST)
+                        + " world=" + gpu.depth() + " func=" + glGetInteger(GL_DEPTH_FUNC)
                         + " attrs=" + count[0];
             }
             if (!selfChecked && !BATCHES.isEmpty()) {
@@ -381,7 +382,9 @@ public final class CarbonRenderer {
                     }
                 }
                 readback(gpu, "depthOff");
-                glEnable(GL_DEPTH_TEST);
+                if (gpu.depth()) {
+                    glEnable(GL_DEPTH_TEST);
+                }
             }
             glBindVertexArray(0);
         }
@@ -733,8 +736,14 @@ public final class CarbonRenderer {
             READBACK.append(stage).append("=").append(Integer.toHexString(buffer.get(0) & 0xFF))
                     .append(Integer.toHexString(buffer.get(1) & 0xFF))
                     .append(Integer.toHexString(buffer.get(2) & 0xFF))
-                    .append("@").append(sx).append(",").append(sy)
-                    .append(" vp=").append(width).append("x").append(height).append(" ");
+                    .append("@").append(sx).append(",").append(sy);
+            if (gpu.depth()) {
+                // 深度可写才谈得上自遮挡：这一次回读同时给出「画之前是世界深度、画之后是物件深度」
+                FloatBuffer depthValue = stack.mallocFloat(1);
+                glReadPixels(sx, sy, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, depthValue);
+                READBACK.append(" z=").append(fmt(depthValue.get(0)));
+            }
+            READBACK.append(" vp=").append(width).append("x").append(height).append(" ");
         } finally {
             glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer);
         }

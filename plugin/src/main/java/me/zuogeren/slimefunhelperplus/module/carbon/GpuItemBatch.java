@@ -176,12 +176,15 @@ final class GpuItemBatch implements AutoCloseable {
                 matrixProbe = text.toString();
             }
         }
-        instances.position(count * INSTANCE_STRIDE);
-        transform.get(instances);
-        instances.putFloat(0.0F).putFloat(0.0F).putFloat(0.0F).putFloat(0.0F);
-        instances.putFloat(light & 0xFFFF).putFloat((light >>> 16) & 0xFFFF);
-        new Matrix3f(transform).get(instances);
-        instances.putFloat(0.0F).putFloat(0.0F).putFloat(0.0F);
+        // 全部按绝对字节下标写。JOML 的 get(ByteBuffer) 写的是 buffer.position() 处的绝对位置，
+        // 写完**不推进 position**；只要后面接一次相对 putFloat，矩阵的头几个分量就被覆盖。
+        int base = count * INSTANCE_STRIDE;
+        transform.get(base, instances);
+        instances.putFloat(base + 64, 0.0F).putFloat(base + 68, 0.0F)
+                .putFloat(base + 72, 0.0F).putFloat(base + 76, 0.0F);
+        instances.putFloat(base + 80, light & 0xFFFF).putFloat(base + 84, (light >>> 16) & 0xFFFF);
+        new Matrix3f(transform).get(base + 88, instances);
+        instances.putFloat(base + 124, 0.0F).putFloat(base + 128, 0.0F).putFloat(base + 132, 0.0F);
         count++;
     }
 
@@ -208,7 +211,7 @@ final class GpuItemBatch implements AutoCloseable {
             glBufferData(GL_ARRAY_BUFFER, (long) INSTANCE_STRIDE * capacity, GL_DYNAMIC_DRAW);
             gpuCapacity = capacity;
         }
-        instances.position(0);
+        instances.clear();
         instances.limit(count * INSTANCE_STRIDE);
         glBufferSubData(GL_ARRAY_BUFFER, 0L, instances);
         instances.clear();
@@ -242,7 +245,7 @@ final class GpuItemBatch implements AutoCloseable {
         try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
             java.nio.IntBuffer value = stack.mallocInt(1);
             org.lwjgl.PointerBuffer pointer = stack.mallocPointer(1);
-            for (int index : new int[]{0, 1, 3, 6, 10, 15}) {
+            for (int index : new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}) {
                 glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_ENABLED, value);
                 int enabled = value.get(0);
                 glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, value);

@@ -7,6 +7,9 @@ package me.zuogeren.slimefunhelperplus.module.carbon.mixin;
 
 import me.zuogeren.slimefunhelperplus.module.carbon.CarbonRenderer;
 //#if MC >= 260300
+//$$ import net.minecraft.client.renderer.state.OptionsRenderState;
+//$$ import net.minecraft.client.renderer.state.level.CameraRenderState;
+//$$ import net.minecraft.client.renderer.state.level.PlayerRenderState;
 //$$ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 //#else
 import net.minecraft.client.DeltaTracker;
@@ -20,9 +23,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 /**
  * 绘制出口。
  *
- * <p>取 {@code renderLevel} 收尾而不是 feature 渲染器内部：那一刻世界已经画完、没有任何 RenderPass 还开着，
- * 可以安全地走裸 GL 绑主目标纹理自绘（{@link me.zuogeren.slimefunhelperplus.module.carbon.GpuFrame} 负责状态存档），
- * 深度缓冲也正好是这一帧世界留下的。
+ * <p>26.3 取 {@code render3dHud} 的开头：{@code renderLevel} 里先 {@code levelRenderer.render}、再 {@code render3dHud}，
+ * 而主目标的深度是在 {@code render3dHud} 内部（画手之前）被清掉的 —— 晚于这一点就只剩一张全 0 的远平面，
+ * 掉落物会穿墙可见。早于这一点，深度还是这一帧世界留下的，既没有打开的 RenderPass，后处理也还没跑。
+ * 26.2 及更早仍留在 {@code renderLevel} 收尾（那一版的捕获姿态本身还没打通）。
  *
  * <p>描述符必须写全：{@code require = 0} 只在「按名字找不到方法」时降级，
  * 若是按名字找到了、参数表却对不上，Mixin 会直接抛 {@code InvalidInjectionException} 让游戏起不来。
@@ -32,8 +36,12 @@ import org.spongepowered.asm.mixin.injection.Inject;
 public abstract class CarbonFlushMixin {
 
     //#if MC >= 260300
-    //$$ @Inject(method = "renderLevel()V", at = @At("RETURN"), require = 0)
-    //$$ private void carbon$flush(CallbackInfo callback) {
+    //$$ @Inject(
+    //$$         method = "render3dHud(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lnet/minecraft/client/renderer/state/OptionsRenderState;Z)V",
+    //$$         at = @At("HEAD"),
+    //$$         require = 0)
+    //$$ private void carbon$flush(
+    //$$         CameraRenderState camera, PlayerRenderState player, OptionsRenderState options, boolean renderHand, CallbackInfo callback) {
     //$$     CarbonRenderer.flush();
     //$$ }
     //#else
