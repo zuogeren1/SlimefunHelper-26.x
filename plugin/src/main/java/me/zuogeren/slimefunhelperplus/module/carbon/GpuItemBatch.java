@@ -48,12 +48,6 @@ final class GpuItemBatch implements AutoCloseable {
      */
     private static final int LIT = 0x00010001;
 
-    /** 首份网格的第一个顶点与总顶点数，用来区分「几何没写进去」和「写进去了但没画出来」。 */
-    static String meshProbe;
-
-    private static String round(float value) {
-        return String.valueOf(Math.round(value * 1000.0F) / 1000.0);
-    }
 
     private final Identifier texture;
     private final int vao;
@@ -62,8 +56,6 @@ final class GpuItemBatch implements AutoCloseable {
     private final int instanceBuffer;
     private final int indexCount;
 
-    static String matrixProbe;
-    private Matrix4f first;
     private ByteBuffer instances;
     private int capacity;
     private int gpuCapacity;
@@ -130,16 +122,15 @@ final class GpuItemBatch implements AutoCloseable {
         return indexCount;
     }
 
-    static String attribProbe;
 
-    /** 首个实例的平移（仅用于一次性自检的屏幕投影）。 */
-    Matrix4f first() {
-        return first;
-    }
-
-    void reset(long frame) {
+    /**
+     * 清空这一帧的实例计数。
+     *
+     * <p>刻意不动 {@code lastFrame}：它记的是「最后有实例的那一帧」，回收判定靠它。
+     * 每帧都把它刷成当前帧，回收就永远不会触发（26.2 上会攒到上万个 batch）。
+     */
+    void reset() {
         count = 0;
-        lastFrame = frame;
     }
 
     boolean stale(long frame) {
@@ -160,22 +151,6 @@ final class GpuItemBatch implements AutoCloseable {
             grow();
         }
         lastFrame = frame;
-        if (count == 0) {
-            first = new Matrix4f(transform);
-            if (matrixProbe == null) {
-                StringBuilder text = new StringBuilder();
-                for (int i = 0; i < 16; i++) {
-                    float value = switch (i) {
-                        case 0 -> transform.m00(); case 1 -> transform.m01(); case 2 -> transform.m02(); case 3 -> transform.m03();
-                        case 4 -> transform.m10(); case 5 -> transform.m11(); case 6 -> transform.m12(); case 7 -> transform.m13();
-                        case 8 -> transform.m20(); case 9 -> transform.m21(); case 10 -> transform.m22(); case 11 -> transform.m23();
-                        case 12 -> transform.m30(); case 13 -> transform.m31(); case 14 -> transform.m32(); default -> transform.m33();
-                    };
-                    text.append(round(value)).append(" ");
-                }
-                matrixProbe = text.toString();
-            }
-        }
         // 全部按绝对字节下标写。JOML 的 get(ByteBuffer) 写的是 buffer.position() 处的绝对位置，
         // 写完**不推进 position**；只要后面接一次相对 putFloat，矩阵的头几个分量就被覆盖。
         int base = count * INSTANCE_STRIDE;
@@ -222,64 +197,6 @@ final class GpuItemBatch implements AutoCloseable {
         glDrawElementsInstanced(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0L, count);
     }
 
-    /** 回读 VAO 的真实状态：属性是否启用、绑到哪个 buffer、stride/offset/divisor 是多少。 */
-    /**
-     * 只读位置属性把这份网格画一次（不用实例矩阵）。
-     *
-     * <p>它出现 = 顶点缓冲与属性 0 的绑定正确，那么问题只可能在实例属性上；不出现 = 顶点侧就不对。
-     */
-    void drawSingle(int meshProgram) {
-        glUseProgram(meshProgram);
-        glBindVertexArray(vao);
-        glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0L);
-    }
-
-    void probeInto() {
-        attribProbe = probeAttributes();
-    }
-
-    String probeAttributes() {
-        glBindVertexArray(vao);
-        StringBuilder text = new StringBuilder();
-        text.append("vao=").append(vao).append(" ok=").append(glIsVertexArray(vao));
-        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
-            java.nio.IntBuffer value = stack.mallocInt(1);
-            org.lwjgl.PointerBuffer pointer = stack.mallocPointer(1);
-            for (int index : new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}) {
-                glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_ENABLED, value);
-                int enabled = value.get(0);
-                glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, value);
-                int buffer = value.get(0);
-                glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_SIZE, value);
-                int size = value.get(0);
-                glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_STRIDE, value);
-                int stride = value.get(0);
-                glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_TYPE, value);
-                int type = value.get(0);
-                int divisor = org.lwjgl.opengl.GL30.glGetVertexAttribi(index, GL_VERTEX_ATTRIB_ARRAY_DIVISOR);
-                glGetVertexAttribPointerv(index, GL_VERTEX_ATTRIB_ARRAY_POINTER, pointer);
-                text.append(" [").append(index).append(": on=").append(enabled).append(" buf=").append(buffer)
-                        .append(" size=").append(size).append(" type=").append(type)
-                        .append(" stride=").append(stride).append(" off=").append(pointer.get(0))
-                        .append(" div=").append(divisor).append("]");
-            }
-        }
-        int previous = glGetInteger(GL_ARRAY_BUFFER_BINDING);
-        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
-            java.nio.IntBuffer size = stack.mallocInt(1);
-            glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-            glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, size);
-            text.append(" vbo=").append(size.get(0));
-            glBindBuffer(GL_ARRAY_BUFFER, instanceBuffer);
-            glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, size);
-            text.append(" ibo=").append(size.get(0)).append(" stride=").append(INSTANCE_STRIDE);
-        } finally {
-            glBindBuffer(GL_ARRAY_BUFFER, previous);
-        }
-        glBindVertexArray(0);
-        return text.toString();
-    }
-
     @Override
     public void close() {
         glDeleteVertexArrays(vao);
@@ -312,33 +229,6 @@ final class GpuItemBatch implements AutoCloseable {
         }
 
         Mesh build() {
-            if (meshProbe == null) {
-                StringBuilder text = new StringBuilder();
-                for (int vertex = 0; vertex < Math.min(4, vertexCount); vertex++) {
-                    int base8 = vertex * VERTEX_STRIDE;
-                    text.append(" v").append(vertex).append("=(")
-                            .append(round(vertices.getFloat(base8))).append(",")
-                            .append(round(vertices.getFloat(base8 + 4))).append(",")
-                            .append(round(vertices.getFloat(base8 + 8))).append(")"
-                            ).append(" uv=(")
-                            .append(round(vertices.getFloat(base8 + 16))).append(",")
-                            .append(round(vertices.getFloat(base8 + 20))).append(")");
-                }
-                float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
-                float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
-                for (int vertex = 0; vertex < vertexCount; vertex++) {
-                    int base8 = vertex * VERTEX_STRIDE;
-                    float px = vertices.getFloat(base8);
-                    float py = vertices.getFloat(base8 + 4);
-                    float pz = vertices.getFloat(base8 + 8);
-                    minX = Math.min(minX, px); maxX = Math.max(maxX, px);
-                    minY = Math.min(minY, py); maxY = Math.max(maxY, py);
-                    minZ = Math.min(minZ, pz); maxZ = Math.max(maxZ, pz);
-                }
-                meshProbe = text + " verts=" + vertexCount + " idx=" + indices.position()
-                        + " bbox=(" + round(minX) + ".." + round(maxX) + "," + round(minY) + ".." + round(maxY)
-                        + "," + round(minZ) + ".." + round(maxZ) + ")";
-            }
             vertices.position(0);
             indices.position(0);
             return new Mesh(vertices, indices);

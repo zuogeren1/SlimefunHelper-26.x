@@ -32,5 +32,18 @@
   "widget.click-gui.module-name.Render.FriendWine": "Friend's Wine",
   "widget.click-gui.module-name.Render.FriendWine.tooltips": "Meme: every living entity wobbles like jelly and spins in place",
   "widget.click-gui.module-name.Render.LocatorTrack": "Locator Track",
-  "widget.click-gui.module-name.Render.LocatorTrack.tooltips": "Estimate hidden player positions from the locator bar"
+  "widget.click-gui.module-name.Render.LocatorTrack.tooltips": "Estimate hidden player positions from the locator bar",
+  "config.index.carbon-render": "Carbon (Item Instancing)",
+  "carbon-render.enable": "Item model instancing",
+  "carbon-render.enable.tooltips": "Cache repeated item geometry and draw it instanced; off hands everything back to vanilla",
+  "carbon-render.optimize-dropped-items": "Dropped-item pipeline",
+  "carbon-render.optimize-dropped-items.tooltips": "Batch only the dropped items in the world",
+  "carbon-render.physical-dropped-items": "Dropped-item tumbling",
+  "carbon-render.physical-dropped-items.tooltips": "Roll dropped items along their local axis by speed; cosmetic only",
+  "carbon-render.skip-visibility-checks": "Skip visibility checks",
+  "carbon-render.skip-visibility-checks.tooltips": "Skip frustum and occlusion culling, keep only the distance limit",
+  "carbon-render.cache-update-budget-ms": "Cache update budget (ms/frame)",
+  "carbon-render.cache-update-budget-ms.tooltips": "Time per frame allowed for rebuilding cached models; 0 means do it all this frame",
+  "widget.click-gui.module-name.Render.CarbonRender": "Carbon (Item Instancing)",
+  "widget.click-gui.module-name.Render.CarbonRender.tooltips": "Cache repeated item geometry on the GPU and draw it instanced (mainly dropped items)"
 }

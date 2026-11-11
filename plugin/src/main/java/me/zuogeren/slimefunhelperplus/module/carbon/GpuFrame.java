@@ -62,6 +62,7 @@ final class GpuFrame implements AutoCloseable {
     private final int status;
     private boolean depthReady;
 
+
     GpuFrame(int target, boolean shared) {
         this(target, shared, true);
     }
@@ -100,12 +101,14 @@ final class GpuFrame implements AutoCloseable {
         //#else
         //$$ var renderTarget = minecraft.getMainRenderTarget();
         //#endif
+        // 出图点在所有 RenderPass 之外，呈现的就是主目标本身；此时 output*Override 若还留着值，
+        // 那是上一个 pass 的残留，跟着它走会画进一张不参与呈现的纹理（表现为「画了但看不见」）。
         //#if MC >= 260300
         //$$ var color = renderTarget.getColorTexture();
         //$$ var depth = renderTarget.getDepthTexture();
         //#else
-        var color = RenderSystem.outputColorTextureOverride != null ? RenderSystem.outputColorTextureOverride.texture() : renderTarget.getColorTexture();
-        var depth = RenderSystem.outputDepthTextureOverride != null ? RenderSystem.outputDepthTextureOverride.texture() : renderTarget.getDepthTexture();
+        var color = renderTarget.getColorTexture();
+        var depth = renderTarget.getDepthTexture();
         //#endif
         if (!attach) {
             status = GL_FRAMEBUFFER_COMPLETE;
@@ -131,7 +134,8 @@ final class GpuFrame implements AutoCloseable {
         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ((GlTexture) color).glId(), 0);
         // 挂主目标自己的深度纹理做遮挡。两个前提缺一不可：
         //   ① 出图点必须在 render3dHud 清深度之前（见 CarbonFlushMixin），否则挂上来的是全 0 的远平面；
-        //   ② 26.x 是反向 Z（近=1 远=0），比较方向必须是 GEQUAL —— 用 LEQUAL 会把所有片元剔掉。
+        //   ② 比较方向跟版本走：26.2 起是反向 Z（近=1 远=0，GEQUAL），26.1.2 及更早是正向 Z（LEQUAL），
+        //     方向错了会把整片物品剔掉（表现为「看不见」或「只有被挡住的地方才看得见」）。
         // 世界深度后面还有后处理与手部通道要用；这里只写自己的片元（远处被 GEQUAL 剔掉），手部通道之前会清深度。
         boolean withDepth = false;
         try {
@@ -154,7 +158,7 @@ final class GpuFrame implements AutoCloseable {
         // 表现为「侧面缺失、内壁可见」。原版 item 管线本来就是 GEQUAL + writeDepth，这里与它一致。
         if (withDepth) {
             glEnable(GL_DEPTH_TEST);
-            glDepthFunc(GL_GEQUAL);
+            glDepthFunc(CarbonRenderer.depthFunction());
             glDepthMask(true);
         } else {
             glDisable(GL_DEPTH_TEST);

@@ -26,7 +26,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
  * <p>26.3 取 {@code render3dHud} 的开头：{@code renderLevel} 里先 {@code levelRenderer.render}、再 {@code render3dHud}，
  * 而主目标的深度是在 {@code render3dHud} 内部（画手之前）被清掉的 —— 晚于这一点就只剩一张全 0 的远平面，
  * 掉落物会穿墙可见。早于这一点，深度还是这一帧世界留下的，既没有打开的 RenderPass，后处理也还没跑。
- * 26.2 及更早仍留在 {@code renderLevel} 收尾（那一版的捕获姿态本身还没打通）。
+ * 26.2 与 26.1.2 没有 {@code render3dHud}：主目标深度是在 {@code renderLevel} 里、切 HUD 投影之后、画手之前被清掉的，
+ * 所以出图点取「{@code Projection.setupPerspective} 调用之前」——那一句在 {@code renderLevel} 里恰好一次，
+ * 且此时世界已经画完、深度还是世界的、没有任何 RenderPass 开着。
  *
  * <p>描述符必须写全：{@code require = 0} 只在「按名字找不到方法」时降级，
  * 若是按名字找到了、参数表却对不上，Mixin 会直接抛 {@code InvalidInjectionException} 让游戏起不来。
@@ -45,7 +47,12 @@ public abstract class CarbonFlushMixin {
     //$$     CarbonRenderer.flush();
     //$$ }
     //#else
-    @Inject(method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V", at = @At("RETURN"), require = 0)
+    @Inject(
+            method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/client/renderer/Projection;setupPerspective(FFFFF)V",
+                    shift = At.Shift.BEFORE),
+            require = 0)
     private void carbon$flush(DeltaTracker delta, CallbackInfo callback) {
         CarbonRenderer.flush();
     }
