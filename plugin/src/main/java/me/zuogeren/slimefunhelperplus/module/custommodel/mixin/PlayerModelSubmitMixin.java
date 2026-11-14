@@ -294,13 +294,17 @@ public abstract class PlayerModelSubmitMixin {
      * 原版 {@code AvatarRenderer} 的四个图层：鞘翅、肩头鹦鹉、头顶物、披风。
      *
      * <p>HEAD 取消把 {@code LivingEntityRenderer#submit} 的图层循环一起砍掉了，这几层要在这里补回来，
-     * 否则滑翔没翅膀、南瓜/头颅不显示、肩上鹦鹉消失。挂点用模型自己的定位组
-     * （{@code PlayerLocator} 的 {@code ElytraLocator} / {@code *ShoulderLocator} / {@code Head}），
-     * 与 YSM 的 {@code CustomPlayerElytraLayer} / {@code CustomParrotOnShoulderLayer} /
-     * {@code CustomPlayerHeadLayer} 同形；模型没有对应定位组时退回原版的固定偏移。
+     * 否则滑翔没翅膀、肩上鹦鹉消失。挂点用模型自己的定位组
+     * （{@code PlayerLocator} 的 {@code ElytraLocator} / {@code *ShoulderLocator}），
+     * 与 YSM 的 {@code CustomPlayerElytraLayer} / {@code CustomParrotOnShoulderLayer} 同形；
+     * 模型没有对应定位组时退回原版的固定偏移。
      *
-     * <p>顺序照 {@code AvatarRenderer} 构造器：装备层之后是手持物，再是箭矢/耳朵/披风/头顶物/翅膀/鹦鹉。
-     * 这里只补自定义模型会遮住的四层，箭矢与耳朵由模型自己表现。
+     * <p>顺序照 {@code AvatarRenderer} 构造器：装备层之后是手持物，再是箭矢/耳朵/披风/翅膀/鹦鹉。
+     * 这里只补自定义模型会遮住的两层，箭矢与耳朵由模型自己表现。
+     *
+     * <p><b>不画头顶方块/头颅</b>：YSM 的 {@code CustomPlayerHeadLayer} 会挂，但自定义模型的头部
+     * 通常自带发型/帽子，再叠一个南瓜或头颅会穿模；玩家戴南瓜的意图是「看不见脸」，
+     * 而自定义模型本来就不显示原版脸，所以这里直接不画。
      */
     private static void renderLayers(ModelRuntime runtime, AvatarRenderState avatar, LocalPlayer player,
             PoseStack poseStack, SubmitNodeCollector collector, int light) {
@@ -310,7 +314,6 @@ public abstract class PlayerModelSubmitMixin {
         }
         renderElytra(runtime, avatar, player, poseStack, collector, light, models);
         renderParrots(runtime, avatar, poseStack, collector, light, models);
-        renderHeadItem(runtime, avatar, poseStack, collector, light);
     }
 
     /**
@@ -425,35 +428,6 @@ public abstract class PlayerModelSubmitMixin {
         state.yRot = avatar.yRot;
         state.xRot = avatar.xRot;
         return state;
-    }
-
-    /**
-     * 头顶物：{@code CustomHeadLayer} 的等价物。
-     *
-     * <p>原版把方块/头颅按 {@code translateToHead} 的固定偏移挂在头上；YSM 挂在 {@code Head} 定位组上，
-     * 缩放 0.625、上移 0.25。有定位组时用后者。
-     */
-    private static void renderHeadItem(ModelRuntime runtime, AvatarRenderState avatar, PoseStack poseStack,
-            SubmitNodeCollector collector, int light) {
-        if (avatar.headItem == null || avatar.headItem.isEmpty()) {
-            return;
-        }
-        int count = runtime.locatorGroupSize("Head");
-        if (count == 0) {
-            return;
-        }
-        for (int i = 0; i < count; i++) {
-            Matrix4f locator = runtime.locatorMatrix("Head", i);
-            if (locator == null) {
-                continue;
-            }
-            poseStack.pushPose();
-            poseStack.mulPose(locator);
-            poseStack.scale(0.625F, 0.625F, 0.625F);
-            poseStack.translate(0.0F, 0.25F, 0.0F);
-            avatar.headItem.submit(poseStack, collector, light, OverlayTexture.NO_OVERLAY, 0);
-            poseStack.popPose();
-        }
     }
 
     /**
