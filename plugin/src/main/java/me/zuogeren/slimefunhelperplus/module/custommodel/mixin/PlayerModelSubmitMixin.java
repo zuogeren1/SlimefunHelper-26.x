@@ -28,6 +28,7 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.Pose;
@@ -487,6 +488,10 @@ public abstract class PlayerModelSubmitMixin {
             return;
         }
         boolean rightHand = arm == HumanoidArm.RIGHT;
+        // 模型自己在 *Sword 锚点下画了剑：再叠一把原版剑就是双剑（SPM SwordReplacementHelper:20-30）
+        if (stack.is(ItemTags.SWORDS) && runtime.hasSwordGeometry(rightHand)) {
+            return;
+        }
         Matrix4f hand = runtime.handItemMatrix(rightHand);
         if (hand == null) {
             return;

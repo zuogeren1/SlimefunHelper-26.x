@@ -194,6 +194,14 @@ public final class ModelRuntime {
     private final List<ExtraOption> extraOptions;
     private final String defaultExtraKey;
     private final Identifier texture;
+    /**
+     * 左右手各自的 {@code *Sword} 锚点子树里有没有几何。
+     *
+     * <p>作者把剑的模型直接烘在 {@code RightSwordLocator} 下面时，手上再画一把原版剑就是双剑
+     * （SPM {@code SwordReplacementHelper:20-77} 同样按这个判据抑制原版物品）。
+     */
+    private final boolean[] swordGeometry = new boolean[2];
+
     /** 定位组名 → 该组的骨骼下标（构建期算好，渲染期只查表）。 */
     private final Map<String, int[]> locatorGroups;
     private final int rightHandBone;
@@ -606,6 +614,7 @@ public final class ModelRuntime {
         ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
                 children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand,
                 collectLocatorGroups(bones), defaultClips, glow);
+        runtime.scanSwordGeometry(bones, parents);
         runtime.soundCursors = ModelSoundCursorTable.build(ModelSound.build(model));
         runtime.controllers = parseControllers(model);
         runtime.controllerBuckets = bucketControllers(runtime.controllers);
@@ -1024,6 +1033,69 @@ public final class ModelRuntime {
             result.put(entry.getKey(), indices);
         }
         return result;
+    }
+
+    /**
+     * 扫描 {@code *Sword} 锚点子树里有没有几何，结果写进 {@link #swordGeometry}。
+     *
+     * <p>判据照 SPM {@code SwordReplacementHelper:36-77}：骨名去掉非字母数字后等于
+     * {@code leftsword}/{@code rightsword}（或带纯数字后缀），且该骨或其后代有面片。
+     * 有几何就说明作者已经画了剑，手上不该再叠一把原版物品。
+     */
+    private void scanSwordGeometry(List<RawYsmModel.RawBone> bones, int[] parents) {
+        for (int i = 0; i < bones.size(); i++) {
+            if (faceCount(bones.get(i)) <= 0) {
+                continue;
+            }
+            int current = i;
+            for (int depth = 0; current >= 0 && depth < bones.size(); depth++) {
+                String name = normalizeBoneName(bones.get(current).name);
+                if (isSwordAnchor(name, "leftsword")) {
+                    swordGeometry[0] = true;
+                    break;
+                }
+                if (isSwordAnchor(name, "rightsword")) {
+                    swordGeometry[1] = true;
+                    break;
+                }
+                current = parents[current];
+            }
+        }
+    }
+
+    /** 骨名归一化：只留字母数字并转小写（SPM {@code SwordReplacementHelper:90-102}）。 */
+    private static String normalizeBoneName(String name) {
+        if (name == null || name.isEmpty()) {
+            return "";
+        }
+        StringBuilder normalized = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char character = Character.toLowerCase(name.charAt(i));
+            if (Character.isLetterOrDigit(character)) {
+                normalized.append(character);
+            }
+        }
+        return normalized.toString();
+    }
+
+    /** 归一化后的名字是不是 {@code anchor} 本身或带纯数字后缀（{@code rightsword} / {@code rightsword2}）。 */
+    private static boolean isSwordAnchor(String normalized, String anchor) {
+        if (normalized.equals(anchor)) {
+            return true;
+        }
+        if (!normalized.startsWith(anchor)) {
+            return false;
+        }
+        String suffix = normalized.substring(anchor.length());
+        if (suffix.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < suffix.length(); i++) {
+            if (!Character.isDigit(suffix.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -2169,6 +2241,14 @@ public final class ModelRuntime {
         float[] pivot = bones.get(bone).pivot;
         matrix.translate(pivot[0] / 16.0F, pivot[1] / 16.0F, pivot[2] / 16.0F);
         return matrix;
+    }
+
+    /**
+     * 这只手的 {@code *Sword} 锚点子树里有没有几何 —— 有就说明模型自己画了剑，
+     * 手上不该再叠一把原版物品（SPM {@code SwordReplacementHelper:20-30}）。
+     */
+    public boolean hasSwordGeometry(boolean rightHand) {
+        return swordGeometry[rightHand ? 1 : 0];
     }
 
     /** 定位组的骨骼数量（YSM 的 {@code locatorGroupSize}）；没有该组返回 0。 */
