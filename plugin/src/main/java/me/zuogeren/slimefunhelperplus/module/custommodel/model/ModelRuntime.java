@@ -16,6 +16,7 @@ import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
@@ -51,6 +52,9 @@ public final class ModelRuntime {
     private static final String[] SWIM = {"swim"};
     private static final String[] SWIM_STAND = {"swim_stand"};
     private static final String[] RIDE = {"ride", "boat"};
+    private static final String[] RIDE_PIG = {"ride_pig", "ride"};
+    private static final String[] RIDE_BOAT = {"boat", "ride"};
+    private static final String[] SIT = {"sit", "ride"};
     private static final String[] DEATH = {"death"};
     private static final String[] ATTACKED = {"attacked"};
     private static final String[] RIPTIDE = {"riptide"};
@@ -119,6 +123,9 @@ public final class ModelRuntime {
     private float[] armRootX;
     private boolean[] renderMask;
     private List<ModelController> controllers = List.of();
+    /** 模型属性里的渲染缩放（YSM 默认 0.7）；作者可以用它整体调大小。 */
+    private float widthScale = 1.0F;
+    private float heightScale = 1.0F;
     /** 无条件循环的默认层：模型里存在的 pre_parallel0..7。道具的自动隐藏写在这些片段里。 */
     private List<String> preParallelBase = List.of();
 
@@ -368,6 +375,38 @@ public final class ModelRuntime {
             }
         }
         runtime.preParallelBase = base;
+        if (model.properties != null) {
+            runtime.widthScale = model.properties.widthScale > 0.0F ? model.properties.widthScale : 1.0F;
+            runtime.heightScale = model.properties.heightScale > 0.0F ? model.properties.heightScale : 1.0F;
+        }
+        // 一次性尺寸诊断：模型静止包围盒 vs vanilla 玩家模型（HumanoidModel 32px = 2.0 格）
+        float lo = Float.MAX_VALUE;
+        float hi = -Float.MAX_VALUE;
+        org.joml.Vector3f probe = new org.joml.Vector3f();
+        for (int i = 0; i < count; i++) {
+            if (hidden[i]) {
+                continue;
+            }
+            for (RawYsmModel.RawCube cube : bones.get(i).cubes) {
+                if (cube.faces == null) {
+                    continue;
+                }
+                for (RawYsmModel.RawFace face : cube.faces) {
+                    if (face.positions == null) {
+                        continue;
+                    }
+                    for (float[] raw : face.positions) {
+                        probe.set(raw[0], raw[1], raw[2]);
+                        matrices[i].transformPosition(probe);
+                        lo = Math.min(lo, probe.y);
+                        hi = Math.max(hi, probe.y);
+                    }
+                }
+            }
+        }
+        Debug.info("[SFH+] size wScale=" + runtime.widthScale + " hScale=" + runtime.heightScale
+                + " geoHeight=" + (hi - lo) + " vanillaModelHeight=2.0"
+                + " -> ours=" + ((hi - lo) * runtime.heightScale) + " vanilla=" + (2.0F * 0.9375F));
         Debug.info("[SFH+] controllers=" + runtime.controllers.size() + "[" + slots.toString().trim()
                 + "] parallelClips=" + parallelCount + "[" + parallelClips.toString().trim() + "]");
         return runtime;
@@ -485,6 +524,18 @@ public final class ModelRuntime {
     }
 
     /** 骨骼名字里带身体部位词根：用来避免把「身体根」当成道具整棵藏掉。 */
+    /** YSM 的 Head 组按「去掉结尾数字后等于 Head」匹配（PlayerLocator + GeoLocatorType 的规则）。 */
+    private static boolean isHeadBone(String name) {
+        if (name == null) {
+            return false;
+        }
+        int end = name.length();
+        while (end > 0 && Character.isDigit(name.charAt(end - 1))) {
+            end--;
+        }
+        return end == 4 && name.regionMatches(true, 0, "head", 0, 4);
+    }
+
     private static boolean isBodyName(String name) {
         if (name == null) {
             return false;
@@ -882,6 +933,25 @@ public final class ModelRuntime {
         return texture;
     }
 
+    /**
+     * 该模型是否自己承担鞘翅平飞时的实体俯仰（因此这一层要抵消掉原版的俯仰与朝向）。
+     *
+     * <p>判据取 YSM 官方渲染器：{@code GeoReplacedEntityRenderer#setupRotations} 直接 super，
+     * 实体级从不补平飞俯仰；SPM 则是按模型判（{@code detectsFallFlyingRootRotation}）。我们跟着 YSM 走，
+     * 缺省抵消；将来接模块开关时改这里即可，调用方不用动。
+     */
+    public boolean handlesElytraPitch() {
+        return true;
+    }
+
+    public float widthScale() {
+        return widthScale;
+    }
+
+    public float heightScale() {
+        return heightScale;
+    }
+
     public int boneCount() {
         return bones.size();
     }
@@ -979,6 +1049,21 @@ public final class ModelRuntime {
             float overlayTime = overlayLength <= 0.0F ? 0.0F : ageSeconds % overlayLength;
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverlay(overlayClip, i, overlayTime, ageSeconds);
+            }
+        }
+        // 头部朝向：YSM 在**动画求值之后**把视线角度加到 Head 组骨骼上（CustomHumanoidEntity#applyHeadTracking）。
+        // 不做这一层，模型的头就永远跟着身体走，转头转头都不动，看着很怪。
+        if (avatar != null) {
+            float headX = (float) Math.toRadians(-avatar.xRot);
+            float headY = (float) Math.toRadians(-net.minecraft.util.Mth.clamp(
+                    net.minecraft.util.Mth.wrapDegrees(avatar.yRot - avatar.bodyRot), -85.0F, 85.0F));
+            for (int i = 0; i < bones.size(); i++) {
+                if (!isHeadBone(bones.get(i).name)) {
+                    continue;
+                }
+                int offset = i * 9;
+                poses[offset] += headX;
+                poses[offset + 1] += headY;
             }
         }
         for (int i = 0; i < bones.size(); i++) {
@@ -1223,7 +1308,7 @@ public final class ModelRuntime {
                 return orIdle(firstOf(SLEEP));
             }
             if (avatar.isPassenger) {
-                return orIdle(firstOf(RIDE));
+                return orIdle(rideClip(player, avatar));
             }
             if (player.isSwimming()) {
                 return orIdle(firstOf(SWIM));
@@ -1283,7 +1368,7 @@ public final class ModelRuntime {
             return orIdle(firstOf(SWIM));
         }
         if (avatar.isPassenger) {
-            return orIdle(firstOf(RIDE));
+            return orIdle(rideClip(player, avatar));
         }
         if (avatar.isCrouching) {
             return orIdle(firstOf(avatar.walkAnimationSpeed > MIN_MOVING ? SNEAK : SNEAK_STILL));
@@ -1292,6 +1377,25 @@ public final class ModelRuntime {
             return orIdle(firstOf(WALK));
         }
         return firstOf(IDLE);
+    }
+
+    /**
+     * 载具对应的动画，顺序照 YSM 的 {@code VehiclePredicate}：
+     * 猪 → {@code ride_pig}，可骑乘（马/驴/骆驼…）→ {@code ride}，船 → {@code boat}，其余 → {@code sit}。
+     *
+     * <p>必须先判猪再判可骑乘：{@code Pig} 自己就实现了 {@code Saddleable}。
+     */
+    private RawYsmModel.RawAnimation rideClip(LocalPlayer player, AvatarRenderState avatar) {
+        Entity vehicle = player == null ? null : player.getVehicle();
+        if (vehicle instanceof net.minecraft.world.entity.animal.pig.Pig) {
+            return firstOf(RIDE_PIG);
+        }
+        if (vehicle instanceof net.minecraft.world.entity.vehicle.boat.AbstractBoat) {
+            return firstOf(RIDE_BOAT);
+        }
+        // 其余可骑乘（马/驴/骆驼/矿车…）走通用 ride；YSM 对「不认识」的载具才退 sit，
+        // 我们没接模型自带载具条件，先按通用 ride 处理更稳。
+        return firstOf(RIDE);
     }
 
     private RawYsmModel.RawAnimation orIdle(RawYsmModel.RawAnimation clip) {

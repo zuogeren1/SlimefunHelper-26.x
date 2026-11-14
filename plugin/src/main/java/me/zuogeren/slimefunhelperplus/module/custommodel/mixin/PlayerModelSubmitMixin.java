@@ -2,6 +2,7 @@ package me.zuogeren.slimefunhelperplus.module.custommodel.mixin;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.math.Axis;
 import java.util.concurrent.atomic.AtomicBoolean;
 import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
@@ -20,6 +21,7 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemDisplayContext;
@@ -47,8 +49,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class PlayerModelSubmitMixin {
 
     @Shadow
-    protected abstract void setupRotations(LivingEntityRenderState state, PoseStack poseStack, float bodyRot,
-            float entityScale);
+    protected abstract void scale(LivingEntityRenderState state, PoseStack poseStack);
+
+    @Shadow
+    protected abstract boolean isShaking(LivingEntityRenderState state);
+
+    @Shadow
+    protected abstract float getFlipDegrees();
 
     private static final float HALF_WIDTH = 0.3F;
     private static final float HEIGHT = 1.8F;
@@ -80,7 +87,7 @@ public abstract class PlayerModelSubmitMixin {
         ModelRuntime runtime = CustomModelManager.runtime();
         if (runtime != null) {
             poseStack.pushPose();
-            applyEntityTransform(avatar, poseStack);
+            applyEntityTransform(avatar, poseStack, runtime);
             float ageSeconds = avatar.ageInTicks / 20.0F;
             collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(runtime.texture()),
                     (pose, buffer) -> runtime.render(pose, buffer, light, avatar, localPlayer, ageSeconds));
@@ -107,12 +114,12 @@ public abstract class PlayerModelSubmitMixin {
     /**
      * 复刻 {@code LivingEntityRenderer#submit} 出模型之前的实体系变换。
      *
-     * <p>只取「姿势」那一段：鞘翅平飞、游泳、死亡倒地、激流旋转都写在 {@code setupRotations} 里，
-     * 模型自己再算一遍就会与实体姿态脱节。
+     * <p>只取「姿势」那一段：鞘翅平飞、游泳、睡觉、倒立都写在这一段里，
+     * 模型自己再算一遍就会与实体姿态脱节（逐分支复刻见 {@link #applyPose}）。
      * 后面的 {@code scale(-1,-1,1)} 与 {@code translate(0,-1.501,0)} 不复刻 ——
      * 反序列化阶段已经把 YSM 的坐标烘成「Y 向上、脚在原点」，再翻一次会把模型倒过来。
      */
-    private void applyEntityTransform(AvatarRenderState state, PoseStack poseStack) {
+    private void applyEntityTransform(AvatarRenderState state, PoseStack poseStack, ModelRuntime runtime) {
         if (state.hasPose(Pose.SLEEPING)) {
             Direction bedOrientation = state.bedOrientation;
             if (bedOrientation != null) {
@@ -122,8 +129,80 @@ public abstract class PlayerModelSubmitMixin {
             }
         }
         poseStack.scale(state.scale, state.scale, state.scale);
-        this.setupRotations(state, poseStack, state.bodyRot, state.scale);
+        applyPose(state, poseStack);
+        // 玩家尺寸缩放（AvatarRenderer 覆写成 0.9375）：vanilla 在 setupRotations 之后做这一步，
+        // 少了模型整体会大 6.25%
+        this.scale(state, poseStack);
+        // 模型作者在 properties 里声明的整体缩放（YSM 默认 0.7）。
+        // 两个轴是**交叉**用的（X/Z 取 heightScale、Y 取 widthScale），照 SPM 的 IGeoRenderer#renderEarly 原样搬；
+        // 宽高相同的模型看不出差别，但宽高不同的模型必须这样才对得上。
+        poseStack.scale(runtime.heightScale(), runtime.widthScale(), runtime.heightScale());
+        // 平飞俯仰在 applyPose 里就没有施加（见上一段注释），这里不需要再抵消。
+        // runtime.handlesElytraPitch() 保留给将来的「跟随原版姿态」开关：那时在这里加回俯仰即可。
     }
+
+    /**
+     * 复刻 {@code AvatarRenderer#setupRotations} 最终交给 {@code LivingEntityRenderer#setupRotations} 的那一层。
+     *
+     * <p>不能直接调 {@code this.setupRotations}：死亡翻滚与激流自旋会再叠一层实体级旋转，而这两个动作
+     * 模型动画自己会做（YSM 是在调 super 之前把 {@code deathTime}/{@code isAutoSpinAttack} 临时清零）。
+     * {@code state} 是与其它图层共享的渲染状态，不能照抄那套改写-还原，只能在复刻时摘掉这两条分支；
+     * 摘掉之后这两个状态会落到睡觉、倒立分支上，与 YSM 清零后走到的位置一致。
+     * 睡觉、倒立、{@code isShaking} 抖动、平飞俯仰与朝向、游泳前倾都照原样保留。
+     */
+    private void applyPose(AvatarRenderState state, PoseStack poseStack) {
+        float bodyRot = state.bodyRot;
+        if (this.isShaking(state)) {
+            bodyRot += (float) (Math.cos(Mth.floor(state.ageInTicks) * 3.25F) * Math.PI * 0.4F);
+        }
+        if (!state.hasPose(Pose.SLEEPING)) {
+            rotateDegrees(poseStack, Axis.YP, 180.0F - bodyRot);
+        }
+        if (state.hasPose(Pose.SLEEPING)) {
+            Direction bedOrientation = state.bedOrientation;
+            rotateDegrees(poseStack, Axis.YP,
+                    bedOrientation != null ? bedDirectionYaw(bedOrientation) : bodyRot);
+            rotateDegrees(poseStack, Axis.ZP, this.getFlipDegrees());
+            rotateDegrees(poseStack, Axis.YP, 270.0F);
+        } else if (state.isUpsideDown) {
+            poseStack.translate(0.0F, (state.boundingBoxHeight + 0.1F) / state.scale, 0.0F);
+            rotateDegrees(poseStack, Axis.ZP, 180.0F);
+        }
+        // 平飞俯仰与「按移动方向扭转」这里都不加：YSM 的渲染器直接继承 LivingEntityRenderer，
+        // 它调到的 setupRotations 根本没有平飞分支（那是 AvatarRenderer 才有的），所以 YSM 模型
+        // 在平飞时身体既不前倾也不随移动方向转 —— 姿态全部由 elytra_fly 片段自己摆。
+        if (!state.isFallFlying && state.swimAmount > 0.0F) {
+            float targetXRot = state.isInWater ? -90.0F - state.xRot : -90.0F;
+            rotateDegrees(poseStack, Axis.XP, Mth.lerp(state.swimAmount, 0.0F, targetXRot));
+            if (state.isVisuallySwimming) {
+                poseStack.translate(0.0F, -1.0F, 0.3F);
+            }
+        }
+    }
+
+    /**
+     * 原版 {@code LivingEntityRenderer#sleepDirectionToRotation} 是 private static，shadow 不到；
+     * 沿用同名会被 Mixin 判成与目标类的成员重名，所以另起一个名字。
+     */
+    private static float bedDirectionYaw(Direction direction) {
+        return switch (direction) {
+            case SOUTH -> 90.0F;
+            case WEST -> 0.0F;
+            case NORTH -> 270.0F;
+            case EAST -> 180.0F;
+            default -> 0.0F;
+        };
+    }
+
+    /**
+     * {@code PoseStack} 的旋转入口三个版本各不相同（26.3 没有 {@code mulPose(Quaternionfc)}），
+     * 但 {@code Pose#rotate(Quaternionfc)} 三者都有、也正是 {@code mulPose} 的内部实现，
+     * 走这一层就不必为版本差异拆 {@code //#if}。
+     */
+    private static void rotateDegrees(PoseStack poseStack, Axis axis, float degrees) {
+        poseStack.last().rotate(axis.rotationDegrees(degrees));
+    }
+
 
     private static void renderHeldItems(ModelRuntime runtime, LocalPlayer player, PoseStack poseStack,
             SubmitNodeCollector collector, int light) {
