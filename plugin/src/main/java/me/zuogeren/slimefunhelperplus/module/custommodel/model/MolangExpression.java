@@ -768,10 +768,13 @@ public final class MolangExpression {
         }
 
         private Expr call(String name, List<Expr> arguments) {
+            // q.* 是 query.* 的官方简写。变量那条路径是逐名列举别名的，函数调用没有，
+            // 而语料里 q.position( 19 次、query.position( 6 次，不归一就有一多半落到 UNKNOWN。
+            String function = name.startsWith("q.") ? "query." + name.substring(2) : name;
             Expr a = argument(arguments, 0);
             Expr b = argument(arguments, 1);
             Expr c = argument(arguments, 2);
-            switch (name) {
+            switch (function) {
                 case "math.sin" -> {
                     return (animTime, lifeTime) -> (float) Math.sin(Math.toRadians(a.eval(animTime, lifeTime)));
                 }
@@ -882,7 +885,31 @@ public final class MolangExpression {
                     return itemCheckCall(arguments, MolangVariables.CHECK_USE);
                 }
                 case "query.equipped_item_any_tag" -> {
-                    return equippedTagCall(arguments);
+                    return equippedTagCall(arguments, false);
+                }
+                case "query.equipped_item_all_tags" -> {
+                    return equippedTagCall(arguments, true);
+                }
+                // 槽位 + 若干物品 id：与标签判定同一套实参形状，只是比的是 id 而不是标签
+                case "query.is_item_name_any" -> {
+                    return itemNameAnyCall(arguments);
+                }
+                // 状态效果 id 是变参，等级求和（SPM EffectLevel:24-59）
+                case "ysm.effect_level" -> {
+                    return effectLevelCall(arguments);
+                }
+                // 种子 + 1..3 个坐标；缺省的 y/z 取 0（SPM PerlinNoise:11-24）
+                case "ysm.perlin_noise" -> {
+                    Expr seed = argument(arguments, 0);
+                    Expr x = argument(arguments, 1);
+                    Expr y = argument(arguments, 2);
+                    Expr z = argument(arguments, 3);
+                    return (animTime, lifeTime) -> MolangVariables.perlinNoise(
+                            seed.eval(animTime, lifeTime), x.eval(animTime, lifeTime),
+                            y.eval(animTime, lifeTime), z.eval(animTime, lifeTime));
+                }
+                case "query.position" -> {
+                    return (animTime, lifeTime) -> MolangVariables.position(a.eval(animTime, lifeTime));
                 }
                 // math.random_integer 是闭区间 [min, max]（SPM RandomInteger#nextInclusive），
                 // 与 math.random 的闭区间一致；上界要能取到，否则随机动作永远差一档。
@@ -957,8 +984,11 @@ public final class MolangExpression {
             return (animTime, lifeTime) -> MolangVariables.itemCheck(slot, filter, operation);
         }
 
-        /** {@code query.equipped_item_any_tag(slot, tag...)}：第一个实参是槽名，其余是物品标签。 */
-        private static Expr equippedTagCall(List<Expr> arguments) {
+        /**
+         * {@code query.equipped_item_any_tag(slot, tag...)} / {@code ..._all_tags(...)}：
+         * 第一个实参是槽名，其余是物品标签；{@code all} 决定「任一命中」还是「全部命中」。
+         */
+        private static Expr equippedTagCall(List<Expr> arguments, boolean all) {
             String slot = literal(arguments, 0);
             List<String> tags = new ArrayList<>(Math.max(0, arguments.size() - 1));
             for (int i = 1; i < arguments.size(); i++) {
@@ -970,7 +1000,40 @@ public final class MolangExpression {
             if (slot.isEmpty() || tags.isEmpty()) {
                 return (animTime, lifeTime) -> 0.0F;
             }
-            return (animTime, lifeTime) -> MolangVariables.equippedItemAnyTag(slot, tags);
+            return all
+                    ? (animTime, lifeTime) -> MolangVariables.equippedItemAllTags(slot, tags)
+                    : (animTime, lifeTime) -> MolangVariables.equippedItemAnyTag(slot, tags);
+        }
+
+        /** {@code query.is_item_name_any(slot, name...)}：第一个实参是槽名，其余是物品 id。 */
+        private static Expr itemNameAnyCall(List<Expr> arguments) {
+            String slot = literal(arguments, 0);
+            List<String> names = new ArrayList<>(Math.max(0, arguments.size() - 1));
+            for (int i = 1; i < arguments.size(); i++) {
+                String name = literal(arguments, i);
+                if (!name.isEmpty()) {
+                    names.add(name);
+                }
+            }
+            if (slot.isEmpty() || names.isEmpty()) {
+                return (animTime, lifeTime) -> 0.0F;
+            }
+            return (animTime, lifeTime) -> MolangVariables.isItemNameAny(slot, names);
+        }
+
+        /** {@code ysm.effect_level(id...)}：全部实参都是状态效果 id。 */
+        private static Expr effectLevelCall(List<Expr> arguments) {
+            List<String> ids = new ArrayList<>(arguments.size());
+            for (int i = 0; i < arguments.size(); i++) {
+                String id = literal(arguments, i);
+                if (!id.isEmpty()) {
+                    ids.add(id);
+                }
+            }
+            if (ids.isEmpty()) {
+                return (animTime, lifeTime) -> 0.0F;
+            }
+            return (animTime, lifeTime) -> MolangVariables.effectLevel(ids);
         }
 
         /**

@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.ClientAvatarState;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -13,6 +14,7 @@ import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Pose;
@@ -24,6 +26,7 @@ import net.minecraft.world.entity.vehicle.boat.Raft;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.LightLayer;
+import org.lwjgl.stb.STBPerlin;
 
 /**
  * YSM 的 ysm.* / query.* 查询量。
@@ -180,6 +183,19 @@ public final class MolangVariables {
 
     /** {@code query.equipped_item_any_tag(slot, tag...)}：任一标签命中即真。 */
     public static float equippedItemAnyTag(String slotName, List<String> tags) {
+        return equippedItemTags(slotName, tags, false);
+    }
+
+    /** {@code query.equipped_item_all_tags(slot, tag...)}：全部标签都命中才真（SPM {@code EquippedItemAllTags:26-35}）。 */
+    public static float equippedItemAllTags(String slotName, List<String> tags) {
+        return equippedItemTags(slotName, tags, true);
+    }
+
+    /**
+     * any / all 两种标签判定的共同实现：空槽一律假、槽名不认识返回 NaN、标签写错返回 NaN
+     * （SPM 的 {@code getResourceLocation} 解析失败给 null，落到 Molang 就是「没有值」）。
+     */
+    private static float equippedItemTags(String slotName, List<String> tags, boolean all) {
         LocalPlayer p = player;
         if (p == null || tags == null || tags.isEmpty()) {
             return 0.0F;
@@ -196,15 +212,95 @@ public final class MolangVariables {
             if (tag == null || tag.isEmpty()) {
                 continue;
             }
+            boolean match;
             try {
-                if (stack.is(TagKey.create(Registries.ITEM, Identifier.parse(tag)))) {
-                    return 1.0F;
-                }
+                match = stack.is(TagKey.create(Registries.ITEM, Identifier.parse(tag)));
             } catch (RuntimeException malformed) {
                 return Float.NaN;
             }
+            if (all && !match) {
+                return 0.0F;
+            }
+            if (!all && match) {
+                return 1.0F;
+            }
+        }
+        return all ? 1.0F : 0.0F;
+    }
+
+    /**
+     * {@code query.is_item_name_any(slot, name...)}：槽位里的物品 id 命中任一名字即真
+     * （SPM {@code IsItemNameAny:17-37}、YSM {@code ControlBuiltins:116-136}）。
+     *
+     * <p>空槽返回假；名字解析不出来返回 NaN 而不是「不匹配」—— 写错 id 的模型该整条失效，
+     * 静默判假会让作者以为条件写对了。
+     */
+    public static float isItemNameAny(String slotName, List<String> names) {
+        LocalPlayer p = player;
+        if (p == null || names == null || names.isEmpty()) {
+            return 0.0F;
+        }
+        EquipmentSlot slot = slotOf(slotName);
+        if (slot == null) {
+            return Float.NaN;
+        }
+        ItemStack stack = p.getItemBySlot(slot);
+        if (stack.isEmpty()) {
+            return 0.0F;
+        }
+        Identifier actual = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (actual == null) {
+            return 0.0F;
+        }
+        for (String name : names) {
+            Identifier expected = Identifier.tryParse(name);
+            if (expected == null) {
+                return Float.NaN;
+            }
+            if (actual.equals(expected)) {
+                return 1.0F;
+            }
         }
         return 0.0F;
+    }
+
+    /**
+     * {@code ysm.effect_level(id...)}：这些状态效果各自等级之和，没有的按 0 计（SPM {@code EffectLevel:24-59}）。
+     *
+     * <p>等级是 {@code amplifier + 1}（力量 I 的 amplifier 是 0）。SPM 对每个实参累加，
+     * 解析不出来的 id 直接跳过而不是整条作废；只有「非生物实体」才返回 null，而这里只有玩家上下文。
+     */
+    public static float effectLevel(List<String> ids) {
+        LocalPlayer p = player;
+        if (p == null || ids == null || ids.isEmpty()) {
+            return 0.0F;
+        }
+        float total = 0.0F;
+        for (String id : ids) {
+            if (id == null || id.isEmpty()) {
+                continue;
+            }
+            Identifier key = Identifier.tryParse(id);
+            if (key == null) {
+                continue;
+            }
+            MobEffectInstance instance = BuiltInRegistries.MOB_EFFECT.get(key).map(p::getEffect).orElse(null);
+            if (instance != null) {
+                total += instance.getAmplifier() + 1;
+            }
+        }
+        return total;
+    }
+
+    /**
+     * {@code ysm.perlin_noise(seed, x[, y[, z]])}：STB 的 3D Perlin 噪声，约 −1..1
+     * （SPM {@code PerlinNoise:11-24} 直接调 {@code stb_perlin_noise3_seed(x, y, z, 0, 0, 0, seed)}）。
+     *
+     * <p>缺省的 y/z 取 0，与 SPM 一致；种子按 {@code (int)} 截断（SPM 的 {@code getAsInt} 同样是截断）。
+     * 用 STB 而不是自己写一份：语料里的模型是按 STB 的输出调参的，换实现波形就对不上。
+     */
+    public static float perlinNoise(float seed, float x, float y, float z) {
+        return STBPerlin.stb_perlin_noise3_seed(x, y, z, 0, 0, 0, (int) seed);
     }
 
     private static EquipmentSlot slotOf(String name) {
@@ -265,6 +361,31 @@ public final class MolangVariables {
         }
         float[] delta = framePositionDelta();
         return delta == null ? Float.NaN : delta[component];
+    }
+
+    /**
+     * {@code query.position(axis)}：实体插值后的世界坐标（格），轴越界按 Molang 未定义返回 NaN
+     * （SPM {@code Position:15-24} 的 default 分支返回 null）。
+     *
+     * <p>与 {@link #positionDelta} 的帧间差分不同，这是绝对坐标：模型拿它做「世界锚定」的骨骼
+     * （语料里是无人机跟随物，{@code query.position(0) - ysm.second_order('DroneX', ...)}）。
+     * 插值端点用 {@code xo/yo/zo}，与 SPM 一致。
+     */
+    public static float position(float axis) {
+        LocalPlayer p = player;
+        if (p == null) {
+            return Float.NaN;
+        }
+        int component = Math.round(axis);
+        if (component < 0 || component > 2) {
+            return Float.NaN;
+        }
+        float partial = boatPartialTick();
+        return switch (component) {
+            case 0 -> (float) Mth.lerp(partial, p.xo, p.getX());
+            case 1 -> (float) Mth.lerp(partial, p.yo, p.getY());
+            default -> (float) Mth.lerp(partial, p.zo, p.getZ());
+        };
     }
 
     /**
@@ -367,6 +488,12 @@ public final class MolangVariables {
                 case "ysm.is_open_air" -> p.level().canSeeSky(p.blockPosition()) ? 1.0F : 0.0F;
                 case "ysm.rendering_in_paperdoll", "ysm.rendering_in_inventory" -> 0.0F;
                 case "ysm.person_view" -> Minecraft.getInstance().options.getCameraType().isFirstPerson() ? 0.0F : 1.0F;
+                // 第一人称下要播「把身体藏起来」的动作（语料里是 ysm.first_person_mod_hide?2 这种位移）。
+                // SPM FirstPersonModHide:15 判的是相机类型而不是渲染通道标志：全身第一人称模型也走
+                // 玩家渲染器，只有相机在第一人称才需要藏。
+                case "ysm.first_person_mod_hide" ->
+                        Minecraft.getInstance().options.getCameraType().isFirstPerson() ? 1.0F : 0.0F;
+                case "ysm.elytra_rot_z" -> elytraRotZ(p);
 
                 // 控制器状态机里最常用的判定：本状态里那几条动画播完了没有
                 case "query.all_animations_finished" -> controllerAllFinished;
@@ -401,6 +528,19 @@ public final class MolangVariables {
                 case "query.is_swinging" -> p.swinging ? 1.0F : 0.0F;
                 //#endif
                 case "query.is_first_person" -> Minecraft.getInstance().options.getCameraType().isFirstPerson() ? 1.0F : 0.0F;
+                // 身体朝向（度）：x 是俯仰（正 = 低头）、y 是身体偏航。
+                // 两条都照 SPM QueryBinding:87-88 的写法：x 走 getXRot(partial)（内部就是
+                // Mth.lerp(partial, xRotO, getXRot())），y 走 Mth.lerp 后 wrapDegrees。
+                case "query.body_x_rotation" -> p.getXRot(boatPartialTick());
+                case "query.body_y_rotation" -> Mth.wrapDegrees(Mth.lerp(boatPartialTick(), p.yBodyRotO, p.yBodyRot));
+                // 视线目标角（度）：x 俯仰、y 偏航，取的是头部朝向而不是身体朝向
+                // （SPM QueryBinding:69-70、YSM EntityBuiltins:83-86 都读 getViewXRot/getViewYRot）
+                case "query.eye_target_x_rotation" -> p.getViewXRot(boatPartialTick());
+                case "query.eye_target_y_rotation" -> p.getViewYRot(boatPartialTick());
+                // 世界时钟的绝对 tick（SPM QueryBinding:63 读 getDefaultClockTime）。
+                // 26.2 没有 getDayTime，getDefaultClockTime 就是它的替代（维度默认时钟的总 tick）。
+                case "query.time_stamp" -> (float) p.level().getDefaultClockTime();
+                case "query.cape_flap_amount" -> capeFlapAmount(p);
                 // 武器族：只看「手里是什么 + 玩家在做什么」，不碰 trident/lance/mace 的动作子状态
                 // （那部分在 SPM 的 WeaponActionBridgeImpl 里是完整子系统，尚未移植，保持 NaN）
                 case "ysm.weapon_type" -> weaponType(p);
@@ -631,6 +771,46 @@ public final class MolangVariables {
     /** 划桨插值按帧内进度取样，否则 20tps 下桨角只有每 tick 一跳。 */
     private static float boatPartialTick() {
         return Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
+    }
+
+    /**
+     * {@code query.cape_flap_amount}：披风下摆角度归一化到 0..1（SPM {@code QueryBinding:238-257}）。
+     *
+     * <p>SPM 的算式是「原版披风 X 旋转 / 108 再夹到 0..1」：{@code (6 + capeLean/2 + capeFlap) / 108}，
+     * 其中 capeLean 是披风相对身体的水平位移在身体朝向法线上的投影、capeFlap 是竖直位移，
+     * 原版 {@code AvatarRenderer#extractCapeState} 就是这么算的。SPM 在 26.x 拿不到披风位置字段，
+     * 把披风位置写死成 0，于是「位移」退化成实体绝对坐标（{@code 0 - lerp(xo, x)}）——
+     * 离原点超过 1.5 格的玩家会直接顶到上限 1。26.2 的 {@code ClientAvatarState#getInterpolatedCloakX/Y/Z}
+     * 仍然提供插值披风位置，所以这里按原版算式取真实位移，只保留 SPM 的归一化与夹取。
+     *
+     * <p>走路摆动项（{@code sin(walkDist * 6) * 32 * bob}）照 SPM 保留：站着不动时它恒为 0，
+     * 走起来才让披风跟着步子抖。原版还会乘 {@code 1 - fallFlyingScale()}（滑翔时披风让位给鞘翅），
+     * SPM 没做，这里同样不做 —— 模型问的是「披风在飘多少」，滑翔时正是最大。
+     * 蹲下时竖直项 +25 是 SPM 保留的原版行为，照抄。
+     */
+    private static float capeFlapAmount(LocalPlayer p) {
+        float partial = boatPartialTick();
+        ClientAvatarState state = p.avatarState();
+        double dx = state.getInterpolatedCloakX(partial) - Mth.lerp(partial, p.xo, p.getX());
+        double dy = state.getInterpolatedCloakY(partial) - Mth.lerp(partial, p.yo, p.getY());
+        double dz = state.getInterpolatedCloakZ(partial) - Mth.lerp(partial, p.zo, p.getZ());
+        float bodyRot = Mth.rotLerp(partial, p.yBodyRotO, p.yBodyRot);
+        float sin = Mth.sin(bodyRot * 0.017453292F);
+        float cos = -Mth.cos(bodyRot * 0.017453292F);
+        float flap = Mth.clamp((float) dy * 10.0F, -6.0F, 32.0F);
+        float lean = Mth.clamp((float) (dx * sin + dz * cos) * 100.0F, 0.0F, 150.0F);
+        // 走路摆动：SPM 的 fSin2 是「竖直位移 + 步幅正弦 × 上下颠簸幅度」
+        flap += Mth.sin(state.getInterpolatedWalkDistance(partial) * 6.0F) * 32.0F
+                * state.getInterpolatedBob(partial);
+        if (p.isCrouching()) {
+            flap += 25.0F;
+        }
+        return Mth.clamp((6.0F + lean / 2.0F + flap) / 108.0F, 0.0F, 1.0F);
+    }
+
+    /** {@code ysm.elytra_rot_z}：鞘翅下摆的 Z 旋转，**度**（SPM {@code YSMBinding:374-376} 对 {@code getRotZ} 取 toDegrees）。 */
+    private static float elytraRotZ(LocalPlayer p) {
+        return (float) Math.toDegrees(p.elytraAnimationState.getRotZ(boatPartialTick()));
     }
 
     private static float has(LivingEntity entity, EquipmentSlot slot) {
