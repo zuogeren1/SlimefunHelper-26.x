@@ -2585,13 +2585,22 @@ public final class ModelRuntime {
         return Float.isFinite(value) ? value : fallback;
     }
 
+    /**
+     * 采样一条通道在 {@code time} 处的三元值；通道为空返回 {@code null}。
+     *
+     * <p>关键帧有 pre / post 两个值：**段内插值的目标是下一帧的 pre**，到帧点才跳到它的 post
+     * （SPM {@code EasingType#buildLinearKeyFrame} 用 {@code end.preValue()} 当终点、
+     * {@code postValue()} 当帧点值）。作者用 pre≠post 表达「到这里瞬间换姿势」，
+     * 只读 post 会把这段跳变摊成一条多余的过渡。
+     */
     private static float[] sampleChannel(List<RawYsmModel.RawKeyframe> frames, float time, float lifeTime) {
         if (frames == null || frames.isEmpty()) {
             return null;
         }
         int last = frames.size() - 1;
-        if (time <= frames.get(0).timestamp) {
-            return valuesOf(frames.get(0).postData, time, lifeTime);
+        if (time < frames.get(0).timestamp) {
+            // 首帧之前是常量：SPM 的 TransitionKeyFrame 取首帧的 pre
+            return valuesOf(preOf(frames.get(0)), time, lifeTime);
         }
         if (time >= frames.get(last).timestamp) {
             return valuesOf(frames.get(last).postData, time, lifeTime);
@@ -2599,7 +2608,7 @@ public final class ModelRuntime {
         for (int i = 0; i < last; i++) {
             RawYsmModel.RawKeyframe current = frames.get(i);
             RawYsmModel.RawKeyframe next = frames.get(i + 1);
-            if (time < current.timestamp || time > next.timestamp) {
+            if (time < current.timestamp || time >= next.timestamp) {
                 continue;
             }
             float[] a = valuesOf(current.postData, time, lifeTime);
@@ -2609,7 +2618,7 @@ public final class ModelRuntime {
             if (current.interpolationMode == RawYsmModel.RawKeyframe.INTERPOLATION_STEP) {
                 return a;
             }
-            float[] b = valuesOf(next.postData, time, lifeTime);
+            float[] b = valuesOf(preOf(next), time, lifeTime);
             if (b == null) {
                 return a;
             }
@@ -2621,6 +2630,11 @@ public final class ModelRuntime {
                     a[2] + (b[2] - a[2]) * t};
         }
         return valuesOf(frames.get(last).postData, time, lifeTime);
+    }
+
+    /** 关键帧的「段起点值」：没有 preData 时与 post 相同（SPM 的 {@code contiguous}）。 */
+    private static Object[] preOf(RawYsmModel.RawKeyframe frame) {
+        return frame.hasPreData ? frame.preData : frame.postData;
     }
 
     private static float[] valuesOf(Object[] values, float time, float lifeTime) {
