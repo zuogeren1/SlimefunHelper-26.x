@@ -41,6 +41,8 @@
   "config.index.custom-model": "自定义玩家模型",
   "custom-model.enable": "本地模型替换",
   "custom-model.enable.tooltips": "只替换自己看到的外观；模型放在 config/slimefunhelper-plus/models",
+  "custom-model.show-props": "显示未参与动画的部件",
+  "custom-model.show-props.tooltips": "舞台道具/额外角色没有基础动画，默认不显示；需要在游戏里展示它们时再打开",
   "widget.click-gui.module-name.Render.CustomModel": "自定义模型",
   "widget.click-gui.module-name.Render.CustomModel.tooltips": "加载 YSM 模型并替换本地玩家外观（仅自己可见）"
 }

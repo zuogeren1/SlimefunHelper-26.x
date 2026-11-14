@@ -85,7 +85,9 @@ public final class CustomModelManager {
         }
         RawYsmModel.RawTexture texture = pickTexture(model);
         Identifier textureId = ModelTexture.register(texture);
-        ModelRuntime loaded = textureId == null ? null : ModelRuntime.build(model, textureId);
+        CustomModelModule module = CustomModelModule.INSTANCE;
+        boolean hideUnreferenced = module == null || !module.showProps.get();
+        ModelRuntime loaded = textureId == null ? null : ModelRuntime.build(model, textureId, hideUnreferenced);
         if (VERSION.get() != version) {
             return;
         }

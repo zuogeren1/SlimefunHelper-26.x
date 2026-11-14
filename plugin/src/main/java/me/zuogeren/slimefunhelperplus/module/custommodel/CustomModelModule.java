@@ -25,6 +25,9 @@ public class CustomModelModule extends BaseModule {
 
     public final FlagRef enable = flagBuilder(root.addEnable()).defaultValue(false).build();
 
+    /** 显示没有参与基础动画的骨骼（舞台道具/额外角色）；默认关，个别模型需要展示时再开。 */
+    public final FlagRef showProps = flagBuilder(root.add("show-props")).defaultValue(false).build();
+
     /** 模型文件名（相对 {@code config/slimefunhelper-plus/models}），P4 接 ClickGui 选择器。 */
     public final StringRef model = builder(root.add("model"), String.class)
             .defaultValue("")
@@ -34,6 +37,11 @@ public class CustomModelModule extends BaseModule {
     public CustomModelModule() {
         super("CustomModel");
         bindFlag(enable);
+        showProps.addUpdateListener(value -> {
+            if (isActive()) {
+                CustomModelManager.reloadAsync(model.get());
+            }
+        });
     }
 
     @Override

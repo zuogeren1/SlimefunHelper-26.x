@@ -2,13 +2,21 @@ package me.zuogeren.slimefunhelperplus.module.custommodel.model;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Pose;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -18,23 +26,103 @@ import org.joml.Vector3f;
  *
  * <p>几何在反序列化阶段已经烘焙成模型空间的面片（见 {@code YsmGeometryParsing}，坐标是方块单位），
  * 这里只负责按骨骼层级乘矩阵；根的朝向（{@code 180 - bodyRot}）由调用方在 PoseStack 上施加。
+ *
+ * <p>动画吃 {@code animation-main}（animType=1）：状态表与 YSM 的 {@code AnimationRegister} 对齐
+ * （death/riptide/sleep/swim/climb/ladder/fly/elytra/swim_stand/attacked/jump/sneak/run/walk/idle），
+ * 主状态一律循环，只有死亡与被击是一次性；关键帧的字符串通道走 {@link MolangExpression} 的数值子集。
+ *
+ * <p>舞台道具分两类识别：整棵只由非基础动画（{@code parallel*}/{@code pre_parallel*}/{@code stage}）
+ * 引用的根（钢琴、背景板、车、鼓），以及挂在身体根下、在 {@code pre_parallel*} 里被缩放到 0 的骨骼
+ * （吉他、手机、备用服装）。{@code show-props} 打开时全部显示。
  */
 public final class ModelRuntime {
 
-    private final List<RawYsmModel.RawBone> bones;
-    private final Matrix4f[] boneMatrices;
-    private final Matrix3f[] normalMatrices;
-    private final Identifier texture;
+    private static final String[] IDLE = {"idle", "empty"};
+    private static final String[] WALK = {"walk"};
+    private static final String[] RUN = {"run"};
+    private static final String[] SNEAK = {"sneak"};
+    private static final String[] SNEAK_STILL = {"sneaking"};
+    private static final String[] ELYTRA = {"elytra_fly"};
+    private static final String[] FLY = {"fly"};
+    private static final String[] SWIM = {"swim"};
+    private static final String[] SWIM_STAND = {"swim_stand"};
+    private static final String[] RIDE = {"ride", "boat"};
+    private static final String[] DEATH = {"death"};
+    private static final String[] ATTACKED = {"attacked"};
+    private static final String[] RIPTIDE = {"riptide"};
+    private static final String[] SLEEP = {"sleep"};
+    private static final String[] CLIMB = {"climb"};
+    private static final String[] CLIMBING = {"climbing"};
+    private static final String[] LADDER_UP = {"ladder_up"};
+    private static final String[] LADDER_DOWN = {"ladder_down"};
+    private static final String[] LADDER_STILL = {"ladder_stillness"};
+    private static final String[] USE_MAIN = {"use_mainhand"};
+    private static final String[] USE_OFF = {"use_offhand"};
+    private static final String[] JUMP = {"jump"};
 
-    private ModelRuntime(List<RawYsmModel.RawBone> bones, Matrix4f[] boneMatrices,
-            Matrix3f[] normalMatrices, Identifier texture) {
-        this.bones = bones;
-        this.boneMatrices = boneMatrices;
-        this.normalMatrices = normalMatrices;
-        this.texture = texture;
+    /** 只播一次的状态；其余主状态按 YSM 的 {@code playLoopAnimation} 语义一律循环。 */
+    private static final Set<String> ONE_SHOT = Set.of("death", "attacked");
+
+    /** 参与「基础动作」的动画名：被这些动画驱动的骨骼不算舞台道具。 */
+    private static final Set<String> MAIN_STATES = Set.of(
+            "idle", "walk", "run", "sneak", "sneaking", "fly", "elytra_fly", "swim", "swim_stand",
+            "ride", "boat", "jump", "attacked", "death", "riptide", "sleep", "climb", "climbing",
+            "ladder_up", "ladder_down", "ladder_stillness", "use_mainhand", "use_offhand", "sit");
+
+    private static final float MIN_MOVING = 0.05F;
+    /** 道具骨骼的最小尺寸（格）：比这个小的大多是耳饰、表情、衣角这类身体附件。 */
+    private static final float PROP_MIN_SIZE = 0.75F;
+    /** 明显不属于角色本体的部件（背景板、载具）。 */
+    private static final float OVERSIZED = 4.0F;
+    /** 身体部位词根：子树里出现这些名字就不按「道具」整棵隐藏。 */
+    private static final String[] BODY_WORDS = {
+            "head", "body", "arm", "hand", "leg", "foot", "hair", "eye", "finger", "neck", "waist", "chest"
+    };
+
+    private final List<RawYsmModel.RawBone> bones;
+    private final Map<String, Integer> boneIndex;
+    private final Map<String, RawYsmModel.RawAnimation> clips;
+    private final int[] parents;
+    private final Matrix4f[] restMatrices;
+    private final Matrix3f[] restNormals;
+    private final Matrix4f[] frameMatrices;
+    private final Matrix3f[] frameNormals;
+    private final byte[] frameState;
+    private final float[] poses;
+    private final boolean[] hidden;
+    private final Identifier texture;
+    private final int rightHandBone;
+    private final int leftHandBone;
+    private RawYsmModel.RawAnimation lastClip;
+    private float lastClipStart;
+    private float lastHurtTime;
+    private boolean frameValid;
+    private boolean logged;
+
+    private static String clipName(RawYsmModel.RawAnimation clip) {
+        return clip == null || clip.name == null ? "none" : clip.name;
     }
 
-    public static ModelRuntime build(RawYsmModel model, Identifier texture) {
+    private ModelRuntime(List<RawYsmModel.RawBone> bones, Map<String, Integer> boneIndex,
+            Map<String, RawYsmModel.RawAnimation> clips, int[] parents, Matrix4f[] restMatrices,
+            Matrix3f[] restNormals, boolean[] hidden, Identifier texture, int rightHandBone, int leftHandBone) {
+        this.bones = bones;
+        this.boneIndex = boneIndex;
+        this.clips = clips;
+        this.parents = parents;
+        this.restMatrices = restMatrices;
+        this.restNormals = restNormals;
+        this.frameMatrices = new Matrix4f[bones.size()];
+        this.frameNormals = new Matrix3f[bones.size()];
+        this.frameState = new byte[bones.size()];
+        this.poses = new float[bones.size() * 9];
+        this.hidden = hidden;
+        this.texture = texture;
+        this.rightHandBone = rightHandBone;
+        this.leftHandBone = leftHandBone;
+    }
+
+    public static ModelRuntime build(RawYsmModel model, Identifier texture, boolean hideProps) {
         RawYsmModel.RawGeometry geometry = model.mainEntity == null ? null : model.mainEntity.mainModel;
         if (geometry == null || geometry.bones == null || geometry.bones.isEmpty()) {
             return null;
@@ -62,11 +150,136 @@ public final class ModelRuntime {
         Matrix4f[] matrices = new Matrix4f[count];
         byte[] state = new byte[count];
         for (int i = 0; i < count; i++) {
-            compute(i, bones, parents, matrices, state);
+            computeRest(i, bones, parents, matrices, state);
         }
         Matrix3f[] normals = new Matrix3f[count];
         for (int i = 0; i < count; i++) {
             normals[i] = normalOf(matrices[i]);
+        }
+        Map<String, RawYsmModel.RawAnimation> clips = new HashMap<>();
+        Map<String, List<String>> references = new HashMap<>();
+        Set<String> zeroScaled = new HashSet<>();
+        Set<String> mainAnimated = new HashSet<>();
+        if (model.mainEntity != null && model.mainEntity.animationFiles != null) {
+            for (RawYsmModel.RawAnimationFile file : model.mainEntity.animationFiles.values()) {
+                if (file == null || file.animType != 1 || file.animations == null) {
+                    continue;
+                }
+                for (Map.Entry<String, RawYsmModel.RawAnimation> entry : file.animations.entrySet()) {
+                    String name = entry.getKey();
+                    RawYsmModel.RawAnimation animation = entry.getValue();
+                    if (animation == null) {
+                        continue;
+                    }
+                    animation.name = name;
+                    clips.putIfAbsent(name, animation);
+                    boolean mainState = MAIN_STATES.contains(name);
+                    for (RawYsmModel.RawBoneAnimation boneAnimation : animation.boneAnimations) {
+                        if (boneAnimation.boneName == null) {
+                            continue;
+                        }
+                        references.computeIfAbsent(boneAnimation.boneName, key -> new java.util.ArrayList<>()).add(name);
+                        if (mainState) {
+                            mainAnimated.add(boneAnimation.boneName);
+                        } else if (name.startsWith("pre_parallel") && hasZeroScale(boneAnimation)) {
+                            zeroScaled.add(boneAnimation.boneName);
+                        }
+                    }
+                }
+            }
+        }
+        boolean[] hidden = new boolean[count];
+        float[] extent = new float[count];
+        int[] faces = new int[count];
+        for (int i = 0; i < count; i++) {
+            extent[i] = extentOf(bones.get(i));
+            faces[i] = faceCount(bones.get(i));
+        }
+        Map<Integer, List<Integer>> children = new HashMap<>();
+        for (int i = 0; i < count; i++) {
+            if (parents[i] >= 0) {
+                children.computeIfAbsent(parents[i], key -> new java.util.ArrayList<>()).add(i);
+            }
+        }
+        // 舞台道具/载具（钢琴、背景板、车、鼓）：整棵子树只被「非基础动画」引用，且子树里没有身体部件。
+        // 这些根在 idle 下应该隐藏 —— YSM 靠 parallel*/pre_parallel* 控制器按需显示。
+        for (int root = 0; root < count; root++) {
+            if (parents[root] >= 0) {
+                continue;
+            }
+            List<String> rootRefs = references.getOrDefault(bones.get(root).name, List.of());
+            boolean mainReferenced = false;
+            boolean propReferenced = false;
+            for (String reference : rootRefs) {
+                if (MAIN_STATES.contains(reference)) {
+                    mainReferenced = true;
+                } else {
+                    propReferenced = true;
+                }
+            }
+            if (mainReferenced || !propReferenced) {
+                continue;
+            }
+            int subtreeFaces = 0;
+            boolean body = isBodyName(bones.get(root).name);
+            ArrayDeque<Integer> queue = new ArrayDeque<>();
+            queue.add(root);
+            while (!queue.isEmpty()) {
+                int current = queue.poll();
+                subtreeFaces += faces[current];
+                if (isBodyName(bones.get(current).name)) {
+                    body = true;
+                }
+                for (int child : children.getOrDefault(current, List.of())) {
+                    queue.add(child);
+                }
+            }
+            if (subtreeFaces <= 0 || body) {
+                continue;
+            }
+            queue.add(root);
+            while (!queue.isEmpty()) {
+                int current = queue.poll();
+                hidden[current] = true;
+                for (int child : children.getOrDefault(current, List.of())) {
+                    queue.add(child);
+                }
+            }
+        }
+        // 挂在身体根下面的道具（吉他、手机、备用服装）：pre_parallel* 里缩放到 0、且基础动画不驱动。
+        for (int i = 0; i < count; i++) {
+            String name = bones.get(i).name;
+            if (name != null && zeroScaled.contains(name) && !mainAnimated.contains(name)
+                    && extent[i] >= PROP_MIN_SIZE) {
+                hidden[i] = true;
+            }
+        }
+        // 道具的子骨骼（琴弦、拨片、装饰）跟着父骨骼一起藏；基础动画驱动的不算。
+        int[] depths = depthsOf(parents);
+        for (int depth = 1; depth < count; depth++) {
+            for (int i = 0; i < count; i++) {
+                int parent = parents[i];
+                if (depths[i] != depth || parent < 0 || !hidden[parent] || hidden[i]) {
+                    continue;
+                }
+                String name = bones.get(i).name;
+                if (name == null || !mainAnimated.contains(name)) {
+                    hidden[i] = true;
+                }
+            }
+        }
+        int hiddenCount = 0;
+        for (int i = 0; i < count; i++) {
+            if (extent[i] > OVERSIZED) {
+                hidden[i] = true;
+            }
+            if (hidden[i]) {
+                hiddenCount++;
+            }
+        }
+        if (!hideProps) {
+            java.util.Arrays.fill(hidden, false);
+            hiddenCount = 0;
         }
         int roots = 0;
         int unresolved = 0;
@@ -79,55 +292,171 @@ public final class ModelRuntime {
                 }
             }
         }
-        float maxCoordinate = 0.0F;
-        int faces = 0;
-        for (RawYsmModel.RawBone bone : bones) {
-            for (RawYsmModel.RawCube cube : bone.cubes) {
-                for (RawYsmModel.RawFace face : cube.faces) {
-                    faces++;
-                    for (float[] position : face.positions) {
-                        maxCoordinate = Math.max(maxCoordinate, Math.max(Math.abs(position[0]),
-                                Math.max(Math.abs(position[1]), Math.abs(position[2]))));
+        int rightHand = findHand(bones, "righthandlocator", "rightitem", "righthand");
+        int leftHand = findHand(bones, "lefthandlocator", "leftitem", "lefthand");
+        Debug.info("[SFH+] geo bones=" + count + " roots=" + roots + " unresolvedParents=" + unresolved
+                + " clips=" + clips.size() + " hidden=" + hiddenCount
+                + " hands=" + rightHand + "/" + leftHand);
+        return new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, texture, rightHand, leftHand);
+    }
+
+    private static boolean hasZeroScale(RawYsmModel.RawBoneAnimation boneAnimation) {
+        if (boneAnimation.scale == null) {
+            return false;
+        }
+        for (RawYsmModel.RawKeyframe keyframe : boneAnimation.scale) {
+            Object[] data = keyframe.postData;
+            if (data != null && data[0] instanceof Number number && Math.abs(number.doubleValue()) < 1.0E-6) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int faceCount(RawYsmModel.RawBone bone) {
+        int total = 0;
+        if (bone.cubes == null) {
+            return 0;
+        }
+        for (RawYsmModel.RawCube cube : bone.cubes) {
+            if (cube.faces != null) {
+                total += cube.faces.size();
+            }
+        }
+        return total;
+    }
+
+    /** 骨骼名字里带身体部位词根：用来避免把「身体根」当成道具整棵藏掉。 */
+    private static boolean isBodyName(String name) {
+        if (name == null) {
+            return false;
+        }
+        String normalized = name.toLowerCase(Locale.ROOT);
+        for (String word : BODY_WORDS) {
+            if (normalized.contains(word)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 骨骼自身几何的最大边长（面片坐标是骨骼局部坐标，已除 16）。 */
+    private static float extentOf(RawYsmModel.RawBone bone) {
+        float[] min = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
+        float[] max = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
+        boolean any = false;
+        if (bone.cubes == null) {
+            return 0.0F;
+        }
+        for (RawYsmModel.RawCube cube : bone.cubes) {
+            if (cube.faces == null) {
+                continue;
+            }
+            for (RawYsmModel.RawFace face : cube.faces) {
+                if (face.positions == null) {
+                    continue;
+                }
+                for (float[] position : face.positions) {
+                    any = true;
+                    for (int axis = 0; axis < 3; axis++) {
+                        min[axis] = Math.min(min[axis], position[axis]);
+                        max[axis] = Math.max(max[axis], position[axis]);
                     }
                 }
             }
         }
-        Debug.info("[SFH+] geo bones=" + count + " roots=" + roots + " unresolvedParents=" + unresolved
-                + " faces=" + faces + " maxCoord=" + maxCoordinate);
-        return new ModelRuntime(bones, matrices, normals, texture);
+        if (!any) {
+            return 0.0F;
+        }
+        return Math.max(max[0] - min[0], Math.max(max[1] - min[1], max[2] - min[2]));
     }
 
-    private static Matrix4f compute(int index, List<RawYsmModel.RawBone> bones, int[] parents,
+    private static int[] depthsOf(int[] parents) {
+        int count = parents.length;
+        int[] depths = new int[count];
+        java.util.Arrays.fill(depths, -1);
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        for (int i = 0; i < count; i++) {
+            if (parents[i] < 0) {
+                depths[i] = 0;
+                queue.add(i);
+            }
+        }
+        Map<Integer, List<Integer>> children = new HashMap<>();
+        for (int i = 0; i < count; i++) {
+            if (parents[i] >= 0) {
+                children.computeIfAbsent(parents[i], key -> new java.util.ArrayList<>()).add(i);
+            }
+        }
+        while (!queue.isEmpty()) {
+            int parent = queue.poll();
+            for (int child : children.getOrDefault(parent, List.of())) {
+                if (depths[child] < 0) {
+                    depths[child] = depths[parent] + 1;
+                    queue.add(child);
+                }
+            }
+        }
+        for (int i = 0; i < count; i++) {
+            if (depths[i] < 0) {
+                depths[i] = 0;
+            }
+        }
+        return depths;
+    }
+
+    private static int findHand(List<RawYsmModel.RawBone> bones, String... candidates) {
+        for (String candidate : candidates) {
+            for (int i = 0; i < bones.size(); i++) {
+                String name = bones.get(i).name;
+                if (name != null && name.toLowerCase(Locale.ROOT).equals(candidate)) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static Matrix4f computeRest(int index, List<RawYsmModel.RawBone> bones, int[] parents,
             Matrix4f[] matrices, byte[] state) {
         if (state[index] == 2) {
             return matrices[index];
         }
         if (state[index] == 1) {
-            // 父级成环：按根处理，避免无限递归
             return new Matrix4f();
         }
         state[index] = 1;
-        Matrix4f local = localOf(bones.get(index));
+        Matrix4f local = localOf(bones.get(index), null, 0);
         int parent = parents[index];
-        Matrix4f world;
-        if (parent < 0) {
-            world = local;
-        } else {
-            world = new Matrix4f(compute(parent, bones, parents, matrices, state)).mul(local);
-        }
+        Matrix4f world = parent < 0
+                ? local
+                : new Matrix4f(computeRest(parent, bones, parents, matrices, state)).mul(local);
         matrices[index] = world;
         state[index] = 2;
         return world;
     }
 
-    private static Matrix4f localOf(RawYsmModel.RawBone bone) {
+    /**
+     * 骨骼局部矩阵：{@code translate(pivot) · rotZ/rotY/rotX · scale · translate(-pivot)}；
+     * 动画位移在第一步减/加进去（与 SPM 的 {@code calculateBoneMatrixLinear} 同形）。
+     */
+    private static Matrix4f localOf(RawYsmModel.RawBone bone, float[] pose, int offset) {
         Matrix4f matrix = new Matrix4f();
-        float[] pivot = bone.pivot == null ? new float[3] : bone.pivot;
-        float[] rotation = bone.rotation == null ? new float[3] : bone.rotation;
-        matrix.translate(pivot[0] / 16.0F, pivot[1] / 16.0F, pivot[2] / 16.0F);
-        matrix.rotateZ(rotation[2]);
-        matrix.rotateY(rotation[1]);
-        matrix.rotateX(rotation[0]);
+        float[] pivot = bone.pivot;
+        float animX = pose == null ? 0.0F : pose[offset + 3];
+        float animY = pose == null ? 0.0F : pose[offset + 4];
+        float animZ = pose == null ? 0.0F : pose[offset + 5];
+        float rotX = (pose == null ? 0.0F : pose[offset]) + bone.rotation[0];
+        float rotY = (pose == null ? 0.0F : pose[offset + 1]) + bone.rotation[1];
+        float rotZ = (pose == null ? 0.0F : pose[offset + 2]) + bone.rotation[2];
+        float scaleX = pose == null ? 1.0F : pose[offset + 6];
+        float scaleY = pose == null ? 1.0F : pose[offset + 7];
+        float scaleZ = pose == null ? 1.0F : pose[offset + 8];
+        matrix.translate((pivot[0] - animX) / 16.0F, (pivot[1] + animY) / 16.0F, (pivot[2] + animZ) / 16.0F);
+        matrix.rotateZ(rotZ);
+        matrix.rotateY(rotY);
+        matrix.rotateX(rotX);
+        matrix.scale(scaleX, scaleY, scaleZ);
         matrix.translate(-pivot[0] / 16.0F, -pivot[1] / 16.0F, -pivot[2] / 16.0F);
         return matrix;
     }
@@ -148,15 +477,336 @@ public final class ModelRuntime {
         return bones.size();
     }
 
+    /**
+     * 手持物品的挂点：{@code 手骨骼矩阵 · translate(pivot) · 默认握持偏移}。
+     *
+     * <p>与 YSM 的 {@code RenderUtils.prepMatrixForLocator} + {@code applyAuthoredDefaultHandTransform}
+     * 同形；调用方把这个矩阵乘进实体姿态即可让物品跟手走。
+     */
+    public Matrix4f handItemMatrix(boolean rightHand) {
+        int index = rightHand ? rightHandBone : leftHandBone;
+        if (index < 0) {
+            return null;
+        }
+        Matrix4f matrix = new Matrix4f(frameValid ? frameMatrices[index] : restMatrices[index]);
+        float[] pivot = bones.get(index).pivot;
+        matrix.translate(pivot[0] / 16.0F, pivot[1] / 16.0F, pivot[2] / 16.0F);
+        matrix.translate(0.0F, -0.0625F, -0.1F);
+        matrix.rotateX((float) Math.toRadians(-90.0F));
+        return matrix;
+    }
+
     public void render(PoseStack.Pose pose, VertexConsumer buffer, int light) {
+        frameValid = false;
+        emit(pose, buffer, light, restMatrices, restNormals);
+    }
+
+    public void render(PoseStack.Pose pose, VertexConsumer buffer, int light,
+            AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
+        RawYsmModel.RawAnimation clip = pickClip(avatar, player);
+        if (clip == null) {
+            render(pose, buffer, light);
+            return;
+        }
+        int hurtTime = player == null ? 0 : player.hurtTime;
+        boolean restart = clip != lastClip;
+        if (ONE_SHOT.contains(clipName(clip)) && hurtTime > lastHurtTime) {
+            restart = true;
+        }
+        lastHurtTime = hurtTime;
+        if (restart) {
+            lastClip = clip;
+            lastClipStart = ageSeconds;
+        }
+        float time = clipTime(clip, ageSeconds);
+        java.util.Arrays.fill(frameState, (byte) 0);
+        for (int i = 0; i < bones.size(); i++) {
+            samplePose(clip, i, time, ageSeconds);
+        }
+        for (int i = 0; i < bones.size(); i++) {
+            computeFrame(i);
+            frameNormals[i] = normalOf(frameMatrices[i]);
+        }
+        frameValid = true;
+        int emitted = emit(pose, buffer, light, frameMatrices, frameNormals);
+        if (!logged) {
+            logged = true;
+            Matrix4f first = frameMatrices.length == 0 ? null : frameMatrices[0];
+            Debug.info("[SFH+] anim clip=" + clipName(clip) + " len=" + clip.length + " loop=" + clip.loopMode
+                    + " t=" + time + " bones=" + bones.size() + " emitted=" + emitted
+                    + " m0=" + (first == null ? "null" : first.m30() + "," + first.m31() + "," + first.m32()));
+        }
+    }
+
+    private Matrix4f computeFrame(int index) {
+        if (frameState[index] == 2) {
+            return frameMatrices[index];
+        }
+        if (frameState[index] == 1) {
+            return new Matrix4f();
+        }
+        frameState[index] = 1;
+        Matrix4f local = localOf(bones.get(index), poses, index * 9);
+        int parent = parents[index];
+        Matrix4f world = parent < 0 ? local : new Matrix4f(computeFrame(parent)).mul(local);
+        frameMatrices[index] = world;
+        frameState[index] = 2;
+        return world;
+    }
+
+    /** 采样三个通道，写入该骨骼的 9 个 float（弧度/像素/倍率）；字符串值按 Molang 求值。 */
+    private void samplePose(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
+        int offset = boneIndex * 9;
+        poses[offset] = 0.0F;
+        poses[offset + 1] = 0.0F;
+        poses[offset + 2] = 0.0F;
+        poses[offset + 3] = 0.0F;
+        poses[offset + 4] = 0.0F;
+        poses[offset + 5] = 0.0F;
+        poses[offset + 6] = 1.0F;
+        poses[offset + 7] = 1.0F;
+        poses[offset + 8] = 1.0F;
+        String boneName = bones.get(boneIndex).name;
+        if (boneName == null) {
+            return;
+        }
+        for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
+            if (!boneName.equals(animation.boneName)) {
+                continue;
+            }
+            float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
+            if (rotation != null) {
+                poses[offset] = (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                poses[offset + 1] = (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                poses[offset + 2] = (float) Math.toRadians(finite(rotation[2], 0.0F));
+            }
+            float[] position = sampleChannel(animation.position, time, lifeTime);
+            if (position != null) {
+                poses[offset + 3] = finite(position[0], 0.0F);
+                poses[offset + 4] = finite(position[1], 0.0F);
+                poses[offset + 5] = finite(position[2], 0.0F);
+            }
+            float[] scale = sampleChannel(animation.scale, time, lifeTime);
+            if (scale != null) {
+                poses[offset + 6] = finite(scale[0], 1.0F);
+                poses[offset + 7] = finite(scale[1], 1.0F);
+                poses[offset + 8] = finite(scale[2], 1.0F);
+            }
+            return;
+        }
+    }
+
+    /** Molang 的未知查询会算出 NaN；落到通道上时取中性值（旋转/位移 0，缩放 1）。 */
+    private static float finite(float value, float fallback) {
+        return Float.isFinite(value) ? value : fallback;
+    }
+
+    private static float[] sampleChannel(List<RawYsmModel.RawKeyframe> frames, float time, float lifeTime) {
+        if (frames == null || frames.isEmpty()) {
+            return null;
+        }
+        int last = frames.size() - 1;
+        if (time <= frames.get(0).timestamp) {
+            return valuesOf(frames.get(0).postData, time, lifeTime);
+        }
+        if (time >= frames.get(last).timestamp) {
+            return valuesOf(frames.get(last).postData, time, lifeTime);
+        }
+        for (int i = 0; i < last; i++) {
+            RawYsmModel.RawKeyframe current = frames.get(i);
+            RawYsmModel.RawKeyframe next = frames.get(i + 1);
+            if (time < current.timestamp || time > next.timestamp) {
+                continue;
+            }
+            float[] a = valuesOf(current.postData, time, lifeTime);
+            if (a == null) {
+                return null;
+            }
+            if (current.interpolationMode == RawYsmModel.RawKeyframe.INTERPOLATION_STEP) {
+                return a;
+            }
+            float[] b = valuesOf(next.postData, time, lifeTime);
+            if (b == null) {
+                return a;
+            }
+            float span = next.timestamp - current.timestamp;
+            float t = span <= 0.0F ? 0.0F : (time - current.timestamp) / span;
+            return new float[]{
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t};
+        }
+        return valuesOf(frames.get(last).postData, time, lifeTime);
+    }
+
+    private static float[] valuesOf(Object[] values, float time, float lifeTime) {
+        if (values == null || values.length < 3) {
+            return null;
+        }
+        float[] result = new float[3];
+        for (int i = 0; i < 3; i++) {
+            Object value = values[i];
+            if (value instanceof Number number) {
+                result[i] = number.floatValue();
+            } else if (value instanceof String text) {
+                result[i] = MolangExpression.of(text).eval(time, lifeTime);
+            } else {
+                return null;
+            }
+        }
+        return result;
+    }
+
+    private float clipTime(RawYsmModel.RawAnimation clip, float ageSeconds) {
+        float length = lengthOf(clip);
+        if (length <= 0.0F) {
+            return 0.0F;
+        }
+        float elapsed = Math.max(0.0F, ageSeconds - lastClipStart);
+        if (ONE_SHOT.contains(clipName(clip))) {
+            return Math.min(elapsed, length);
+        }
+        return elapsed % length;
+    }
+
+    private static float lengthOf(RawYsmModel.RawAnimation clip) {
+        float length = clip.length;
+        if (!Float.isFinite(length) || length <= 0.0F) {
+            length = maxKeyframeTime(clip);
+        }
+        return Float.isFinite(length) && length > 0.0F ? length : 0.0F;
+    }
+
+    private static float maxKeyframeTime(RawYsmModel.RawAnimation clip) {
+        float max = 0.0F;
+        for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
+            max = Math.max(max, lastTime(animation.rotation));
+            max = Math.max(max, lastTime(animation.position));
+            max = Math.max(max, lastTime(animation.scale));
+        }
+        return max;
+    }
+
+    private static float lastTime(List<RawYsmModel.RawKeyframe> frames) {
+        return frames == null || frames.isEmpty() ? 0.0F : frames.get(frames.size() - 1).timestamp;
+    }
+
+    private RawYsmModel.RawAnimation firstOf(String[] candidates) {
+        for (String name : candidates) {
+            RawYsmModel.RawAnimation clip = clips.get(name);
+            if (clip != null) {
+                return clip;
+            }
+        }
+        return null;
+    }
+
+    /** 状态表按 YSM 的 {@code AnimationRegister} 排序；缺失的动画退回 idle，再退回静止。 */
+    private RawYsmModel.RawAnimation pickClip(AvatarRenderState avatar, LocalPlayer player) {
+        if (avatar == null) {
+            return firstOf(IDLE);
+        }
+        RawYsmModel.RawAnimation clip;
+        if (player != null) {
+            if (player.isDeadOrDying()) {
+                return orIdle(firstOf(DEATH));
+            }
+            if (player.isAutoSpinAttack()) {
+                return orIdle(firstOf(RIPTIDE));
+            }
+            if (player.getPose() == Pose.SLEEPING) {
+                return orIdle(firstOf(SLEEP));
+            }
+            if (avatar.isPassenger) {
+                return orIdle(firstOf(RIDE));
+            }
+            if (player.isSwimming()) {
+                return orIdle(firstOf(SWIM));
+            }
+            boolean swimmingPose = player.getPose() == Pose.SWIMMING;
+            if (swimmingPose) {
+                clip = firstOf(avatar.walkAnimationSpeed > MIN_MOVING ? CLIMB : CLIMBING);
+                if (clip != null) {
+                    return clip;
+                }
+            }
+            if (player.onClimbable()) {
+                double vertical = player.getDeltaMovement().y;
+                clip = firstOf(vertical > 1.0E-4 ? LADDER_UP : vertical < -1.0E-4 ? LADDER_DOWN : LADDER_STILL);
+                if (clip != null) {
+                    return clip;
+                }
+            }
+            if (player.getAbilities().flying) {
+                return orIdle(firstOf(FLY));
+            }
+            if (player.isFallFlying()) {
+                return orIdle(firstOf(ELYTRA));
+            }
+            if (player.isInWater() && !player.onGround()) {
+                return orIdle(firstOf(SWIM_STAND));
+            }
+            if (player.hurtTime > 0) {
+                RawYsmModel.RawAnimation attacked = firstOf(ATTACKED);
+                if (attacked != null) {
+                    return attacked;
+                }
+            }
+            if (!player.onGround() && !player.isInWater()) {
+                return orIdle(firstOf(JUMP));
+            }
+            if (player.onGround() && avatar.isCrouching) {
+                return orIdle(firstOf(avatar.walkAnimationSpeed > MIN_MOVING ? SNEAK : SNEAK_STILL));
+            }
+            if (avatar.isUsingItem && avatar.walkAnimationSpeed <= MIN_MOVING) {
+                return orIdle(firstOf(avatar.useItemHand == InteractionHand.MAIN_HAND ? USE_MAIN : USE_OFF));
+            }
+            if (player.onGround() && player.isSprinting()) {
+                return orIdle(firstOf(RUN));
+            }
+            if (player.onGround() && avatar.walkAnimationSpeed > MIN_MOVING) {
+                return orIdle(firstOf(WALK));
+            }
+        }
+        if (avatar.isUsingItem) {
+            return orIdle(firstOf(avatar.useItemHand == InteractionHand.MAIN_HAND ? USE_MAIN : USE_OFF));
+        }
+        if (avatar.isFallFlying) {
+            return orIdle(firstOf(ELYTRA));
+        }
+        if (avatar.isVisuallySwimming) {
+            return orIdle(firstOf(SWIM));
+        }
+        if (avatar.isPassenger) {
+            return orIdle(firstOf(RIDE));
+        }
+        if (avatar.isCrouching) {
+            return orIdle(firstOf(avatar.walkAnimationSpeed > MIN_MOVING ? SNEAK : SNEAK_STILL));
+        }
+        if (avatar.walkAnimationSpeed > MIN_MOVING) {
+            return orIdle(firstOf(WALK));
+        }
+        return firstOf(IDLE);
+    }
+
+    private RawYsmModel.RawAnimation orIdle(RawYsmModel.RawAnimation clip) {
+        return clip != null ? clip : firstOf(IDLE);
+    }
+
+    private int emit(PoseStack.Pose pose, VertexConsumer buffer, int light,
+            Matrix4f[] matrices, Matrix3f[] normals) {
+        int emitted = 0;
         Vector3f position = new Vector3f();
         Vector3f normal = new Vector3f();
         for (int i = 0; i < bones.size(); i++) {
-            Matrix4f matrix = boneMatrices[i];
+            Matrix4f matrix = matrices[i];
             if (matrix == null) {
                 continue;
             }
-            Matrix3f normalMatrix = normalMatrices[i];
+            if (hidden[i]) {
+                continue;
+            }
+            Matrix3f normalMatrix = normals[i];
             for (RawYsmModel.RawCube cube : bones.get(i).cubes) {
                 if (cube.faces == null) {
                     continue;
@@ -180,9 +830,11 @@ public final class ModelRuntime {
                                 .setOverlay(OverlayTexture.NO_OVERLAY)
                                 .setLight(light)
                                 .setNormal(pose, normal.x, normal.y, normal.z);
+                        emitted++;
                     }
                 }
             }
         }
+        return emitted;
     }
 }

@@ -41,6 +41,8 @@
   "config.index.custom-model": "Custom player model",
   "custom-model.enable": "Local model replacement",
   "custom-model.enable.tooltips": "Replace only your own appearance; models live in config/slimefunhelper-plus/models",
+  "custom-model.show-props": "Show parts not used by animations",
+  "custom-model.show-props.tooltips": "Stage props and extra actors have no base animation and are hidden by default; turn on to show them",
   "widget.click-gui.module-name.Render.CustomModel": "Custom Model",
   "widget.click-gui.module-name.Render.CustomModel.tooltips": "Load a YSM model and replace the local player's appearance (client-side only)"
 }
