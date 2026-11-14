@@ -109,6 +109,21 @@ public final class ModelRuntime {
             "pre_hold", "post_hold", "pre_swing", "post_swing", "pre_use", "post_use",
             "parallel");
 
+    /**
+     * YSM 的定位组名（{@code PlayerLocator:13-25}）：按「去掉结尾数字后全等」匹配骨骼名，
+     * 一组可以有多根骨（{@code GeoModelState#visitLocatorGroup} 逐根回调）。
+     *
+     * <p>只列渲染层真正会挂东西的几个：装备/鞘翅/鹦鹉/头顶物/背包。手部两组走
+     * {@link #RIGHT_HAND_CHAIN} 的候选链，不在这里。
+     */
+    private static final String[] LOCATOR_NAMES = {
+            "Head", "ElytraLocator", "BackpackLocator",
+            "LeftShoulderLocator", "RightShoulderLocator",
+            "LeftWaistLocator", "RightWaistLocator",
+            "BladeLocator", "SheathLocator",
+            "PistolLocator", "RifleLocator"
+    };
+
     /** 参与「基础动作」的动画名：被这些动画驱动的骨骼不算舞台道具。 */
     private static final Set<String> MAIN_STATES = Set.of(
             "idle", "walk", "run", "sneak", "sneaking", "fly", "elytra_fly", "swim", "swim_stand",
@@ -179,6 +194,8 @@ public final class ModelRuntime {
     private final List<ExtraOption> extraOptions;
     private final String defaultExtraKey;
     private final Identifier texture;
+    /** 定位组名 → 该组的骨骼下标（构建期算好，渲染期只查表）。 */
+    private final Map<String, int[]> locatorGroups;
     private final int rightHandBone;
     private final int leftHandBone;
     private RawYsmModel.RawAnimation lastClip;
@@ -329,7 +346,7 @@ public final class ModelRuntime {
             Map<String, RawYsmModel.RawAnimation> clips, int[] parents, Matrix4f[] restMatrices,
             Matrix3f[] restNormals, boolean[] hidden, int[] propRoot, Map<Integer, List<Integer>> children,
             Map<String, RawYsmModel.RawAnimation> extraClips, List<ExtraOption> extraOptions, String defaultExtraKey,
-            Identifier texture, int rightHandBone, int leftHandBone,
+            Identifier texture, int rightHandBone, int leftHandBone, Map<String, int[]> locatorGroups,
             Map<String, RawYsmModel.RawAnimation> defaultClips, boolean[] glow) {
         this.bones = bones;
         this.boneIndex = boneIndex;
@@ -368,6 +385,7 @@ public final class ModelRuntime {
         this.texture = texture;
         this.rightHandBone = rightHandBone;
         this.leftHandBone = leftHandBone;
+        this.locatorGroups = locatorGroups;
         this.glowMask = glow;
     }
 
@@ -586,7 +604,8 @@ public final class ModelRuntime {
                 + " clips=" + clips.size() + " hidden=" + hiddenCount + " extras=" + extraOptions.size()
                 + " hands=" + rightHand + "/" + leftHand + " glow=" + glowCount);
         ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
-                children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand, defaultClips, glow);
+                children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand,
+                collectLocatorGroups(bones), defaultClips, glow);
         runtime.soundCursors = ModelSoundCursorTable.build(ModelSound.build(model));
         runtime.controllers = parseControllers(model);
         runtime.controllerBuckets = bucketControllers(runtime.controllers);
@@ -966,6 +985,45 @@ public final class ModelRuntime {
             }
         }
         return bones;
+    }
+
+    /**
+     * 按 YSM 的定位组规则收集骨骼下标：去掉结尾数字后与组名全等（{@code GeoLocatorType#getByBoneName}）。
+     *
+     * <p>一组可以有多根骨 —— {@code GeoModelState#visitLocatorGroup} 对组内每根骨各回调一次，
+     * 所以 {@code Head1}/{@code Head2} 会各挂一份头顶物。没有该组的模型不进表。
+     */
+    private static Map<String, int[]> collectLocatorGroups(List<RawYsmModel.RawBone> bones) {
+        Map<String, List<Integer>> groups = new HashMap<>();
+        for (int i = 0; i < bones.size(); i++) {
+            String name = bones.get(i).name;
+            if (name == null || name.isEmpty()) {
+                continue;
+            }
+            int end = name.length();
+            while (end > 0 && Character.isDigit(name.charAt(end - 1))) {
+                end--;
+            }
+            String stem = name.substring(0, end);
+            for (String locator : LOCATOR_NAMES) {
+                if (locator.equalsIgnoreCase(stem)) {
+                    groups.computeIfAbsent(locator, key -> new ArrayList<>()).add(i);
+                    break;
+                }
+            }
+        }
+        if (groups.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, int[]> result = new HashMap<>();
+        for (Map.Entry<String, List<Integer>> entry : groups.entrySet()) {
+            int[] indices = new int[entry.getValue().size()];
+            for (int i = 0; i < indices.length; i++) {
+                indices[i] = entry.getValue().get(i);
+            }
+            result.put(entry.getKey(), indices);
+        }
+        return result;
     }
 
     /**
@@ -2073,6 +2131,30 @@ public final class ModelRuntime {
         matrix.translate(0.0F, -0.0625F, -0.1F);
         matrix.rotateX((float) Math.toRadians(-90.0F));
         return matrix;
+    }
+
+    /**
+     * 定位组里第 {@code index} 根骨的挂点矩阵：{@code 骨骼矩阵 · translate(pivot)}。
+     *
+     * <p>与 YSM {@code GeoModelState#visitLocatorGroup:154-162} 同形 —— 先乘骨骼的世界矩阵，
+     * 再平移到该骨的 pivot（模型空间单位是 1/16 格）。组不存在或下标越界返回 {@code null}。
+     */
+    public Matrix4f locatorMatrix(String locator, int index) {
+        int[] group = locatorGroups.get(locator);
+        if (group == null || index < 0 || index >= group.length) {
+            return null;
+        }
+        int bone = group[index];
+        Matrix4f matrix = new Matrix4f(frameValid ? frameMatrices[bone] : restMatrices[bone]);
+        float[] pivot = bones.get(bone).pivot;
+        matrix.translate(pivot[0] / 16.0F, pivot[1] / 16.0F, pivot[2] / 16.0F);
+        return matrix;
+    }
+
+    /** 定位组的骨骼数量（YSM 的 {@code locatorGroupSize}）；没有该组返回 0。 */
+    public int locatorGroupSize(String locator) {
+        int[] group = locatorGroups.get(locator);
+        return group == null ? 0 : group.length;
     }
 
     /** 骨骼名 → 下标；找不到返回 -1。 */
