@@ -21,7 +21,8 @@
 		"slimefunhelperplus.mixins.json",
 		"slimefunhelperplus.conflux.mixins.json",
 		"slimefunhelperplus.render.mixins.json",
-		"slimefunhelperplus.carbon.mixins.json"
+		"slimefunhelperplus.carbon.mixins.json",
+		"slimefunhelperplus.model.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.19.5",

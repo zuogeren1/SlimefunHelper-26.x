@@ -37,5 +37,10 @@
   "carbon-render.enable": "物品模型实例化",
   "carbon-render.enable.tooltips": "缓存重复物品的模型几何并按实例合并绘制；关闭后完全交还原版",
   "widget.click-gui.module-name.Render.CarbonRender": "碳 · 物品实例化",
-  "widget.click-gui.module-name.Render.CarbonRender.tooltips": "把重复物品的模型几何缓存到 GPU、按实例合并绘制（以掉落物为主）"
+  "widget.click-gui.module-name.Render.CarbonRender.tooltips": "把重复物品的模型几何缓存到 GPU、按实例合并绘制（以掉落物为主）",
+  "config.index.custom-model": "自定义玩家模型",
+  "custom-model.enable": "本地模型替换",
+  "custom-model.enable.tooltips": "只替换自己看到的外观；模型放在 config/slimefunhelper-plus/models",
+  "widget.click-gui.module-name.Render.CustomModel": "自定义模型",
+  "widget.click-gui.module-name.Render.CustomModel.tooltips": "加载 YSM 模型并替换本地玩家外观（仅自己可见）"
 }
