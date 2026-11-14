@@ -1495,9 +1495,12 @@ public final class ModelRuntime {
     /**
      * 覆盖层：写到的通道**赋值**而不是相加，没写到的骨骼完全不动。
      *
-     * <p>手部条件动画（{@code hold_*} / {@code swing:*} / {@code use_*:*}）是绝对姿态 —— YSM 里跨控制器是
-     * {@code set} 覆盖（{@code AnimationProcessor#updateModel} → {@code AnimationVec3#applyRotation} 的
-     * {@code dst.set(this)}），只有单个控制器内部的多条动画才按权重 {@code fma}。用相加会双倍变形。
+     * <p>YSM 里跨控制器一律是 {@code set} 覆盖：{@code AnimationProcessor#updateModel} 对每个控制器的
+     * {@code pollRotationPoint} 结果调 {@code AnimationVec3#applyRotation}，运行中的动画
+     * {@code endingTransitionPercentProgress == 0} 走 {@code dst.set(this)}；只有单个控制器内部的多条动画
+     * 才按 {@code blend_weight} 做 {@code fma}。{@code PlayerControllerCollection} 里只有 {@code parallel}
+     * 传了 {@code blendRotation}，{@code pre_parallel}、{@code main} 与手部三层都是覆盖。
+     * 用相加会让同一通道被两层各写一次时叠成两倍变形。
      */
     private void sampleOverride(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
         String boneName = bones.get(boneIndex).name;
@@ -2153,7 +2156,7 @@ public final class ModelRuntime {
         runTimeline(clip, time, ageSeconds, "main");
         advanceSound("main", clip, time);
         for (int i = 0; i < bones.size(); i++) {
-            samplePoseOver(clip, i, time, ageSeconds);
+            sampleOverride(clip, i, time, ageSeconds);
         }
         // 服装变体是静态预设（只有缩放/位移），动作是循环播放；两层叠加，动作最后生效
         if (activeVariant != null) {
@@ -2277,7 +2280,7 @@ public final class ModelRuntime {
         lastFrameAge = ageSeconds;
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
-            samplePoseOver(clip, i, time, ageSeconds);
+            sampleOverride(clip, i, time, ageSeconds);
         }
         settleDecay(ageSeconds);
         for (int i = 0; i < bones.size(); i++) {
@@ -2370,46 +2373,6 @@ public final class ModelRuntime {
                 poses[offset + channel] = decayPoses[offset + channel]
                         + (neutral - decayPoses[offset + channel]) * t;
             }
-        }
-    }
-
-    /**
-     * 把片段里该骨骼的通道叠到当前姿态上，**不复位**。
-     *
-     * <p>分层顺序：复位 → {@code pre_parallel0..7}（默认层）→ 主状态片段。旋转与位移跨层相加（与 YSM 的
-     * {@code BedrockAnimationController#pollRotationPoint} 的 {@code fma} 一致），缩放则整体替换（见默认层那段注释）。
-     * 静止姿态的 rest 旋转只在 {@link #localOf} 里加一次，这里累加的一直是动画空间的偏移量。
-     */
-    private void samplePoseOver(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
-        int offset = boneIndex * 9;
-        String boneName = bones.get(boneIndex).name;
-        if (boneName == null) {
-            return;
-        }
-        for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
-            if (!boneName.equals(animation.boneName)) {
-                continue;
-            }
-            float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
-            if (rotation != null) {
-                poses[offset] += (float) -Math.toRadians(finite(rotation[0], 0.0F));
-                poses[offset + 1] += (float) -Math.toRadians(finite(rotation[1], 0.0F));
-                poses[offset + 2] += (float) Math.toRadians(finite(rotation[2], 0.0F));
-            }
-            float[] position = sampleChannel(animation.position, time, lifeTime);
-            if (position != null) {
-                poses[offset + 3] += finite(position[0], 0.0F);
-                poses[offset + 4] += finite(position[1], 0.0F);
-                poses[offset + 5] += finite(position[2], 0.0F);
-            }
-            float[] scale = sampleChannel(animation.scale, time, lifeTime);
-            if (scale != null) {
-                poses[offset + 6] = finite(scale[0], 1.0F);
-                poses[offset + 7] = finite(scale[1], 1.0F);
-                poses[offset + 8] = finite(scale[2], 1.0F);
-            }
-            markDriven(boneIndex);
-            return;
         }
     }
 
