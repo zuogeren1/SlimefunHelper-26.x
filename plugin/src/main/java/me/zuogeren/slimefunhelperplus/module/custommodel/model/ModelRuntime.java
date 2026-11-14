@@ -21,6 +21,7 @@ import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.Pose;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
@@ -66,6 +67,9 @@ public final class ModelRuntime {
     private static final String[] LADDER_STILL = {"ladder_stillness"};
     private static final String[] USE_MAIN = {"use_mainhand"};
     private static final String[] USE_OFF = {"use_offhand"};
+    /** 挥动：主手前缀是 {@code swing}（没有下划线），副手才是 {@code swing_offhand}（YSM ConditionalSwing）。 */
+    private static final String[] SWING_MAIN = {"swing_hand", "swing"};
+    private static final String[] SWING_OFF = {"swing_offhand"};
     private static final String[] JUMP = {"jump"};
     private static final String[] FP_ARM = {"fp_arm", "arm", "idle", "empty"};
 
@@ -76,7 +80,8 @@ public final class ModelRuntime {
     private static final Set<String> MAIN_STATES = Set.of(
             "idle", "walk", "run", "sneak", "sneaking", "fly", "elytra_fly", "swim", "swim_stand",
             "ride", "boat", "jump", "attacked", "death", "riptide", "sleep", "climb", "climbing",
-            "ladder_up", "ladder_down", "ladder_stillness", "use_mainhand", "use_offhand", "sit");
+            "ladder_up", "ladder_down", "ladder_stillness", "use_mainhand", "use_offhand",
+            "swing_hand", "swing_offhand", "sit");
 
     private static final float MIN_MOVING = 0.05F;
     /** 道具骨骼的最小尺寸（格）：比这个小的大多是耳饰、表情、衣角这类身体附件。 */
@@ -111,6 +116,21 @@ public final class ModelRuntime {
     private RawYsmModel.RawAnimation lastClip;
     private float lastClipStart;
     private float lastHurtTime;
+    /** 三条手部层的重播起点：YSM 靠显式信号从头播，而不是靠「片段名变了」。 */
+    private float handStartMain = Float.NaN;
+    private float handStartOff = Float.NaN;
+    private float swingStart = Float.NaN;
+    private float useStart = Float.NaN;
+    /** 上一次看到的手持物 / 挥动 tick / 使用 tick，用来认出「换物品」「新一次挥动」「新一次使用」。 */
+    private ItemStack lastHoldMain = ItemStack.EMPTY;
+    private ItemStack lastHoldOff = ItemStack.EMPTY;
+    private float lastSwingTick = -1.0F;
+    private float lastUseTick = -1.0F;
+    private boolean swinging;
+    private boolean using;
+    /** 已锁存的挥动/使用片段：起手时解析一次，播完才释放。 */
+    private RawYsmModel.RawAnimation swingClip;
+    private RawYsmModel.RawAnimation useClip;
     private RawYsmModel.RawAnimation activeVariant;
     private String activeVariantKey = "";
     private RawYsmModel.RawAnimation activeExtra;
@@ -219,7 +239,7 @@ public final class ModelRuntime {
         Set<String> mainAnimated = new HashSet<>();
         if (model.mainEntity != null && model.mainEntity.animationFiles != null) {
             for (RawYsmModel.RawAnimationFile file : model.mainEntity.animationFiles.values()) {
-                if (file == null || file.animType != 1 || file.animations == null) {
+                if (file == null || !isBodyAnimationFile(file.animType) || file.animations == null) {
                     continue;
                 }
                 for (Map.Entry<String, RawYsmModel.RawAnimation> entry : file.animations.entrySet()) {
@@ -229,8 +249,10 @@ public final class ModelRuntime {
                         continue;
                     }
                     animation.name = name;
-                    clips.putIfAbsent(name, animation);
-                    boolean mainState = MAIN_STATES.contains(name);
+                    // 后到的覆盖先到的：YSM 把 main/arm/extra 塞进同一个命名空间，同名时以加载顺序靠后的为准
+                    clips.put(name, animation);
+                    // 道具启发式只认主动画文件：手部动画（arm）动的是身体骨骼，算进来会把手臂当道具藏掉
+                    boolean mainState = file.animType == 1 && MAIN_STATES.contains(name);
                     for (RawYsmModel.RawBoneAnimation boneAnimation : animation.boneAnimations) {
                         if (boneAnimation.boneName == null) {
                             continue;
@@ -572,6 +594,17 @@ public final class ModelRuntime {
             end--;
         }
         return end == 4 && name.regionMatches(true, 0, "head", 0, 4);
+    }
+
+    /**
+     * 参与「身体动画」的动画文件类型。YSM 把 main(1) / arm(2) / extra(3) / 控制器等放进同一个命名空间，
+     * 手部条件动画（{@code hold_*} / {@code swing:*} / {@code use_*:*}）全在 arm 文件里，
+     * 不放开这一层就永远选不到它们。排除 5（箭矢）与 11（第一人称手臂，走独立 runtime）。
+     */
+    private static boolean isBodyAnimationFile(int animType) {
+        return animType == 1 || animType == 2 || animType == 3 || animType == 4
+                || animType == 6 || animType == 7 || animType == 8 || animType == 9
+                || animType == 10 || animType == 12 || animType == 13;
     }
 
     private static boolean isBodyName(String name) {
@@ -950,6 +983,181 @@ public final class ModelRuntime {
         private float time = Float.NaN;
     }
 
+    /**
+     * 覆盖层：写到的通道**赋值**而不是相加，没写到的骨骼完全不动。
+     *
+     * <p>手部条件动画（{@code hold_*} / {@code swing:*} / {@code use_*:*}）是绝对姿态 —— YSM 里跨控制器是
+     * {@code set} 覆盖（{@code AnimationProcessor#updateModel} → {@code AnimationVec3#applyRotation} 的
+     * {@code dst.set(this)}），只有单个控制器内部的多条动画才按权重 {@code fma}。用相加会双倍变形。
+     */
+    private void sampleOverride(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
+        String boneName = bones.get(boneIndex).name;
+        if (boneName == null) {
+            return;
+        }
+        for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
+            if (!boneName.equals(animation.boneName)) {
+                continue;
+            }
+            int offset = boneIndex * 9;
+            float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
+            if (rotation != null) {
+                poses[offset] = (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                poses[offset + 1] = (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                poses[offset + 2] = (float) Math.toRadians(finite(rotation[2], 0.0F));
+            }
+            float[] position = sampleChannel(animation.position, time, lifeTime);
+            if (position != null) {
+                poses[offset + 3] = finite(position[0], 0.0F);
+                poses[offset + 4] = finite(position[1], 0.0F);
+                poses[offset + 5] = finite(position[2], 0.0F);
+            }
+            float[] scale = sampleChannel(animation.scale, time, lifeTime);
+            if (scale != null) {
+                poses[offset + 6] = finite(scale[0], 1.0F);
+                poses[offset + 7] = finite(scale[1], 1.0F);
+                poses[offset + 8] = finite(scale[2], 1.0F);
+            }
+            return;
+        }
+    }
+
+    /**
+     * 手部条件动画层：按 YSM 的控制器顺序 {@code hold_offhand → hold_mainhand → swing → use} 依次覆盖。
+     *
+     * <p>片段名由 {@link ItemClassifier#candidates} 给出的后缀候选拼成（{@code hold_mainhand:sword}、
+     * {@code swing$minecraft:mace} 这类），取第一个存在的。挥动与使用是单次播放，持有是循环。
+     */
+    private void sampleHandLayers(AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
+        if (player == null) {
+            return;
+        }
+        // 换物品 → 持有动画从头播一次（YSM 的 MainhandPredicate/OffhandPredicate#indicateReload）
+        ItemStack main = player.getMainHandItem();
+        if (!ItemStack.matches(main, lastHoldMain)) {
+            lastHoldMain = main.copy();
+            handStartMain = ageSeconds;
+        }
+        ItemStack off = player.getOffhandItem();
+        if (!ItemStack.matches(off, lastHoldOff)) {
+            lastHoldOff = off.copy();
+            handStartOff = ageSeconds;
+        }
+        applyHandLayer(player, InteractionHand.OFF_HAND, "hold_offhand", ageSeconds, handStartOff);
+        applyHandLayer(player, InteractionHand.MAIN_HAND, "hold_mainhand", ageSeconds, handStartMain);
+
+        // 挥动与使用是「起手时解析一次、播完才释放」：Wiki 明确说挥动动画
+        // 「即使玩家停止挥动也不会中断，直至播放完毕」—— 边播边跟着 swinging 走会把收尾那段切掉，
+        // 重锤这类长尾动画就会在攻击动作结束时直接弹回待机。
+        boolean swingingNow = isSwinging(avatar, player);
+        if (swingingNow) {
+            InteractionHand hand = swingHand(avatar, player);
+            float swingTick = swingProgress(avatar, player);
+            // swingTime 每 tick 递增，只有回到 0 或变小才是新的一次（YSM 的 SwingPredicate:52-56）
+            if (!swinging || swingTick < lastSwingTick) {
+                boolean offHandSide = hand == InteractionHand.OFF_HAND;
+                // 主手分类前缀是 swing（无下划线），副手是 swing_offhand；都对不上就退到 swing_hand
+                swingClip = resolveHandClip(player, hand, offHandSide ? "swing_offhand" : "swing",
+                        offHandSide ? "swing_offhand" : "swing_hand");
+                swingStart = ageSeconds;
+            }
+            swinging = true;
+            lastSwingTick = swingTick;
+        } else {
+            swinging = false;
+            lastSwingTick = -1.0F;
+        }
+        swingClip = playLatched(swingClip, swingStart, ageSeconds);
+
+        boolean usingNow = avatar != null && avatar.isUsingItem;
+        if (usingNow) {
+            InteractionHand hand = avatar.useItemHand;
+            float useTick = avatar.ticksUsingItem;
+            if (!using || useTick < lastUseTick) {
+                boolean offHandSide = hand == InteractionHand.OFF_HAND;
+                useClip = resolveHandClip(player, hand, offHandSide ? "use_offhand" : "use_mainhand",
+                        offHandSide ? "use_offhand" : "use_mainhand");
+                useStart = ageSeconds;
+            }
+            using = true;
+            lastUseTick = useTick;
+        } else {
+            using = false;
+            lastUseTick = -1.0F;
+        }
+        // 使用动画是循环播放（YSM UsePredicate 用 LoopType.LOOP），和挥动的单次播放不同
+        if (useClip != null) {
+            float length = lengthOf(useClip);
+            float elapsed = Float.isFinite(useStart) ? Math.max(0.0F, ageSeconds - useStart) : 0.0F;
+            float time = length <= 0.0F ? 0.0F : elapsed % length;
+            runTimeline(useClip, time, ageSeconds);
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverride(useClip, i, time, ageSeconds);
+            }
+        }
+    }
+
+    /**
+     * 播一个「锁存」的手部片段：从 {@code start} 起单次播放，播完返回 {@code null} 表示可以释放。
+     *
+     * <p>时间用 {@code min(elapsed, length)} 而不是取模 —— 取模是循环，收尾帧永远播不到。
+     */
+    private RawYsmModel.RawAnimation playLatched(RawYsmModel.RawAnimation clip, float start, float ageSeconds) {
+        if (clip == null) {
+            return null;
+        }
+        float length = lengthOf(clip);
+        float elapsed = Float.isFinite(start) ? Math.max(0.0F, ageSeconds - start) : 0.0F;
+        if (length > 0.0F && elapsed >= length) {
+            return null;
+        }
+        float time = length <= 0.0F ? 0.0F : elapsed;
+        runTimeline(clip, time, ageSeconds);
+        for (int i = 0; i < bones.size(); i++) {
+            sampleOverride(clip, i, time, ageSeconds);
+        }
+        return clip;
+    }
+
+    /**
+     * 持有层：从 {@code start} 起单次播放，播完**停在最后一帧**并一直保持 —— 换物品时会重置起点，
+     * 于是切换武器时重播一次（YSM 的 {@code indicateReload}）。和挥动不同，它不释放。
+     */
+    private void applyHandLayer(LocalPlayer player, InteractionHand hand, String prefix, float ageSeconds,
+            float start) {
+        RawYsmModel.RawAnimation clip = resolveHandClip(player, hand, prefix, null);
+        if (clip == null) {
+            return;
+        }
+        float length = lengthOf(clip);
+        float elapsed = Float.isFinite(start) ? Math.max(0.0F, ageSeconds - start) : 0.0F;
+        float time = length <= 0.0F ? 0.0F : Math.min(elapsed, length);
+        runTimeline(clip, time, ageSeconds);
+        for (int i = 0; i < bones.size(); i++) {
+            sampleOverride(clip, i, time, ageSeconds);
+        }
+    }
+
+    /** 按「前缀 + 分类后缀」找一个手部片段；找不到返回 {@code null}（保持主动画姿态）。 */
+    private RawYsmModel.RawAnimation resolveHandClip(LocalPlayer player, InteractionHand hand, String prefix,
+            String fallback) {
+        for (String suffix : ItemClassifier.candidates(player, hand)) {
+            RawYsmModel.RawAnimation clip = clips.get(prefix + suffix);
+            if (clip != null && clip.boneAnimations != null) {
+                return clip;
+            }
+        }
+        // 分类对不上时的兜底：YSM 的 SwingPredicate/UsePredicate 都会退到不带分类的名字，
+        // 所以拿镐子挖矿这类「模型没有专属动作」的情况仍然有动作可播。持有层没有兜底（源码返回 STOP）。
+        if (fallback != null) {
+            RawYsmModel.RawAnimation clip = clips.get(fallback);
+            if (clip != null && clip.boneAnimations != null) {
+                return clip;
+            }
+        }
+        return null;
+    }
+
     /** 叠加层只动它写到的通道：旋转/位移相加，缩放整体替换；没写到的通道保持基础姿态。 */
     private void sampleOverlay(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
         String boneName = bones.get(boneIndex).name;
@@ -1166,6 +1374,10 @@ public final class ModelRuntime {
                 sampleOverlay(overlayClip, i, overlayTime, ageSeconds);
             }
         }
+        // 手部条件动画：YSM 的控制器顺序是 pre_hold → hold_offhand → hold_mainhand → pre_swing → swing
+        // → pre_use → use，全部排在主动画之后、parallel 之前，且是**覆盖**（绝对姿态）而不是相加。
+        // 主副手各一层、互不覆盖（不同手臂），万一同骨骼则 mainhand 赢（顺序在后）。
+        sampleHandLayers(avatar, player, ageSeconds);
         // parallel 槽在 YSM 里排在 main 之后，所以它既能把通道加到主姿态上，也能在缩放上盖掉前面几层
         sampleLayers(parallelBase, ageSeconds);
         // 头部朝向：YSM 在动画求值之后把视线角度加到 Head 组骨骼上（CustomHumanoidEntity#codeAnimation），
@@ -1411,6 +1623,36 @@ public final class ModelRuntime {
         return frames == null || frames.isEmpty() ? 0.0F : frames.get(frames.size() - 1).timestamp;
     }
 
+    /**
+     * 是否正在挥动。26.3 把实体上的 {@code swinging} 收进了 {@code ArmedEntityRenderState.currentSwing}
+     * （{@code LivingEntity.SwingDescription}），26.2 及以前仍是实体字段。
+     */
+    private static boolean isSwinging(AvatarRenderState avatar, LocalPlayer player) {
+        //#if MC >= 260300
+        //$$ return avatar != null && avatar.currentSwing != null;
+        //#else
+        return player != null && player.swinging;
+        //#endif
+    }
+
+    /** 正在挥动的那只手；26.3 从 {@code currentSwing.hand()} 取，之前从实体字段取。 */
+    private static InteractionHand swingHand(AvatarRenderState avatar, LocalPlayer player) {
+        //#if MC >= 260300
+        //$$ return avatar != null && avatar.currentSwing != null ? avatar.currentSwing.hand() : InteractionHand.MAIN_HAND;
+        //#else
+        return player != null ? player.swingingArm : InteractionHand.MAIN_HAND;
+        //#endif
+    }
+
+    /** 挥动进度（tick）。26.3 只有 {@code currentSwing.durationTicks()}，26.2 及以前是实体字段。 */
+    private static float swingProgress(AvatarRenderState avatar, LocalPlayer player) {
+        //#if MC >= 260300
+        //$$ return avatar == null || avatar.currentSwing == null ? 0.0F : avatar.currentSwing.durationTicks();
+        //#else
+        return player == null ? 0.0F : player.swingTime;
+        //#endif
+    }
+
     private RawYsmModel.RawAnimation firstOf(String[] candidates) {
         for (String name : candidates) {
             RawYsmModel.RawAnimation clip = clips.get(name);
@@ -1478,6 +1720,16 @@ public final class ModelRuntime {
             if (player.onGround() && avatar.isCrouching) {
                 return orIdle(firstOf(avatar.walkAnimationSpeed > MIN_MOVING ? SNEAK : SNEAK_STILL));
             }
+            // 挥动优先于使用（YSM 控制器顺序 pre_swing → swing → pre_use → use）。
+            // 挥动/使用的「武器专属」版本由手部层单独覆盖（只看手臂骨骼），主动画仍走走路/待机，
+            // 这样挖掘或攻击时腿照样动。只有模型自己真的提供了 swing_hand / use_* 时才换主体态。
+            if (isSwinging(avatar, player)) {
+                RawYsmModel.RawAnimation swing = firstOf(
+                        swingHand(avatar, player) == InteractionHand.OFF_HAND ? SWING_OFF : SWING_MAIN);
+                if (swing != null) {
+                    return swing;
+                }
+            }
             if (avatar.isUsingItem && avatar.walkAnimationSpeed <= MIN_MOVING) {
                 return orIdle(firstOf(avatar.useItemHand == InteractionHand.MAIN_HAND ? USE_MAIN : USE_OFF));
             }
@@ -1486,6 +1738,13 @@ public final class ModelRuntime {
             }
             if (player.onGround() && avatar.walkAnimationSpeed > MIN_MOVING) {
                 return orIdle(firstOf(WALK));
+            }
+        }
+        if (isSwinging(avatar, player)) {
+            RawYsmModel.RawAnimation swing = firstOf(
+                    swingHand(avatar, player) == InteractionHand.OFF_HAND ? SWING_OFF : SWING_MAIN);
+            if (swing != null) {
+                return swing;
             }
         }
         if (avatar.isUsingItem) {
