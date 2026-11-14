@@ -86,20 +86,19 @@ public final class ModelController {
     }
 
     /**
-     * 由代码侧直接驱动的槽：主体态（{@code main} 与它的 pre/post）和手部三层
-     * （{@code hold_*} / {@code swing} / {@code use}）。
+     * 由代码侧直接驱动的槽：主体态 {@code main} 与手部三层 {@code hold_*} / {@code swing} / {@code use}。
      *
-     * <p>YSM 里这些槽挂的是 {@code PlayerMainPredicate} / {@code MainhandPredicate} /
+     * <p>YSM 给这几个槽注册的是 {@code PlayerMainPredicate} / {@code MainhandPredicate} /
      * {@code OffhandPredicate} / {@code SwingPredicate} / {@code UsePredicate} 这类**代码控制器**，
-     * 我们已经按 {@link ItemClassifier} 的优先级在 {@code ModelRuntime} 里实现了同一套判定；
-     * 模型若把默认状态机整份抄进 {@code controller.json}（例如把 {@code post_hold} 写成
-     * {@code hold_mainhand:axe …} 那串），再求值一次等于把同一段动画叠两遍。
+     * 我们已经按 {@link ItemClassifier} 的优先级在 {@code ModelRuntime} 里实现了同一套判定。
+     * 模型若把默认状态机整份抄进 {@code controller.json}，再求值一次等于把同一段动画叠两遍。
+     *
+     * <p>{@code pre_*} / {@code post_*} 八个槽不在这里：YSM 用 {@code multi(...)} + {@code EmptyPredicate}
+     * 注册它们（{@code PlayerControllerCollection:39-60}），没有代码侧对应物，纯靠模型自己的状态机驱动，
+     * 丢掉就等于这些槽永远不播。
      */
     private static final Set<String> CODE_SLOTS = Set.of(
-            "main", "pre_main", "post_main",
-            "hold_mainhand", "hold_offhand", "pre_hold", "post_hold",
-            "swing", "pre_swing", "post_swing",
-            "use", "pre_use", "post_use");
+            "main", "hold_mainhand", "hold_offhand", "swing", "use");
 
     /** 一帧内最多连跳几次（YSM 用 skipPathSet 防环，这里再加一道次数上限）。 */
     private static final int MAX_CHAIN = 8;
