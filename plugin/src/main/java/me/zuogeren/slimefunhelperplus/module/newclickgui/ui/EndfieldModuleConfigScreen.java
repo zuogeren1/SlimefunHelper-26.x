@@ -433,6 +433,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                             "重新解密、解析并注册当前模型。",
                             () -> CustomModelManager.reloadAsync(custom.model.get())),
                     new Action(
+                            "选择模型",
+                            current.isBlank() ? "还没有选择模型" : ModelCatalog.displayName(current),
+                            "选",
+                            "打开模型选择页：点卡片即切换模型，预览区右上角的齿轮进动作预览；热键在「模型选择热键」一行绑定。",
+                            custom::openModelPicker),
+                    new Action(
                             "动画轮盘",
                             currentExtraLabel(),
                             "◎",

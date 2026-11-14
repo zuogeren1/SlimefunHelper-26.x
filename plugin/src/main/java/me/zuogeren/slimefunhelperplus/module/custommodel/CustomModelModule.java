@@ -9,6 +9,7 @@ import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.zuogeren.slimefunhelperplus.config.PluginConfig;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ui.ModelPickerScreen;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ui.ModelRouletteScreen;
 
 /**
@@ -64,6 +65,12 @@ public class CustomModelModule extends BaseModule {
             .registerHotkey(HotKeyUtils.wrapAsHandler((Runnable) this::openRoulette))
             .build();
 
+    /** 打开模型选择页的热键；默认不绑，在模块配置页里设。 */
+    public final KeyBindRef modelPickerKey = hotkey(root.add("model-picker-key"))
+            .defaultValue(new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.wrapAsHandler((Runnable) this::openModelPicker))
+            .build();
+
     public CustomModelModule() {
         super("CustomModel");
         bindFlag(enable);
@@ -91,6 +98,17 @@ public class CustomModelModule extends BaseModule {
         if (isActive()) {
             CustomModelManager.reloadAsync(value);
         }
+    }
+
+    /**
+     * 模型选择页：不要求模型已加载 —— 这一页本来就是用来挑模型的，
+     * 一个都没加载时正好从列表里选第一个。
+     */
+    public void openModelPicker() {
+        if (!isActive()) {
+            return;
+        }
+        ModelPickerScreen.open();
     }
 
     /** 热键与模块页动作行共用的入口：没启用或模型还没加载时什么都不做。 */

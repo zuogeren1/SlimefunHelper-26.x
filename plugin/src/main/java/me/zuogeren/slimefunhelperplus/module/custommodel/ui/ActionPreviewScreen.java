@@ -1,0 +1,416 @@
+package me.zuogeren.slimefunhelperplus.module.custommodel.ui;
+
+import java.util.List;
+import java.util.Locale;
+import me.matl114.accessors.gui.ScreenAccess;
+import me.matl114.gui.GenericScreen;
+import me.matl114.utils.ClientUtils;
+import me.matl114.versioned.api.VDrawContext;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
+import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.network.chat.Component;
+
+/**
+ * 动作预览页：左边一块大预览，右边一列动作，点动作即切换。
+ *
+ * <p>版式照用户确认过的可交互预览（{@code .notes/refs/image/ysm/preview.html}）：面板 420×235、
+ * 左栏 262、右栏 155、动作 8 条一页、返回按钮 145×22。
+ *
+ * <p>从模型选择页的齿轮进来，返回（按钮或 Esc）回到模型选择页 —— 父屏由
+ * {@link ScreenAccess#openFromCurrent()} 记下，所以这里只管调 {@code onClose()}。
+ *
+ * <p>动作列表直接取 {@link ModelRuntime#extras()}：服装预设与额外动作都在里面，点一下切换、再点取消，
+ * 与轮盘同一套语义（{@link CustomModelManager#selectExtra(String)}）。
+ */
+public class ActionPreviewScreen extends GenericScreen {
+
+    private static final int PANEL_W = 420;
+    private static final int PANEL_H = 235;
+    private static final int LEFT_W = 262;
+    private static final int RIGHT_X = 265;
+    private static final int RIGHT_W = 155;
+
+    private static final int STAGE_X = 5;
+    private static final int STAGE_Y = 5;
+    private static final int STAGE_W = 255;
+    private static final int STAGE_H = 225;
+    /** 3D 只占舞台中段：PiP 出图盖在所有 2D 之上，面包屑、标题、时间轴必须留在它外面。 */
+    private static final int FIG_TOP = 26;
+    private static final int FIG_H = 147;
+
+    private static final int NAV_SIZE = 30;
+    private static final int PREV_X = 265;
+    private static final int NEXT_X = 380;
+    private static final int NAV_Y = 8;
+    private static final int PAGE_X = 297;
+    private static final int PAGE_Y = 23;
+    private static final int PAGE_W = 81;
+    private static final int PAGE_H = 15;
+    private static final int BACK_X = 265;
+    private static final int BACK_Y = 40;
+    private static final int BACK_W = 145;
+    private static final int BACK_H = 22;
+    private static final int LIST_X = 265;
+    private static final int LIST_Y = 66;
+    private static final int LIST_W = 145;
+    private static final int ROW_H = 18;
+    private static final int ROW_STEP = 20;
+    private static final int ACT_PER_PAGE = 8;
+
+    private static final float WIPE_MS = 260.0F;
+
+    /** 面板之外的压暗：世界还看得见，但不会和面板抢注意力。 */
+    private static final int VEIL = 0x40000000;
+
+    private static final int HOVER_NONE = 0;
+    private static final int HOVER_PREV = 1;
+    private static final int HOVER_NEXT = 2;
+    private static final int HOVER_BACK = 3;
+    private static final int HOVER_ROW = 10;
+
+    private final Ef.Palette pal = Ef.DARK;
+
+    private int panelX;
+    private int panelY;
+    private int page;
+    private int hovered = HOVER_NONE;
+    private long hoverStart = System.currentTimeMillis();
+
+    public ActionPreviewScreen() {
+        super(Component.literal("动作预览"), 0, 0);
+    }
+
+    /** 不要求玩家实体存在：没有它只是少了 3D 预览，动作列表照常可用。 */
+    public static void open() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) {
+            return;
+        }
+        if (ClientUtils.getScreen() instanceof ActionPreviewScreen) {
+            return;
+        }
+        ScreenAccess.of(new ActionPreviewScreen()).openFromCurrent();
+    }
+
+    @Override
+    protected void init0() {
+        super.init0();
+        this.x = 0;
+        this.y = 0;
+        this.panelX = Math.max(0, (this.width - PANEL_W) / 2);
+        this.panelY = Math.max(0, (this.height - PANEL_H) / 2);
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+
+    /** 世界留在背后：预览动作时要看得见角色本身，压暗交给 {@link #paint} 里那层 VEIL。 */
+    @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {}
+
+    @Override
+    protected void refreshWidgets() {
+        super.refreshWidgets();
+        EfWidget.of(0, 0, this.width, this.height, this::paint)
+                .click(this::click)
+                .scroll(this::wheel)
+                .addTo(this);
+    }
+
+    private List<ModelRuntime.ExtraOption> options() {
+        ModelRuntime runtime = CustomModelManager.runtime();
+        return runtime == null ? List.of() : runtime.extras();
+    }
+
+    private int pageCount() {
+        return Math.max(1, (options().size() + ACT_PER_PAGE - 1) / ACT_PER_PAGE);
+    }
+
+    // ------------------------------------------------------------------ 绘制
+
+    private void paint(EfWidget self, VDrawContext ctx, int mouseX, int mouseY) {
+        Ef.fill(ctx, 0, 0, this.width, this.height, VEIL);
+        updateHover(mouseX, mouseY);
+        int px = panelX;
+        int py = panelY;
+        Ef.cutFill(ctx, px, py, PANEL_W, PANEL_H, pal.paper(), Ef.CUT_PANEL, Ef.Corner.BR);
+        Ef.fill(ctx, px, py, LEFT_W, PANEL_H, pal.panel());
+        Ef.cutFill(ctx, px + RIGHT_X, py, RIGHT_W, PANEL_H, pal.panel(), Ef.CUT_PANEL, Ef.Corner.BR);
+        paintStage(ctx, px, py);
+        paintNav(ctx, px, py);
+        paintList(ctx, px, py);
+    }
+
+    private void paintStage(VDrawContext ctx, int px, int py) {
+        int sx = px + STAGE_X;
+        int sy = py + STAGE_Y;
+        Ef.fill(ctx, sx, sy, STAGE_W, STAGE_H, pal.chip());
+        hatch(ctx, sx, sy, STAGE_W, STAGE_H, 0x0AFFFFFF);
+        cornerMark(ctx, sx + 4, sy + 4, 8, pal.rule(), true);
+        cornerMark(ctx, sx + STAGE_W - 12, sy + STAGE_H - 12, 8, pal.rule(), false);
+
+        paintModel(ctx, sx, sy + FIG_TOP, STAGE_W, FIG_H);
+
+        String file = CustomModelManager.loadedFile();
+        String name = file.isEmpty() ? "未加载模型" : ModelCatalog.displayName(file);
+        Ef.text(ctx, Ef.ellipsis(name, 200), sx + 8, sy + 7, pal.ink());
+
+        ModelRuntime runtime = CustomModelManager.runtime();
+        String badge = runtime == null ? "-" : "循环";
+        Ef.fill(ctx, sx + STAGE_W - 8 - 3, sy + 10, 3, 3, Ef.SIGNAL);
+        Ef.text(ctx, badge, sx + STAGE_W - 8 - 3 - 4 - Ef.textWidth(badge), sy + 7, pal.ink2());
+
+        String current = currentLabel(runtime);
+        Ef.text(ctx, Ef.ellipsis(current, STAGE_W - 16), sx + 8, sy + STAGE_H - 26, pal.ink());
+        String stats = runtime == null ? "" : runtime.boneCount() + " 骨 │ " + runtime.extras().size() + " 动作";
+        Ef.text(ctx, stats, sx + STAGE_W - 8 - Ef.textWidth(stats), sy + STAGE_H - 26, pal.ink2());
+        Ef.fill(ctx, sx + 8, sy + STAGE_H - 14, STAGE_W - 16, 3, 0xFF3A3A3A);
+    }
+
+    private String currentLabel(ModelRuntime runtime) {
+        if (runtime == null) {
+            return "模型未加载";
+        }
+        String variant = labelOf(runtime, runtime.activeVariantKey());
+        String extra = labelOf(runtime, runtime.activeExtraKey());
+        String head = variant.isEmpty() ? "默认服装" : variant;
+        return extra.isEmpty() ? head : head + " · " + extra;
+    }
+
+    private String labelOf(ModelRuntime runtime, String key) {
+        if (key == null || key.isEmpty()) {
+            return "";
+        }
+        for (ModelRuntime.ExtraOption option : runtime.extras()) {
+            if (option.key().equals(key)) {
+                return option.label();
+            }
+        }
+        return key;
+    }
+
+    private void paintNav(VDrawContext ctx, int px, int py) {
+        int pages = pageCount();
+        // 箭头用 ASCII：界面字体不一定带 ◀ ▶ 这类符号，缺字会画成方块
+        paintNavButton(ctx, px + PREV_X, py + NAV_Y, "<", page > 0, hovered == HOVER_PREV);
+        paintNavButton(ctx, px + NEXT_X, py + NAV_Y, ">", page < pages - 1, hovered == HOVER_NEXT);
+        String text = (page + 1) + " / " + pages;
+        Ef.fill(ctx, px + PAGE_X, py + PAGE_Y, PAGE_W, PAGE_H, 0x48000000);
+        Ef.text(ctx, text, px + PAGE_X + (PAGE_W - Ef.textWidth(text)) / 2,
+                py + PAGE_Y + (PAGE_H - Ef.lineH()) / 2, pal.ink2());
+
+        boolean hot = hovered == HOVER_BACK;
+        float wipe = hot ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
+        Ef.wipeCut(ctx, px + BACK_X, py + BACK_Y, BACK_W, BACK_H, pal.chip(), Ef.SIGNAL, wipe,
+                Ef.CUT_WIDE, Ef.Corner.BR);
+        String label = "< 返回";
+        Ef.text(ctx, label, px + BACK_X + (BACK_W - Ef.textWidth(label)) / 2,
+                py + BACK_Y + (BACK_H - Ef.lineH()) / 2, hot ? Ef.ON_SIGNAL : pal.ink());
+    }
+
+    private void paintNavButton(VDrawContext ctx, int x, int y, String glyph, boolean enabled, boolean hot) {
+        float wipe = hot && enabled ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
+        if (enabled && hot) {
+            Ef.wipeCut(ctx, x, y, NAV_SIZE, NAV_SIZE, pal.chip(), Ef.SIGNAL, wipe, Ef.CUT, Ef.Corner.BR);
+        } else {
+            Ef.cutFill(ctx, x, y, NAV_SIZE, NAV_SIZE, pal.chip(), Ef.CUT, Ef.Corner.BR);
+        }
+        int ink = !enabled ? 0xFF5C5C5C : (hot ? Ef.ON_SIGNAL : pal.ink());
+        Ef.text(ctx, glyph, x + (NAV_SIZE - Ef.textWidth(glyph)) / 2,
+                y + (NAV_SIZE - Ef.lineH()) / 2, ink);
+    }
+
+    private void paintList(VDrawContext ctx, int px, int py) {
+        List<ModelRuntime.ExtraOption> list = options();
+        if (list.isEmpty()) {
+            String empty = "这个模型没有可选的动作。";
+            Ef.text(ctx, empty, px + LIST_X + (LIST_W - Ef.textWidth(empty)) / 2, py + 120, pal.ink2());
+            return;
+        }
+        ModelRuntime runtime = CustomModelManager.runtime();
+        int base = page * ACT_PER_PAGE;
+        for (int i = 0; i < ACT_PER_PAGE; i++) {
+            int index = base + i;
+            if (index >= list.size()) {
+                break;
+            }
+            ModelRuntime.ExtraOption option = list.get(index);
+            int rx = px + LIST_X;
+            int ry = py + LIST_Y + i * ROW_STEP;
+            boolean active = isActive(runtime, option);
+            boolean hot = hovered == HOVER_ROW + i;
+            float wipe = hot ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
+            if (active) {
+                Ef.cutFill(ctx, rx, ry, LIST_W, ROW_H, Ef.SIGNAL, Ef.CUT, Ef.Corner.BR);
+            } else if (hot) {
+                Ef.wipeCut(ctx, rx, ry, LIST_W, ROW_H, pal.chip(), Ef.alpha(Ef.SIGNAL, 0.18F), wipe,
+                        Ef.CUT, Ef.Corner.BR);
+            } else {
+                Ef.cutFill(ctx, rx, ry, LIST_W, ROW_H, pal.chip(), Ef.CUT, Ef.Corner.BR);
+            }
+            int ink = active ? Ef.ON_SIGNAL : (hot ? pal.ink() : pal.ink2());
+            String no = String.format(Locale.ROOT, "%02d", index + 1);
+            Ef.text(ctx, no, rx + 5, ry + (ROW_H - Ef.lineH()) / 2, active ? 0x99161616 : 0xFF6A6A6A);
+            String label = Ef.ellipsis(option.label(), LIST_W - 34);
+            Ef.text(ctx, label, rx + 20, ry + (ROW_H - Ef.lineH()) / 2, ink);
+            if (option.variant()) {
+                // 服装预设是静态覆盖层，没有时长；用一个小方块和动作区分开
+                Ef.fill(ctx, rx + LIST_W - 8, ry + ROW_H / 2 - 2, 3, 3,
+                        active ? Ef.ON_SIGNAL : Ef.SIGNAL);
+            }
+        }
+    }
+
+    private boolean isActive(ModelRuntime runtime, ModelRuntime.ExtraOption option) {
+        if (runtime == null) {
+            return false;
+        }
+        return option.variant()
+                ? option.key().equals(runtime.activeVariantKey())
+                : option.key().equals(runtime.activeExtraKey());
+    }
+
+    // ------------------------------------------------------------------ 3D 预览
+
+    /** 与模型选择页同一条路径：原版实体预览 + 自定义模型 mixin，画出来就是当前模型。 */
+    private void paintModel(VDrawContext ctx, int x, int y, int w, int h) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null || minecraft.player == null) {
+            return;
+        }
+        GuiGraphicsExtractor graphics = extractor(ctx);
+        if (graphics == null) {
+            return;
+        }
+        int size = Math.max(8, Math.round(h * 0.45F));
+        int centerX = x + w / 2;
+        int centerY = y + h / 2;
+        InventoryScreen.extractEntityInInventoryFollowsMouse(
+                graphics, x, y, x + w, y + h, size, 0.0F, centerX, centerY, minecraft.player);
+    }
+
+    /** 取底层 {@link GuiGraphicsExtractor}：{@link VDrawContext} 没暴露实例入口，push 后立刻 pop 保持栈平衡。 */
+    private static GuiGraphicsExtractor extractor(VDrawContext ctx) {
+        GuiGraphicsExtractor graphics = ctx.pushMatrix();
+        ctx.popMatrix();
+        return graphics;
+    }
+
+    // ------------------------------------------------------------------ 装饰
+
+    /**
+     * 空槽位的底纹：每 6px 一道极淡的横线。
+     *
+     * <p>预览里是 45° 斜线，这里换成横线 —— 斜线要么逐像素 fill（一块 255×225 的舞台要上万次），
+     * 要么走 {@code lineGui} 的调试线管线（26.2 上实测画不出像素），横线用普通 fill 就够，
+     * 观感上同样是「这里没有内容」。
+     */
+    private static void hatch(VDrawContext ctx, int x, int y, int w, int h, int color) {
+        for (int row = y + 3; row < y + h; row += 6) {
+            Ef.fill(ctx, x, row, w, 1, color);
+        }
+    }
+
+    private static void cornerMark(VDrawContext ctx, int x, int y, int size, int color, boolean topLeft) {
+        if (topLeft) {
+            Ef.fill(ctx, x, y, size, 1, color);
+            Ef.fill(ctx, x, y, 1, size, color);
+        } else {
+            Ef.fill(ctx, x, y + size - 1, size, 1, color);
+            Ef.fill(ctx, x + size - 1, y, 1, size, color);
+        }
+    }
+
+    // ------------------------------------------------------------------ 交互
+
+    private static boolean inside(int mx, int my, int x, int y, int w, int h) {
+        return mx >= x && my >= y && mx < x + w && my < y + h;
+    }
+
+    private int rowAt(int mx, int my) {
+        int base = page * ACT_PER_PAGE;
+        for (int i = 0; i < ACT_PER_PAGE; i++) {
+            if (base + i >= options().size()) {
+                break;
+            }
+            if (inside(mx, my, LIST_X, LIST_Y + i * ROW_STEP, LIST_W, ROW_H)) {
+                return base + i;
+            }
+        }
+        return -1;
+    }
+
+    private void updateHover(double mouseX, double mouseY) {
+        int mx = (int) Math.floor(mouseX) - panelX;
+        int my = (int) Math.floor(mouseY) - panelY;
+        int next = HOVER_NONE;
+        if (mx >= 0 && my >= 0 && mx < PANEL_W && my < PANEL_H) {
+            if (inside(mx, my, PREV_X, NAV_Y, NAV_SIZE, NAV_SIZE)) {
+                next = HOVER_PREV;
+            } else if (inside(mx, my, NEXT_X, NAV_Y, NAV_SIZE, NAV_SIZE)) {
+                next = HOVER_NEXT;
+            } else if (inside(mx, my, BACK_X, BACK_Y, BACK_W, BACK_H)) {
+                next = HOVER_BACK;
+            } else {
+                int row = rowAt(mx, my);
+                if (row >= 0) {
+                    next = HOVER_ROW + (row - page * ACT_PER_PAGE);
+                }
+            }
+        }
+        if (next != hovered) {
+            this.hovered = next;
+            this.hoverStart = System.currentTimeMillis();
+        }
+    }
+
+    private boolean click(EfWidget self, double mouseX, double mouseY, int button) {
+        if (button != 0) {
+            return false;
+        }
+        int mx = (int) Math.floor(mouseX) - panelX;
+        int my = (int) Math.floor(mouseY) - panelY;
+        if (mx < 0 || my < 0 || mx >= PANEL_W || my >= PANEL_H) {
+            return false;
+        }
+        if (inside(mx, my, BACK_X, BACK_Y, BACK_W, BACK_H)) {
+            super.onClose();
+            return true;
+        }
+        if (inside(mx, my, PREV_X, NAV_Y, NAV_SIZE, NAV_SIZE)) {
+            turnPage(-1);
+            return true;
+        }
+        if (inside(mx, my, NEXT_X, NAV_Y, NAV_SIZE, NAV_SIZE)) {
+            turnPage(1);
+            return true;
+        }
+        int row = rowAt(mx, my);
+        if (row >= 0) {
+            CustomModelManager.selectExtra(options().get(row).key());
+            return true;
+        }
+        return false;
+    }
+
+    private void turnPage(int step) {
+        this.page = Math.max(0, Math.min(pageCount() - 1, this.page + step));
+    }
+
+    private boolean wheel(EfWidget self, double mouseX, double mouseY, double amount) {
+        if (pageCount() <= 1 || amount == 0.0D) {
+            return false;
+        }
+        turnPage(amount > 0.0D ? -1 : 1);
+        return true;
+    }
+
+}
