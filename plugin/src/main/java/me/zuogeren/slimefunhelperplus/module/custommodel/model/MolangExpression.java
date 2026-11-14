@@ -45,11 +45,26 @@ public final class MolangExpression {
 
     private MolangExpression() {}
 
+    private static String stripTrailingSemicolons(String source) {
+        String text = source.trim();
+        int end = text.length();
+        while (end > 0) {
+            char c = text.charAt(end - 1);
+            if (c != ';' && !Character.isWhitespace(c)) {
+                break;
+            }
+            end--;
+        }
+        return text.substring(0, end);
+    }
+
     public static Expr of(String source) {
         if (source == null || source.isBlank()) {
             return ZERO;
         }
-        String key = source.trim();
+        // 部分模型的关键帧值以分号结尾（Blockbench 导出习惯，例如 `(v.qh==1?(-167)) + (v.jump?(...));`）。
+        // 不剥掉的话解析器停在分号前、atEnd() 为假，整条表达式会被判成 ZERO，骨骼就停在静止姿态。
+        String key = stripTrailingSemicolons(source);
         Expr cached = CACHE.get(key);
         if (cached != null) {
             return cached;
@@ -259,11 +274,15 @@ public final class MolangExpression {
             this.index++;
             Expr whenTrue = expression();
             skipSpace();
-            if (!peek(':')) {
-                throw new IllegalArgumentException("missing ':'");
+            // Molang 允许省略 else：`cond ? a` 在条件为假时取 0。模型里大量这么写
+            // （`(v.qh==1?(-167)) + (v.jump?(-20))`），缺了这条整条表达式会被判成非法、返回 0。
+            Expr whenFalse;
+            if (peek(':')) {
+                this.index++;
+                whenFalse = expression();
+            } else {
+                whenFalse = (animTime, lifeTime) -> 0.0F;
             }
-            this.index++;
-            Expr whenFalse = expression();
             return (animTime, lifeTime) -> truthy(condition.eval(animTime, lifeTime))
                     ? whenTrue.eval(animTime, lifeTime)
                     : whenFalse.eval(animTime, lifeTime);

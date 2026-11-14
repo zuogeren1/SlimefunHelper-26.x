@@ -1,0 +1,18 @@
+SlimeFunHelper+ 第三方声明
+==========================
+
+本项目包含取自其他项目的代码与资源。下列内容保留其原始许可与归属，不因位于本仓库内
+而改为本项目的许可。
+
+1. YesSteveModel —— 内置默认模型动画
+   来源：https://github.com/YesSteveModel/YesSteveModel
+   上游许可：Apache License 2.0（见上游 LICENSE；上游 NOTICE.md 另对内置模型资产作了单独声明）
+   纳入文件（原样拷贝，未作修改）：
+     assets/slimefunhelperplus/custommodel/default/main.animation.json
+     assets/slimefunhelperplus/custommodel/default/arm.animation.json
+   上游路径：assets/ysm/builtin/default/animations/main.animation.json
+             assets/ysm/builtin/default/animations/arm.animation.json
+   用途：自定义模型缺失某段动画时，用默认模型的同名动画兜底播放。
+   许可说明：这两份文件属于上游「内置默认模型」资产。上游 NOTICE.md 明确「内置模型资产不属于
+   Apache License 2.0」，其 ysm.json 的 metadata.license 声明为 CC0；模型与动画作者为
+   哥斯拉、端木一动不动、甜粽子、星屑海螺、蓝玫瑰、艾雷克亚。本条目同时保留上述两条许可信息。

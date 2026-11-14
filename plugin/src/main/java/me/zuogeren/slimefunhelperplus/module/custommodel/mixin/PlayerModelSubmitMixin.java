@@ -171,13 +171,9 @@ public abstract class PlayerModelSubmitMixin {
         // 平飞俯仰与「按移动方向扭转」这里都不加：YSM 的渲染器直接继承 LivingEntityRenderer，
         // 它调到的 setupRotations 根本没有平飞分支（那是 AvatarRenderer 才有的），所以 YSM 模型
         // 在平飞时身体既不前倾也不随移动方向转 —— 姿态全部由 elytra_fly 片段自己摆。
-        if (!state.isFallFlying && state.swimAmount > 0.0F) {
-            float targetXRot = state.isInWater ? -90.0F - state.xRot : -90.0F;
-            rotateDegrees(poseStack, Axis.XP, Mth.lerp(state.swimAmount, 0.0F, targetXRot));
-            if (state.isVisuallySwimming) {
-                poseStack.translate(0.0F, -1.0F, 0.3F);
-            }
-        }
+        // 游泳倾斜这里也不加，理由和上一段一样：原版把 swimAmount 的分支写在 AvatarRenderer 里，
+        // 而 YSM 的渲染器继承的是 LivingEntityRenderer（全库对 swimAmount 零引用）。YSM 模型的游泳姿态
+        // 由 swim / swim_stand 片段自己摆，多这一层会把身体压成原版那种水平前扑。
     }
 
     /**

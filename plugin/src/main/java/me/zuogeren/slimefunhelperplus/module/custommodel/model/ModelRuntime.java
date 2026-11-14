@@ -96,6 +96,8 @@ public final class ModelRuntime {
     private final List<RawYsmModel.RawBone> bones;
     private final Map<String, Integer> boneIndex;
     private final Map<String, RawYsmModel.RawAnimation> clips;
+    /** 模型缺失片段时的兜底表（默认模型的 main + arm）；只读，且不参与模型自身的统计。 */
+    private final Map<String, RawYsmModel.RawAnimation> defaultClips;
     private final int[] parents;
     private final Matrix4f[] restMatrices;
     private final Matrix3f[] restNormals;
@@ -176,10 +178,12 @@ public final class ModelRuntime {
             Map<String, RawYsmModel.RawAnimation> clips, int[] parents, Matrix4f[] restMatrices,
             Matrix3f[] restNormals, boolean[] hidden, int[] propRoot, Map<Integer, List<Integer>> children,
             Map<String, RawYsmModel.RawAnimation> extraClips, List<ExtraOption> extraOptions, String defaultExtraKey,
-            Identifier texture, int rightHandBone, int leftHandBone) {
+            Identifier texture, int rightHandBone, int leftHandBone,
+            Map<String, RawYsmModel.RawAnimation> defaultClips) {
         this.bones = bones;
         this.boneIndex = boneIndex;
         this.clips = clips;
+        this.defaultClips = defaultClips;
         this.parents = parents;
         this.restMatrices = restMatrices;
         this.restNormals = restNormals;
@@ -200,6 +204,15 @@ public final class ModelRuntime {
     }
 
     public static ModelRuntime build(RawYsmModel model, Identifier texture, boolean hideProps) {
+        return build(model, texture, hideProps, DefaultAnimations.clips());
+    }
+
+    /**
+     * {@code defaultClips} 是缺失片段的兜底表：主模型接默认模型的 main + arm，第一人称手臂传空表
+     * —— 默认动画按渲染目标分域，main/arm 那套不属于手臂模型，套上去只会让手臂摆出身体姿势。
+     */
+    private static ModelRuntime build(RawYsmModel model, Identifier texture, boolean hideProps,
+            Map<String, RawYsmModel.RawAnimation> defaultClips) {
         RawYsmModel.RawGeometry geometry = model.mainEntity == null ? null : model.mainEntity.mainModel;
         if (geometry == null || geometry.bones == null || geometry.bones.isEmpty()) {
             return null;
@@ -391,7 +404,7 @@ public final class ModelRuntime {
                 + " clips=" + clips.size() + " hidden=" + hiddenCount + " extras=" + extraOptions.size()
                 + " hands=" + rightHand + "/" + leftHand);
         ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
-                children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand);
+                children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand, defaultClips);
         runtime.controllers = parseControllers(model);
         StringBuilder slots = new StringBuilder();
         for (ModelController controller : runtime.controllers) {
@@ -529,7 +542,7 @@ public final class ModelRuntime {
         proxy.metadata = model.metadata;
         proxy.properties = model.properties;
         proxy.mainEntity = main;
-        ModelRuntime runtime = build(proxy, texture, false);
+        ModelRuntime runtime = build(proxy, texture, false, Map.of());
         if (runtime != null) {
             runtime.initArmSides();
         }
@@ -924,7 +937,7 @@ public final class ModelRuntime {
      */
     private void sampleLayers(List<String> names, float ageSeconds) {
         for (String name : names) {
-            RawYsmModel.RawAnimation layer = clips.get(name);
+            RawYsmModel.RawAnimation layer = clip(name);
             if (layer == null) {
                 continue;
             }
@@ -1084,9 +1097,12 @@ public final class ModelRuntime {
         } else {
             using = false;
             lastUseTick = -1.0F;
+            // 松手就丢掉：使用层不像挥动那样需要播完收尾（弓没拉满就松开时，动画必须立刻让位给待机）。
+            useClip = null;
         }
-        // 使用动画是循环播放（YSM UsePredicate 用 LoopType.LOOP），和挥动的单次播放不同
-        if (useClip != null) {
+        // 使用动画是循环播放（YSM UsePredicate 用 LoopType.LOOP），和挥动的单次播放不同。
+        // 只在「确实还在使用」时应用：不加这层判断会让松手后的姿态一直停在最后一帧。
+        if (usingNow && useClip != null) {
             float length = lengthOf(useClip);
             float elapsed = Float.isFinite(useStart) ? Math.max(0.0F, ageSeconds - useStart) : 0.0F;
             float time = length <= 0.0F ? 0.0F : elapsed % length;
@@ -1142,21 +1158,22 @@ public final class ModelRuntime {
     private RawYsmModel.RawAnimation resolveHandClip(LocalPlayer player, InteractionHand hand, String prefix,
             String fallback) {
         for (String suffix : ItemClassifier.candidates(player, hand)) {
-            RawYsmModel.RawAnimation clip = clips.get(prefix + suffix);
-            if (clip != null && clip.boneAnimations != null) {
-                return clip;
+            RawYsmModel.RawAnimation resolved = clip(prefix + suffix);
+            if (resolved != null && resolved.boneAnimations != null) {
+                return resolved;
             }
         }
         // 分类对不上时的兜底：YSM 的 SwingPredicate/UsePredicate 都会退到不带分类的名字，
         // 所以拿镐子挖矿这类「模型没有专属动作」的情况仍然有动作可播。持有层没有兜底（源码返回 STOP）。
         if (fallback != null) {
-            RawYsmModel.RawAnimation clip = clips.get(fallback);
-            if (clip != null && clip.boneAnimations != null) {
-                return clip;
+            RawYsmModel.RawAnimation resolved = clip(fallback);
+            if (resolved != null && resolved.boneAnimations != null) {
+                return resolved;
             }
         }
         return null;
     }
+
 
     /** 叠加层只动它写到的通道：旋转/位移相加，缩放整体替换；没写到的通道保持基础姿态。 */
     private void sampleOverlay(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
@@ -1363,7 +1380,7 @@ public final class ModelRuntime {
             if (overlayName == null) {
                 continue;
             }
-            RawYsmModel.RawAnimation overlayClip = clips.get(overlayName);
+            RawYsmModel.RawAnimation overlayClip = clip(overlayName);
             if (overlayClip == null || overlayClip.boneAnimations == null) {
                 continue;
             }
@@ -1653,11 +1670,38 @@ public final class ModelRuntime {
         //#endif
     }
 
-    private RawYsmModel.RawAnimation firstOf(String[] candidates) {
+    /**
+     * 取片段：模型自带的优先，缺失时退回默认模型的同名动画。
+     *
+     * <p>兜底只在读取侧生效，绝不写进 {@code clips} —— {@code references}、道具启发式与
+     * {@code pre_parallel*} 的统计都按模型自己的骨骼名算，混进默认模型的骨骼会把它们污染掉。
+     */
+    private RawYsmModel.RawAnimation clip(String name) {
+        RawYsmModel.RawAnimation own = clips.get(name);
+        return own != null ? own : defaultClips.get(name);
+    }
+
+    /**
+     * 只在模型自带的片段里找，**不**回落默认模型。
+     *
+     * <p>主体态必须用这个：默认模型的 {@code swing_hand} 只写双臂，一旦被选成主体态，边挖边走时腿就停了。
+     * 挥动/使用的默认兜底交给手部层（它只覆盖手臂骨骼），主体态继续走 walk/idle。
+     */
+    private RawYsmModel.RawAnimation firstOwnOf(String[] candidates) {
         for (String name : candidates) {
             RawYsmModel.RawAnimation clip = clips.get(name);
             if (clip != null) {
                 return clip;
+            }
+        }
+        return null;
+    }
+
+    private RawYsmModel.RawAnimation firstOf(String[] candidates) {
+        for (String name : candidates) {
+            RawYsmModel.RawAnimation resolved = clip(name);
+            if (resolved != null) {
+                return resolved;
             }
         }
         return null;
@@ -1724,14 +1768,18 @@ public final class ModelRuntime {
             // 挥动/使用的「武器专属」版本由手部层单独覆盖（只看手臂骨骼），主动画仍走走路/待机，
             // 这样挖掘或攻击时腿照样动。只有模型自己真的提供了 swing_hand / use_* 时才换主体态。
             if (isSwinging(avatar, player)) {
-                RawYsmModel.RawAnimation swing = firstOf(
+                RawYsmModel.RawAnimation swing = firstOwnOf(
                         swingHand(avatar, player) == InteractionHand.OFF_HAND ? SWING_OFF : SWING_MAIN);
                 if (swing != null) {
                     return swing;
                 }
             }
             if (avatar.isUsingItem && avatar.walkAnimationSpeed <= MIN_MOVING) {
-                return orIdle(firstOf(avatar.useItemHand == InteractionHand.MAIN_HAND ? USE_MAIN : USE_OFF));
+                RawYsmModel.RawAnimation use = firstOwnOf(
+                        avatar.useItemHand == InteractionHand.MAIN_HAND ? USE_MAIN : USE_OFF);
+                if (use != null) {
+                    return use;
+                }
             }
             if (player.onGround() && player.isSprinting()) {
                 return orIdle(firstOf(RUN));
@@ -1741,14 +1789,18 @@ public final class ModelRuntime {
             }
         }
         if (isSwinging(avatar, player)) {
-            RawYsmModel.RawAnimation swing = firstOf(
+            RawYsmModel.RawAnimation swing = firstOwnOf(
                     swingHand(avatar, player) == InteractionHand.OFF_HAND ? SWING_OFF : SWING_MAIN);
             if (swing != null) {
                 return swing;
             }
         }
         if (avatar.isUsingItem) {
-            return orIdle(firstOf(avatar.useItemHand == InteractionHand.MAIN_HAND ? USE_MAIN : USE_OFF));
+            RawYsmModel.RawAnimation use = firstOwnOf(
+                    avatar.useItemHand == InteractionHand.MAIN_HAND ? USE_MAIN : USE_OFF);
+            if (use != null) {
+                return use;
+            }
         }
         if (avatar.isFallFlying) {
             return orIdle(firstOf(ELYTRA));

@@ -82,8 +82,25 @@ public final class CustomModelManager {
         loadedFile = "";
     }
 
-    private static void reload(String fileName, int version) {
-        if (fileName == null || fileName.isBlank()) {
+    /**
+     * 配置里的模型路径可能被用户写成带引号的绝对路径，直接喂给 Path 会抛 InvalidPathException。
+     * 这里统一去掉首尾空白与成对引号。
+     */
+    private static String normalizeModelPath(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.length() >= 2) {
+            char first = text.charAt(0);
+            char last = text.charAt(text.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                text = text.substring(1, text.length() - 1).trim();
+            }
+        }
+        return text;
+    }
+
+    private static void reload(String rawFileName, int version) {
+        final String fileName = normalizeModelPath(rawFileName);
+        if (fileName.isBlank()) {
             if (VERSION.get() == version) {
                 runtime = null;
                 loadedFile = "";

@@ -30,6 +30,12 @@ public final class ModelCatalog {
                 .resolve("slimefunhelper-plus")
                 .resolve("models");
         List<String> found = new ArrayList<>();
+        // 首次启动时目录还不存在：建出来再扫，不然每次扫描都会抛 NoSuchFileException 刷屏。
+        try {
+            Files.createDirectories(dir);
+        } catch (Exception exception) {
+            Debug.info("[SFH+] 无法创建模型目录: " + exception);
+        }
         try (var stream = Files.walk(dir, 4)) {
             stream.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".ysm"))

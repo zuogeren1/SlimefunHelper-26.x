@@ -38,9 +38,14 @@ public class CustomModelModule extends BaseModule {
             .updateListener(this::onModelChanged)
             .build();
 
-    /** 第一人称隐藏原版手臂（模型自带第一人称手臂还没接）；默认关，避免看不到手。 */
+    /**
+     * 第一人称用模型自带的手臂替换原版皮肤手臂。
+     *
+     * <p>默认开：模型没带 armModel 时 mixin 会原样放行，「看不到手」不会发生，
+     * 所以开着比关着更符合「选了自定义模型就该看到它」的预期。
+     */
     public final FlagRef hideFirstPersonArm = flagBuilder(root.add("hide-first-person-arm"))
-            .defaultValue(false)
+            .defaultValue(true)
             .build();
 
     /** 打开动画轮盘的热键；默认不绑，在模块配置页里设。 */
