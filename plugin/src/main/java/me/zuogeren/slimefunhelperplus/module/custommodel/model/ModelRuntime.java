@@ -119,6 +119,8 @@ public final class ModelRuntime {
     private float[] armRootX;
     private boolean[] renderMask;
     private List<ModelController> controllers = List.of();
+    /** 无条件循环的默认层：模型里存在的 pre_parallel0..7。道具的自动隐藏写在这些片段里。 */
+    private List<String> preParallelBase = List.of();
 
     /** 轮盘里的一条：{@code key} 是动画名，{@code variant} 标记「服装预设」而不是额外动作。 */
     public record ExtraOption(String key, String label, boolean variant) {}
@@ -346,6 +348,28 @@ public final class ModelRuntime {
         ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
                 children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand);
         runtime.controllers = parseControllers(model);
+        StringBuilder slots = new StringBuilder();
+        for (ModelController controller : runtime.controllers) {
+            slots.append(' ').append(controller.slot());
+        }
+        StringBuilder parallelClips = new StringBuilder();
+        int parallelCount = 0;
+        for (String name : clips.keySet()) {
+            if (name.matches("^(pre_)?parallel[0-7]$")) {
+                parallelClips.append(' ').append(name);
+                parallelCount++;
+            }
+        }
+        List<String> base = new ArrayList<>();
+        for (int index = 0; index < 8; index++) {
+            String baseName = "pre_parallel" + index;
+            if (clips.containsKey(baseName)) {
+                base.add(baseName);
+            }
+        }
+        runtime.preParallelBase = base;
+        Debug.info("[SFH+] controllers=" + runtime.controllers.size() + "[" + slots.toString().trim()
+                + "] parallelClips=" + parallelCount + "[" + parallelClips.toString().trim() + "]");
         return runtime;
     }
 
@@ -907,7 +931,23 @@ public final class ModelRuntime {
         float time = clipTime(clip, ageSeconds);
         java.util.Arrays.fill(frameState, (byte) 0);
         for (int i = 0; i < bones.size(); i++) {
-            samplePose(clip, i, time, ageSeconds);
+            resetPose(i);
+        }
+        // 默认层 pre_parallel0..7：由代码侧控制器无条件循环播放，道具「默认不显示」就是靠它们把骨骼缩放成 0。
+        // 优先级低于主动画（YSM 里 pre_parallel 先注册、main 后注册），所以先叠它、再让主动画覆盖。
+        for (String baseName : preParallelBase) {
+            RawYsmModel.RawAnimation base = clips.get(baseName);
+            if (base == null) {
+                continue;
+            }
+            float baseLength = lengthOf(base);
+            float baseTime = baseLength <= 0.0F ? 0.0F : ageSeconds % baseLength;
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverlay(base, i, baseTime, ageSeconds);
+            }
+        }
+        for (int i = 0; i < bones.size(); i++) {
+            samplePoseOver(clip, i, time, ageSeconds);
         }
         // 服装变体是静态预设（只有缩放/位移），动作是循环播放；两层叠加，动作最后生效
         if (activeVariant != null) {
@@ -981,7 +1021,8 @@ public final class ModelRuntime {
         float time = clipTime(clip, ageSeconds);
         java.util.Arrays.fill(frameState, (byte) 0);
         for (int i = 0; i < bones.size(); i++) {
-            samplePose(clip, i, time, ageSeconds);
+            resetPose(i);
+            samplePoseOver(clip, i, time, ageSeconds);
         }
         for (int i = 0; i < bones.size(); i++) {
             computeFrame(i);
@@ -1008,7 +1049,8 @@ public final class ModelRuntime {
     }
 
     /** 采样三个通道，写入该骨骼的 9 个 float（弧度/像素/倍率）；字符串值按 Molang 求值。 */
-    private void samplePose(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
+    /** 把一根骨骼的姿态复位成静止值；分层叠加靠它划清每帧的起点。 */
+    private void resetPose(int boneIndex) {
         int offset = boneIndex * 9;
         poses[offset] = 0.0F;
         poses[offset + 1] = 0.0F;
@@ -1019,6 +1061,16 @@ public final class ModelRuntime {
         poses[offset + 6] = 1.0F;
         poses[offset + 7] = 1.0F;
         poses[offset + 8] = 1.0F;
+    }
+
+    /**
+     * 把片段里该骨骼的通道叠到当前姿态上，**不复位**。
+     *
+     * <p>分层顺序：复位 → {@code pre_parallel0..7}（默认层，优先级最低）→ 主状态片段，
+     * 后写的覆盖先写的。这与 YSM 的控制器注册顺序一致（pre_parallel 先注册、main 后注册）。
+     */
+    private void samplePoseOver(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
+        int offset = boneIndex * 9;
         String boneName = bones.get(boneIndex).name;
         if (boneName == null) {
             return;
