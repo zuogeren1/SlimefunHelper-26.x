@@ -325,6 +325,11 @@ public abstract class PlayerModelSubmitMixin {
      * <p><b>没有 {@code ElytraLocator} 就不画</b>：YSM 的 {@code CustomPlayerElytraLayer} 走的是
      * {@code visitLocatorGroup}（不是 {@code OrDefault}），空组时回调根本不触发。退回原版偏移会把
      * 一对倒着的原版翅膀糊在模型背后 —— 模型作者没摆过挂点，那个位置本来就没有翅膀。
+     *
+     * <p><b>要抵消模型的整体缩放</b>：YSM 的图层跑在 {@code setupRotations} 之后、
+     * {@code IGeoRenderer#renderEarly} 之前（{@code GeoReplacedEntityRenderer:168-176}），
+     * 那时 pose 上还没有 {@code widthScale}；我们这里排在 {@link #applyEntityTransform} 之后，
+     * 已经乘过 0.7 之类的整体缩放，不除回去翅膀会比 YSM 大一圈。
      */
     private static void renderElytra(ModelRuntime runtime, AvatarRenderState avatar, LocalPlayer player,
             PoseStack poseStack, SubmitNodeCollector collector, int light, EntityModelSet models) {
@@ -348,7 +353,10 @@ public abstract class PlayerModelSubmitMixin {
             poseStack.mulPose(locator);
             poseStack.translate(0.0F, 1.5F, 0.0F);
             rotateDegrees(poseStack, Axis.ZP, 180.0F);
-            poseStack.scale(2.0F, 2.0F, 2.0F);
+            // 抵消 applyEntityTransform 已经乘上的模型整体缩放（X/Z 取 heightScale、Y 取 widthScale）
+            float inverseHeight = 1.0F / runtime.heightScale();
+            float inverseWidth = 1.0F / runtime.widthScale();
+            poseStack.scale(2.0F * inverseHeight, 2.0F * inverseWidth, 2.0F * inverseHeight);
             submitModel(collector, model, avatar, poseStack, texture, light);
             poseStack.popPose();
         }
@@ -410,6 +418,9 @@ public abstract class PlayerModelSubmitMixin {
             poseStack.mulPose(locatorPose);
             poseStack.translate(0.0F, 1.5F, 0.0F);
             rotateDegrees(poseStack, Axis.ZP, 180.0F);
+            // 同鞘翅：抵消 applyEntityTransform 已经乘上的模型整体缩放
+            poseStack.scale(1.0F / runtime.heightScale(), 1.0F / runtime.widthScale(),
+                    1.0F / runtime.heightScale());
             model.setupAnim(state);
             submitModel(collector, model, state, poseStack, ParrotRenderer.getVariantTexture(variant), light);
             poseStack.popPose();
