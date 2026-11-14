@@ -220,18 +220,36 @@ def pluginJarDir = rootProject.file("plugin/versions/${project.minecraft_version
 def pluginModsDir = rootProject.file("run/${project.minecraft_version}/mods")
 def includedPlugin = gradle.includedBuilds.find { it.name == 'plugin' }
 
+// 只拷当前 mod_version 的那一个 jar：build/libs 里会同时留着历史版本的产物，
+// 按 '*.jar' 全量拷贝会把旧包一起带进 mods。Fabric 对同 id 的多个候选不报错，
+// 只按版本挑一个，旧包会静默参与解析（版本号相同时挑哪个取决于目录顺序）。
+def pluginProps = new Properties()
+rootProject.file('plugin/gradle.properties').withInputStream { pluginProps.load(it) }
+def pluginJarName = "${pluginProps.getProperty('archives_base_name')}-${project.minecraft_version}-${pluginProps.getProperty('mod_version')}.jar"
+def pluginJarFile = new File(pluginJarDir, pluginJarName)
+
 def syncPluginJar = tasks.register('syncPluginJar', Copy) {
 	group = 'slimefunhelper'
 	description = "构建 SlimeFunHelper+ 并把它的 jar 放进 run/${project.minecraft_version}/mods"
 
 	from(pluginJarDir) {
-		include '*.jar'
-		exclude '*-sources.jar', '*-thin.jar', '*-dev.jar'
+		include pluginJarName
 	}
 	into pluginModsDir
 
+	// Copy 只追踪自己产出的文件：mods 里多出来的 jar（旧版本、手动塞的）不会让它失效，
+	// 于是 doFirst 的清理被 UP-TO-DATE 跳过，留下「以为同步了其实没同步」。
+	// 这个任务只有一次删除 + 一次拷贝，永远执行比漏同步便宜。
+	outputs.upToDateWhen { false }
+
 	doFirst {
-		// 插件升版本号后旧包会和新包一起留在 mods 里，Fabric 会直接报 duplicate mod id
+		// 名字对不上时 Copy 会静默拷 0 个文件，mods 被清空后游戏照常启动、插件却没加载，
+		// 比直接失败更难查。先确认产物存在再删。
+		if (!pluginJarFile.isFile()) {
+			throw new GradleException("找不到插件 jar: ${pluginJarFile}\n" +
+					"核对 plugin/gradle.properties 的 mod_version 与 ${pluginJarDir} 下的产物名。")
+		}
+		// 先清掉 mods 里所有 SlimeFunHelper+ 的 jar，避免旧版本残留
 		// 用 File API 删除：配置缓存下执行期不能访问 project
 		pluginModsDir.listFiles()?.findAll { it.name.startsWith('SlimeFunHelper+') && it.name.endsWith('.jar') }?.each { it.delete() }
 	}
