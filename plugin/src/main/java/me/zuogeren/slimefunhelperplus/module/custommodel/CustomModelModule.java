@@ -31,7 +31,8 @@ public class CustomModelModule extends BaseModule {
 
     @Override
     public void onEnableModule() {
-        log("自定义模型已启用（骨架阶段，尚未加载模型）");
+        log("自定义模型已启用（P2 格式层探针）");
+        ModelProbe.scanAsync();
     }
 
     @Override
