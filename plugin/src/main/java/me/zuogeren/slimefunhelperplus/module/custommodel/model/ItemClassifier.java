@@ -142,6 +142,56 @@ public final class ItemClassifier {
         return "";
     }
 
+    /**
+     * 手持物的握持类别，决定挂点上的微调偏移（SPM {@code InnerClassify#getWeaponKind:72-90}）。
+     *
+     * <p>与 {@link #classify} 分开：那个是给动画片段名用的（三叉戟归 {@code spear}、原版长矛归
+     * {@code lance}），这里是给挂点矩阵用的 —— 三叉戟/长矛/锤的模型重心与剑不同，
+     * 用同一套偏移会让它们插进手里或者悬空。
+     */
+    public enum Grip {
+        /** 剑、斧、镐、工具、空手：默认偏移。 */
+        DEFAULT,
+        TRIDENT,
+        /** 原版长矛（{@code minecraft:*_spear}，使用动画为 SPEAR）。 */
+        SPEAR,
+        /** 模组长矛（{@code ItemTags.SPEARS}）。 */
+        LANCE,
+        MACE
+    }
+
+    /** 握持类别；空手与普通物品都是 {@link Grip#DEFAULT}。 */
+    public static Grip grip(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return Grip.DEFAULT;
+        }
+        if (stack.is(Items.TRIDENT)) {
+            return Grip.TRIDENT;
+        }
+        if (isVanillaSpear(stack)) {
+            return Grip.SPEAR;
+        }
+        if (stack.is(ItemTags.SPEARS)) {
+            return Grip.LANCE;
+        }
+        if (stack.is(Items.MACE)) {
+            return Grip.MACE;
+        }
+        return Grip.DEFAULT;
+    }
+
+    /**
+     * 原版长矛：使用动画是 SPEAR，且 id 是 {@code minecraft:*_spear}
+     * （SPM {@code InnerClassify:92-98}）。只判使用动画会把模组长矛也算进来。
+     */
+    private static boolean isVanillaSpear(ItemStack stack) {
+        if (stack.getUseAnimation() != ItemUseAnimation.SPEAR) {
+            return false;
+        }
+        Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        return id != null && "minecraft".equals(id.getNamespace()) && id.getPath().endsWith("_spear");
+    }
+
     private static boolean isFishing(LocalPlayer player, ItemStack stack) {
         // YSM 只判 player.fishing != null（MainhandPredicate:46），不看手上是不是鱼竿；
         // 照 SPM 收紧到鱼竿（MainHandHoldPredicate:43-46），否则切到别的物品也会播抛竿姿势。

@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
+import me.zuogeren.slimefunhelperplus.module.custommodel.model.ItemClassifier;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -492,7 +493,7 @@ public abstract class PlayerModelSubmitMixin {
         if (stack.is(ItemTags.SWORDS) && runtime.hasSwordGeometry(rightHand)) {
             return;
         }
-        Matrix4f hand = runtime.handItemMatrix(rightHand);
+        Matrix4f hand = runtime.handItemMatrix(rightHand, ItemClassifier.grip(stack));
         if (hand == null) {
             return;
         }

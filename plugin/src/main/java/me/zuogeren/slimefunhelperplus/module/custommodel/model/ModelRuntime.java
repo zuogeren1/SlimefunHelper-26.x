@@ -2213,6 +2213,17 @@ public final class ModelRuntime {
      * <p>挂点骨骼在构建期由候选链解析（见 {@link #RIGHT_HAND_CHAIN}），未命中时返回 {@code null}。
      */
     public Matrix4f handItemMatrix(boolean rightHand) {
+        return handItemMatrix(rightHand, ItemClassifier.Grip.DEFAULT);
+    }
+
+    /**
+     * 手持物品的挂点，按握持类别微调。
+     *
+     * <p>三叉戟/长矛/锤的重心与剑不同，用同一套偏移会插进手里或悬空
+     * （SPM {@code CustomPlayerItemInHandLayer:213-242} 的 {@code applyAuthoredHandTransform}）。
+     * 偏移量照抄 SPM 的 YSM 自定义骨骼那一套（不是原版装备那一套）。
+     */
+    public Matrix4f handItemMatrix(boolean rightHand, ItemClassifier.Grip grip) {
         int index = rightHand ? rightHandBone : leftHandBone;
         if (index < 0) {
             return null;
@@ -2222,6 +2233,16 @@ public final class ModelRuntime {
         matrix.translate(pivot[0] / 16.0F, pivot[1] / 16.0F, pivot[2] / 16.0F);
         matrix.translate(0.0F, -0.0625F, -0.1F);
         matrix.rotateX((float) Math.toRadians(-90.0F));
+        switch (grip) {
+            case TRIDENT -> {
+                // 三叉戟的柄比剑长，往手心方向再收一点
+                matrix.translate(0.0F, 0.0F, -0.0125F);
+            }
+            case SPEAR, LANCE -> matrix.translate(0.0F, -0.01875F, -0.025F);
+            case MACE -> matrix.translate(0.0F, -0.0125F, 0.01875F);
+            default -> {
+            }
+        }
         return matrix;
     }
 
