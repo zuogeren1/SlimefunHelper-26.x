@@ -14,6 +14,12 @@ import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
+import net.minecraft.client.model.animal.parrot.ParrotModel;
+import net.minecraft.client.model.geom.EntityModelSet;
+import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.model.object.equipment.ElytraModel;
+import net.minecraft.client.renderer.entity.ParrotRenderer;
+import net.minecraft.client.renderer.entity.state.ParrotRenderState;
 import net.minecraft.client.renderer.item.ItemModelResolver;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.rendertype.RenderType;
@@ -25,8 +31,11 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.animal.parrot.Parrot;
+import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -70,6 +79,9 @@ public abstract class PlayerModelSubmitMixin {
     private static final int OPAQUE_TINT = -1;
     /** 轮廓趟用的满亮度（原版 {@code submitModel} 给 outline 的那一档）。 */
     private static final int FULL_BRIGHT = 15728880;
+
+    /** 原版翅膀贴图（{@code WingsLayer} 在皮肤没有自带鞘翅/披风时用它）。 */
+    private static final Identifier ELYTRA_TEXTURE = Identifier.withDefaultNamespace("textures/entity/equipment/wings/elytra.png");
 
     private static final AtomicBoolean LOGGED = new AtomicBoolean();
 
@@ -133,6 +145,7 @@ public abstract class PlayerModelSubmitMixin {
             }
             if (mainType != null) {
                 renderHeldItems(runtime, localPlayer, poseStack, collector, light);
+                renderLayers(runtime, avatar, localPlayer, poseStack, collector, light);
             }
             poseStack.popPose();
             if (LOGGED.compareAndSet(false, true)) {
@@ -274,6 +287,187 @@ public abstract class PlayerModelSubmitMixin {
         poseStack.last().rotate(axis.rotationDegrees(degrees));
     }
 
+
+    /**
+     * 原版 {@code AvatarRenderer} 的四个图层：鞘翅、肩头鹦鹉、头顶物、披风。
+     *
+     * <p>HEAD 取消把 {@code LivingEntityRenderer#submit} 的图层循环一起砍掉了，这几层要在这里补回来，
+     * 否则滑翔没翅膀、南瓜/头颅不显示、肩上鹦鹉消失。挂点用模型自己的定位组
+     * （{@code PlayerLocator} 的 {@code ElytraLocator} / {@code *ShoulderLocator} / {@code Head}），
+     * 与 YSM 的 {@code CustomPlayerElytraLayer} / {@code CustomParrotOnShoulderLayer} /
+     * {@code CustomPlayerHeadLayer} 同形；模型没有对应定位组时退回原版的固定偏移。
+     *
+     * <p>顺序照 {@code AvatarRenderer} 构造器：装备层之后是手持物，再是箭矢/耳朵/披风/头顶物/翅膀/鹦鹉。
+     * 这里只补自定义模型会遮住的四层，箭矢与耳朵由模型自己表现。
+     */
+    private static void renderLayers(ModelRuntime runtime, AvatarRenderState avatar, LocalPlayer player,
+            PoseStack poseStack, SubmitNodeCollector collector, int light) {
+        EntityModelSet models = Minecraft.getInstance().getEntityModels();
+        if (models == null) {
+            return;
+        }
+        renderElytra(runtime, avatar, player, poseStack, collector, light, models);
+        renderParrots(runtime, avatar, poseStack, collector, light, models);
+        renderHeadItem(runtime, avatar, poseStack, collector, light);
+    }
+
+    /**
+     * 鞘翅：{@code WingsLayer} 的等价物。
+     *
+     * <p>原版把翅膀挂在 {@code translate(0, 0, 0.125)} 之后，YSM 挂在 {@code ElytraLocator} 上并额外
+     * {@code translate(0, 1.5, 0) · rotZ(180°) · scale(2)}。有定位组时用后者（作者按模型体型摆过位置），
+     * 没有时退回原版偏移，至少滑翔时有翅膀。
+     */
+    private static void renderElytra(ModelRuntime runtime, AvatarRenderState avatar, LocalPlayer player,
+            PoseStack poseStack, SubmitNodeCollector collector, int light, EntityModelSet models) {
+        ItemStack chest = avatar.chestEquipment;
+        if (chest == null || chest.isEmpty() || !chest.is(Items.ELYTRA)) {
+            return;
+        }
+        ElytraModel model = new ElytraModel(models.bakeLayer(ModelLayers.ELYTRA));
+        model.setupAnim(avatar);
+        Identifier texture = elytraTexture(avatar);
+        int count = runtime.locatorGroupSize("ElytraLocator");
+        if (count == 0) {
+            poseStack.pushPose();
+            poseStack.translate(0.0F, 0.0F, 0.125F);
+            submitModel(collector, model, avatar, poseStack, texture, light);
+            poseStack.popPose();
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            Matrix4f locator = runtime.locatorMatrix("ElytraLocator", i);
+            if (locator == null) {
+                continue;
+            }
+            poseStack.pushPose();
+            poseStack.mulPose(locator);
+            poseStack.translate(0.0F, 1.5F, 0.0F);
+            rotateDegrees(poseStack, Axis.ZP, 180.0F);
+            poseStack.scale(2.0F, 2.0F, 2.0F);
+            submitModel(collector, model, avatar, poseStack, texture, light);
+            poseStack.popPose();
+        }
+    }
+
+    /** 鞘翅贴图：皮肤自带优先，其次披风（且披风可见），最后原版翅膀贴图。 */
+    private static Identifier elytraTexture(AvatarRenderState avatar) {
+        PlayerSkin skin = avatar.skin;
+        if (skin != null) {
+            if (skin.elytra() != null) {
+                return skin.elytra().texturePath();
+            }
+            if (skin.cape() != null && avatar.showCape) {
+                return skin.cape().texturePath();
+            }
+        }
+        return ELYTRA_TEXTURE;
+    }
+
+    /**
+     * 肩头鹦鹉：{@code ParrotOnShoulderLayer} 的等价物。
+     *
+     * <p>原版按 {@code translate(±0.4, -1.5, 0)} 挂在身体上；YSM 挂在 {@code *ShoulderLocator} 上，
+     * 只额外 {@code translate(0, 1.5, 0) · rotZ(180°)}。有定位组时用后者。
+     */
+    private static void renderParrots(ModelRuntime runtime, AvatarRenderState avatar, PoseStack poseStack,
+            SubmitNodeCollector collector, int light, EntityModelSet models) {
+        if (avatar.parrotOnLeftShoulder == null && avatar.parrotOnRightShoulder == null) {
+            return;
+        }
+        ParrotModel model = new ParrotModel(models.bakeLayer(ModelLayers.PARROT));
+        renderParrot(runtime, avatar, poseStack, collector, light, model, avatar.parrotOnLeftShoulder, true);
+        renderParrot(runtime, avatar, poseStack, collector, light, model, avatar.parrotOnRightShoulder, false);
+    }
+
+    private static void renderParrot(ModelRuntime runtime, AvatarRenderState avatar, PoseStack poseStack,
+            SubmitNodeCollector collector, int light, ParrotModel model, Parrot.Variant variant,
+            boolean leftShoulder) {
+        if (variant == null) {
+            return;
+        }
+        String locator = leftShoulder ? "LeftShoulderLocator" : "RightShoulderLocator";
+        int count = runtime.locatorGroupSize(locator);
+        ParrotRenderState state = parrotState(avatar, variant);
+        if (count == 0) {
+            poseStack.pushPose();
+            poseStack.translate(leftShoulder ? 0.4F : -0.4F, avatar.isCrouching ? -1.3F : -1.5F, 0.0F);
+            model.setupAnim(state);
+            submitModel(collector, model, state, poseStack, ParrotRenderer.getVariantTexture(variant), light);
+            poseStack.popPose();
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            Matrix4f locatorPose = runtime.locatorMatrix(locator, i);
+            if (locatorPose == null) {
+                continue;
+            }
+            poseStack.pushPose();
+            poseStack.mulPose(locatorPose);
+            poseStack.translate(0.0F, 1.5F, 0.0F);
+            rotateDegrees(poseStack, Axis.ZP, 180.0F);
+            model.setupAnim(state);
+            submitModel(collector, model, state, poseStack, ParrotRenderer.getVariantTexture(variant), light);
+            poseStack.popPose();
+        }
+    }
+
+    /** 肩头鹦鹉的渲染状态：原版 {@code ParrotOnShoulderLayer} 只填这几个字段。 */
+    private static ParrotRenderState parrotState(AvatarRenderState avatar, Parrot.Variant variant) {
+        ParrotRenderState state = new ParrotRenderState();
+        state.pose = ParrotModel.Pose.ON_SHOULDER;
+        state.variant = variant;
+        state.ageInTicks = avatar.ageInTicks;
+        state.walkAnimationPos = avatar.walkAnimationPos;
+        state.walkAnimationSpeed = avatar.walkAnimationSpeed;
+        state.yRot = avatar.yRot;
+        state.xRot = avatar.xRot;
+        return state;
+    }
+
+    /**
+     * 头顶物：{@code CustomHeadLayer} 的等价物。
+     *
+     * <p>原版把方块/头颅按 {@code translateToHead} 的固定偏移挂在头上；YSM 挂在 {@code Head} 定位组上，
+     * 缩放 0.625、上移 0.25。有定位组时用后者。
+     */
+    private static void renderHeadItem(ModelRuntime runtime, AvatarRenderState avatar, PoseStack poseStack,
+            SubmitNodeCollector collector, int light) {
+        if (avatar.headItem == null || avatar.headItem.isEmpty()) {
+            return;
+        }
+        int count = runtime.locatorGroupSize("Head");
+        if (count == 0) {
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            Matrix4f locator = runtime.locatorMatrix("Head", i);
+            if (locator == null) {
+                continue;
+            }
+            poseStack.pushPose();
+            poseStack.mulPose(locator);
+            poseStack.scale(0.625F, 0.625F, 0.625F);
+            poseStack.translate(0.0F, 0.25F, 0.0F);
+            avatar.headItem.submit(poseStack, collector, light, OverlayTexture.NO_OVERLAY, 0);
+            poseStack.popPose();
+        }
+    }
+
+    /**
+     * 提交一个原版模型：26.2 的 {@code submitModel} 末尾多一个 {@code CrumblingOverlay} 参数，26.3 去掉了。
+     *
+     * <p>两个版本都收 {@code (Model, S, PoseStack, Identifier, int light, int overlay, int tint)} 这一段，
+     * 只有尾部不同，所以只在这一处拆版本。
+     */
+    private static <S> void submitModel(SubmitNodeCollector collector, net.minecraft.client.model.Model<? super S> model,
+            S state, PoseStack poseStack, Identifier texture, int light) {
+//#if MC >= 260300
+//$$         collector.submitModel(model, state, poseStack, texture, light, OverlayTexture.NO_OVERLAY, -1);
+//#else
+        collector.submitModel(model, state, poseStack, texture, light, OverlayTexture.NO_OVERLAY, -1, null);
+//#endif
+    }
 
     private static void renderHeldItems(ModelRuntime runtime, LocalPlayer player, PoseStack poseStack,
             SubmitNodeCollector collector, int light) {
