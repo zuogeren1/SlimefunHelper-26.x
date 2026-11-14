@@ -1400,16 +1400,20 @@ public final class ModelRuntime {
      * 片段内时间：按 {@code loopMode} 决定循环还是停在末帧。
      *
      * <p>与 SPM {@code AnimationMapper:48-50} 一致：0=PLAY_ONCE、1=LOOP、3=HOLD_ON_LAST_FRAME。
-     * 只有 LOOP 取模，其余一律 {@code min(elapsed, length)} —— 取模会让单次动作的收尾帧永远播不到，
-     * 而物理片段若被当成单次，弹簧每轮只积分一次就冻住。
+     * 只有 LOOP 取模，其余一律 {@code min(elapsed, length)} —— 取模会让单次动作的收尾帧永远播不到。
+     *
+     * <p><b>默认层一律循环</b>：YSM 的 {@code ParallelPredicate} 走 {@code playLoopAnimation}，
+     * 也就是 {@code LoopType.LOOP}，不看模型里写的 {@code loopMode}。语料里 {@code parallel6}/{@code parallel7}
+     * 常写成 {@code loopMode=2}（PLAY_ONCE）却承载弹簧积分，按单次处理会让积分只跑一个片段长度就冻住，
+     * 表现成「头发完全没有物理」。
      */
-    private static float layerTime(RawYsmModel.RawAnimation clip, float ageSeconds) {
+    private static float layerTime(RawYsmModel.RawAnimation clip, float ageSeconds, boolean alwaysLoop) {
         float length = lengthOf(clip);
         if (length <= 0.0F) {
             return 0.0F;
         }
         float elapsed = Math.max(0.0F, ageSeconds);
-        return clip.loopMode == 1 ? elapsed % length : Math.min(elapsed, length);
+        return alwaysLoop || clip.loopMode == 1 ? elapsed % length : Math.min(elapsed, length);
     }
 
     private float overlayTime(RawYsmModel.RawAnimation clip, float ageSeconds) {
@@ -1445,7 +1449,8 @@ public final class ModelRuntime {
             if (layer == null) {
                 continue;
             }
-            float time = layerTime(layer, ageSeconds);
+            // 默认层（pre_parallelN / parallelN）由 ParallelPredicate 无条件循环，不看片段自己的 loopMode
+            float time = layerTime(layer, ageSeconds, true);
             runTimeline(layer, time, ageSeconds, name);
             advanceSound(name, layer, time);
             for (int i = 0; i < bones.size(); i++) {
