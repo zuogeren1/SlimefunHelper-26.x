@@ -68,6 +68,11 @@ dependencies {
 	// 只挂编译期：绝不把宿主类打进插件 jar。
 	compileOnly files(hostJar)
 
+	// YSM 模型内嵌贴图的 WebP/AVIF 解码器（纯 Java，无 native）。
+	// 与 SPM 用同一个库（com.github.TartaricAlkaline:ImageStream，jitpack），
+	// 打进插件 jar：模型贴图是运行时数据，不能指望玩家自己装这个库。
+	implementation 'com.github.TartaricAlkaline:ImageStream:-SNAPSHOT'
+
 	// Conflux 适配里的 @Getter/@RequiredArgsConstructor 等与宿主保持同一版本
 	compileOnly 'org.projectlombok:lombok:1.18.48'
 	annotationProcessor 'org.projectlombok:lombok:1.18.48'

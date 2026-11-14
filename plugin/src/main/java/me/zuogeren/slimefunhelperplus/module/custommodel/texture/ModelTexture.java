@@ -1,6 +1,7 @@
 package me.zuogeren.slimefunhelperplus.module.custommodel.texture;
 
 import com.mojang.blaze3d.platform.NativeImage;
+import java.awt.image.BufferedImage;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -9,6 +10,8 @@ import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
+import rip.ysm.imagestream.avif.AvifDecoder;
+import rip.ysm.imagestream.webp.WebpDecoder;
 
 /**
  * 把 YSM 模型里内嵌的贴图字节注册成游戏纹理。
@@ -117,10 +120,16 @@ public final class ModelTexture {
                 return raw;
             }
         }
-        // 声明的 imageFormat 可能与真实字节不符（SPM 也是按文件头重判），所以先认 magic：
-        // 认得出是 WebP/AVIF 就直接放弃，认成 PNG/JPEG/BMP 就交给 NativeImage。
+        // 声明的 imageFormat 可能与真实字节不符（SPM 也是按文件头重判），所以先认 magic。
+        // WebP/AVIF 交给 ImageStream（纯 Java 解码器，与 SPM 同一个库）；
+        // 其余交给 NativeImage，它只认 PNG/JPEG/BMP。
         String magic = magicName(texture.data);
-        if (!"webp".equals(magic) && !"avif".equals(magic)) {
+        if ("webp".equals(magic) || "avif".equals(magic)) {
+            NativeImage decoded = decodeWithImageStream(texture.data, magic);
+            if (decoded != null) {
+                return decoded;
+            }
+        } else {
             try {
                 return NativeImage.read(texture.data);
             } catch (Throwable encodedFailure) {
@@ -134,6 +143,35 @@ public final class ModelTexture {
                 + " size=" + texture.width + "x" + texture.height
                 + " magic=" + magic + " key=" + key);
         return placeholderImage();
+    }
+
+    /**
+     * WebP/AVIF 解码：{@link NativeImage} 只认 PNG/JPEG/BMP，这两种要靠 ImageStream。
+     *
+     * <p>解码器返回 {@link BufferedImage}，这里逐像素搬进 {@link NativeImage}。
+     * 解不出来返回 {@code null}，由调用方退回占位图 —— 贴图缺失不该让整个模型建不出来。
+     */
+    private static NativeImage decodeWithImageStream(byte[] data, String magic) {
+        try {
+            BufferedImage image = "webp".equals(magic)
+                    ? new WebpDecoder().read(data)
+                    : new AvifDecoder().read(data);
+            if (image == null) {
+                return null;
+            }
+            int width = image.getWidth();
+            int height = image.getHeight();
+            NativeImage result = new NativeImage(NativeImage.Format.RGBA, width, height, false);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    result.setPixelABGR(x, y, image.getRGB(x, y));
+                }
+            }
+            return result;
+        } catch (Throwable throwable) {
+            Debug.info("[SFH+] " + magic + " 解码失败: " + throwable);
+            return null;
+        }
     }
 
     private static NativeImage rawRgba(RawYsmModel.RawTexture texture) {
