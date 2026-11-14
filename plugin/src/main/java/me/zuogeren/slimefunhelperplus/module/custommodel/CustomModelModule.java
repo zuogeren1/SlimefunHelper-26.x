@@ -4,6 +4,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.FlagRef;
+import me.matl114.managers.config.StringRef;
 import me.zuogeren.slimefunhelperplus.config.PluginConfig;
 
 /**
@@ -24,6 +25,12 @@ public class CustomModelModule extends BaseModule {
 
     public final FlagRef enable = flagBuilder(root.addEnable()).defaultValue(false).build();
 
+    /** 模型文件名（相对 {@code config/slimefunhelper-plus/models}），P4 接 ClickGui 选择器。 */
+    public final StringRef model = builder(root.add("model"), String.class)
+            .defaultValue("")
+            .updateListener(this::onModelChanged)
+            .build();
+
     public CustomModelModule() {
         super("CustomModel");
         bindFlag(enable);
@@ -31,12 +38,20 @@ public class CustomModelModule extends BaseModule {
 
     @Override
     public void onEnableModule() {
-        log("自定义模型已启用（P2 格式层探针）");
-        ModelProbe.scanAsync();
+        log("自定义模型已启用");
+        ModelCatalog.rescan();
+        CustomModelManager.reloadAsync(model.get());
     }
 
     @Override
     public void onDisableModule() {
+        CustomModelManager.clear();
         log("自定义模型已停用");
+    }
+
+    private void onModelChanged(String value) {
+        if (isActive()) {
+            CustomModelManager.reloadAsync(value);
+        }
     }
 }

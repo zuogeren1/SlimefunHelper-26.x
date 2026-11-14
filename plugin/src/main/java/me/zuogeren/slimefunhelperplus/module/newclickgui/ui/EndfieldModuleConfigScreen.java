@@ -43,6 +43,9 @@ import me.matl114.utils.ChatUtils;
 import me.matl114.utils.config.NumberClamp;
 import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.versioned.api.VDrawContext;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
 import net.minecraft.client.gui.screens.Screen;
@@ -406,6 +409,28 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                             "读取",
                             "选一个快照文件读回来：文件里的配置会整份套到当前配置上。",
                             () -> manager.openSnapshotScreen(NewClickGui.elementFactory(), false)));
+        }
+        if (module instanceof CustomModelModule custom) {
+            String current = custom.model.get();
+            return List.of(
+                    new Action(
+                            "模型：" + (current.isBlank() ? "未选择" : current),
+                            "点击切换到下一个",
+                            "▸",
+                            "在 config/slimefunhelper-plus/models 里循环切换；也可以直接在「模型」一行里填文件名。",
+                            () -> custom.model.set(ModelCatalog.cycle(custom.model.get()))),
+                    new Action(
+                            "重新扫描模型",
+                            "models 目录：" + ModelCatalog.names().size() + " 个",
+                            "↻",
+                            "重新扫描模型目录；扫描结果用于切换与选择。",
+                            ModelCatalog::rescan),
+                    new Action(
+                            "重载当前模型",
+                            current.isBlank() ? "还没有选择模型" : current,
+                            "⟳",
+                            "重新解密、解析并注册当前模型。",
+                            () -> CustomModelManager.reloadAsync(custom.model.get())));
         }
         return List.of();
     }

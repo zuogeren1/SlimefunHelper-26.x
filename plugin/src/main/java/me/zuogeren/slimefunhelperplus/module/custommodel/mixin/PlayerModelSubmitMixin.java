@@ -4,7 +4,9 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import me.matl114.utils.Debug;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
+import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
@@ -61,14 +63,28 @@ public abstract class PlayerModelSubmitMixin {
         if (localPlayer == null || avatar.id != localPlayer.getId()) {
             return;
         }
-        Identifier texture = avatar.skin.body().texturePath();
-        if (texture == null) {
-            return;
-        }
         int light = avatar.lightCoords;
-        collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(texture), (pose, buffer) -> emitBox(pose, buffer, light));
-        if (LOGGED.compareAndSet(false, true)) {
-            Debug.info("[SFH+] custom model debug box rendered, texture=" + texture);
+        ModelRuntime runtime = CustomModelManager.runtime();
+        if (runtime != null) {
+            poseStack.pushPose();
+            poseStack.last().pose().rotateY((float) Math.toRadians(180.0F - avatar.bodyRot));
+            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(runtime.texture()),
+                    (pose, buffer) -> runtime.render(pose, buffer, light));
+            poseStack.popPose();
+            if (LOGGED.compareAndSet(false, true)) {
+                Debug.info("[SFH+] custom model rendered: " + CustomModelManager.loadedFile()
+                        + " texture=" + runtime.texture());
+            }
+        } else {
+            Identifier texture = avatar.skin.body().texturePath();
+            if (texture == null) {
+                return;
+            }
+            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(texture),
+                    (pose, buffer) -> emitBox(pose, buffer, light));
+            if (LOGGED.compareAndSet(false, true)) {
+                Debug.info("[SFH+] custom model debug box rendered, texture=" + texture);
+            }
         }
         callbackInfo.cancel();
     }
