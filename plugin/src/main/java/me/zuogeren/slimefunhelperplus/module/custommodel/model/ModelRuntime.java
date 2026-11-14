@@ -126,6 +126,14 @@ public final class ModelRuntime {
     /** 上一次看到的手持物 / 挥动 tick / 使用 tick，用来认出「换物品」「新一次挥动」「新一次使用」。 */
     private ItemStack lastHoldMain = ItemStack.EMPTY;
     private ItemStack lastHoldOff = ItemStack.EMPTY;
+    /** 基础姿态过渡：上一帧的快照与起始时刻。 */
+    private float[] lastBasePoses;
+    private float blendStart = Float.NaN;
+    /** 过渡时长（秒），对齐 SPM 主控制器的 0.1f（TicksInterpolator 内部乘 20，即 2 tick）。 */
+    private static final float BLEND_SECONDS = 0.1F;
+
+    /** 26.3 上用来识别「新一次挥动」的 {@code SwingDescription} 实例。 */
+    private Object lastSwingMarker;
     private float lastSwingTick = -1.0F;
     private float lastUseTick = -1.0F;
     private boolean swinging;
@@ -418,17 +426,31 @@ public final class ModelRuntime {
                 parallelCount++;
             }
         }
+        // 控制器槽名与片段名差一个下划线（player.parallel_6 驱动 parallel6），先换算成片段名
+        Set<String> driven = new HashSet<>();
+        for (ModelController controller : runtime.controllers) {
+            driven.add(clipNameOfSlot(controller.slot()));
+        }
         List<String> base = new ArrayList<>();
         List<String> parallel = new ArrayList<>();
         for (int index = 0; index < 8; index++) {
+            // 有模型控制器的槽让位给状态机：YSM 里一个槽只有一个控制器，模型的定义会顶掉
+            // 「无条件循环 parallelN」这个默认实现，两边都跑就是同一段动画叠两遍。
             String baseName = "pre_parallel" + index;
-            if (clips.containsKey(baseName)) {
+            if (clips.containsKey(baseName) && !driven.contains(baseName)) {
                 base.add(baseName);
             }
             String parallelName = "parallel" + index;
-            if (clips.containsKey(parallelName)) {
+            if (clips.containsKey(parallelName) && !driven.contains(parallelName)) {
                 parallel.add(parallelName);
             }
+        }
+        // 默认的 player.pre_parallel_0 控制器最先播的是模型的 hair_physics
+        // （YSM 的 builtin/misc/4_default_controllers/controller/main_controllers.json），
+        // 名字不在 pre_parallelN 这一族里，不单独挑出来就整条不播。
+        String hair = findClipIgnoreCase(clips, "hair_physics");
+        if (hair != null && !driven.contains("pre_parallel0")) {
+            base.add(0, hair);
         }
         runtime.preParallelBase = base;
         runtime.parallelBase = parallel;
@@ -436,34 +458,6 @@ public final class ModelRuntime {
             runtime.widthScale = model.properties.widthScale > 0.0F ? model.properties.widthScale : 1.0F;
             runtime.heightScale = model.properties.heightScale > 0.0F ? model.properties.heightScale : 1.0F;
         }
-        // 一次性尺寸诊断：模型静止包围盒 vs vanilla 玩家模型（HumanoidModel 32px = 2.0 格）
-        float lo = Float.MAX_VALUE;
-        float hi = -Float.MAX_VALUE;
-        org.joml.Vector3f probe = new org.joml.Vector3f();
-        for (int i = 0; i < count; i++) {
-            if (hidden[i]) {
-                continue;
-            }
-            for (RawYsmModel.RawCube cube : bones.get(i).cubes) {
-                if (cube.faces == null) {
-                    continue;
-                }
-                for (RawYsmModel.RawFace face : cube.faces) {
-                    if (face.positions == null) {
-                        continue;
-                    }
-                    for (float[] raw : face.positions) {
-                        probe.set(raw[0], raw[1], raw[2]);
-                        matrices[i].transformPosition(probe);
-                        lo = Math.min(lo, probe.y);
-                        hi = Math.max(hi, probe.y);
-                    }
-                }
-            }
-        }
-        Debug.info("[SFH+] size wScale=" + runtime.widthScale + " hScale=" + runtime.heightScale
-                + " geoHeight=" + (hi - lo) + " vanillaModelHeight=2.0"
-                + " -> ours=" + ((hi - lo) * runtime.heightScale) + " vanilla=" + (2.0F * 0.9375F));
         int timelineCount = 0;
         for (RawYsmModel.RawAnimation clip : clips.values()) {
             if (clip != null && clip.timelineEvents != null) {
@@ -497,7 +491,9 @@ public final class ModelRuntime {
             }
             for (RawYsmModel.RawAnimationController controller : file.controllers.values()) {
                 ModelController machine = ModelController.parse(controller);
-                if (machine != null && !machine.slot().isEmpty()) {
+                // 主体态与手部三层由代码侧判定（ItemClassifier 那套优先级）；模型把默认状态机
+                // 整份抄进 controller.json 的情况很常见，再求值一次等于同一段动画叠两遍。
+                if (machine != null && !machine.slot().isEmpty() && !ModelController.isCodeDriven(machine.slot())) {
                     parsed.add(machine);
                 }
             }
@@ -1041,7 +1037,43 @@ public final class ModelRuntime {
      * <p>片段名由 {@link ItemClassifier#candidates} 给出的后缀候选拼成（{@code hold_mainhand:sword}、
      * {@code swing$minecraft:mace} 这类），取第一个存在的。挥动与使用是单次播放，持有是循环。
      */
-    private void sampleHandLayers(AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
+    /**
+     * 基础姿态的短时交叉淡入：切片段时把上一帧的姿态按比例混进来，避免「跑动忽然站定」那种硬切。
+     *
+     * <p>只作用于基础层（pre_parallel → 主动画 → 轮盘/额外/控制器），手部动作、parallel 与头部朝向
+     * 都在它之后应用，不受影响 —— 那些层要么是瞬时动作，要么本身就带自己的时间轴。
+     */
+    private void blendBasePose(float ageSeconds) {
+        int needed = poses.length;
+        if (lastBasePoses == null || lastBasePoses.length != needed) {
+            lastBasePoses = new float[needed];
+            System.arraycopy(poses, 0, lastBasePoses, 0, needed);
+            blendStart = Float.NaN;
+            return;
+        }
+        if (Float.isFinite(blendStart)) {
+            float progress = (ageSeconds - blendStart) / BLEND_SECONDS;
+            if (progress >= 1.0F) {
+                blendStart = Float.NaN;
+            } else {
+                // 平滑一下：线性混合在中段会有明显的「同时存在两个姿态」感
+                float t = Math.max(0.0F, progress);
+                t = t * t * (3.0F - 2.0F * t);
+                for (int i = 0; i < needed; i++) {
+                    poses[i] = lastBasePoses[i] + (poses[i] - lastBasePoses[i]) * t;
+                }
+            }
+        }
+        System.arraycopy(poses, 0, lastBasePoses, 0, needed);
+    }
+
+    /**
+     * 持有层：换物品时从头播一次，其余时间保持。
+     *
+     * <p>它排在主动画**之前**（与 {@code pre_parallel} 同级），所以走路、待机这类主体态会覆盖它 ——
+     * 模型作者的持有动画往往把全身都摆一遍，压在主动画之上会让呼吸、迈腿全都停住。
+     */
+    private void sampleHoldLayers(LocalPlayer player, float ageSeconds) {
         if (player == null) {
             return;
         }
@@ -1058,7 +1090,16 @@ public final class ModelRuntime {
         }
         applyHandLayer(player, InteractionHand.OFF_HAND, "hold_offhand", ageSeconds, handStartOff);
         applyHandLayer(player, InteractionHand.MAIN_HAND, "hold_mainhand", ageSeconds, handStartMain);
+    }
 
+    /**
+     * 动作层：挥动与使用。这两层排在主动画与轮盘层**之后**，因为它们是一次性的动作，
+     * 本来就该盖住待机/走路的手臂姿态。
+     */
+    private void sampleActionLayers(AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
+        if (player == null) {
+            return;
+        }
         // 挥动与使用是「起手时解析一次、播完才释放」：Wiki 明确说挥动动画
         // 「即使玩家停止挥动也不会中断，直至播放完毕」—— 边播边跟着 swinging 走会把收尾那段切掉，
         // 重锤这类长尾动画就会在攻击动作结束时直接弹回待机。
@@ -1066,8 +1107,9 @@ public final class ModelRuntime {
         if (swingingNow) {
             InteractionHand hand = swingHand(avatar, player);
             float swingTick = swingProgress(avatar, player);
-            // swingTime 每 tick 递增，只有回到 0 或变小才是新的一次（YSM 的 SwingPredicate:52-56）
-            if (!swinging || swingTick < lastSwingTick) {
+            // 26.2 及以前 swingTime 每 tick 递增，回到 0 或变小才是新的一次（YSM 的 SwingPredicate:52-56）；
+            // 26.3 只有恒定的 durationTicks，改看 SwingDescription 的实例身份。
+            if (!swinging || isNewSwing(avatar, swingTick)) {
                 boolean offHandSide = hand == InteractionHand.OFF_HAND;
                 // 主手分类前缀是 swing（无下划线），副手是 swing_offhand；都对不上就退到 swing_hand
                 swingClip = resolveHandClip(player, hand, offHandSide ? "swing_offhand" : "swing",
@@ -1327,6 +1369,9 @@ public final class ModelRuntime {
             return;
         }
         MolangVariables.bind(player, avatar, variables);
+        // 控制器条件里写的 ctrl.idle / ctrl.run 就是这套主体态判定
+        MolangVariables.bindControl(selectControlName(avatar, player));
+        MolangVariables.clearControllerState();
         ModelPhysics.bind(physics);
         physics.advance(ageSeconds);
         int hurtTime = player == null ? 0 : player.hurtTime;
@@ -1338,11 +1383,15 @@ public final class ModelRuntime {
         if (restart) {
             lastClip = clip;
             lastClipStart = ageSeconds;
-            // 片段切换时打一行：排查「该播的片段没播」时，这行是唯一能直接看到当前状态的东西
-            Debug.info("[SFH+] clip -> " + clipName(clip) + " (dead=" + (player != null && player.isDeadOrDying())
-                    + " fly=" + avatar.isFallFlying + " passenger=" + avatar.isPassenger + ")");
+            blendStart = ageSeconds;
         }
         float time = clipTime(clip, ageSeconds);
+        // 过渡窗口内把新动画的时间钉在 0：SPM 的 BEGINNING_TRANSITION 就是这样做的
+        // （过渡期间 animTime 恒为 0，走完才把 tick 减去过渡长度继续推进）。
+        // 只混姿态不让时间停住的话，动作本身已经在跑，观感仍是「跳一下」。
+        if (Float.isFinite(blendStart) && ageSeconds - blendStart < BLEND_SECONDS) {
+            time = 0.0F;
+        }
         java.util.Arrays.fill(frameState, (byte) 0);
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
@@ -1352,6 +1401,8 @@ public final class ModelRuntime {
         // 缩放在层间是整体替换而不是相乘：作者在 boat/sleep 这类主动画里用 scale=1 把 pre_parallel 藏起来的
         // 道具重新显示出来，相乘会把这个 1 乘成 0、道具永远出不来。
         sampleLayers(preParallelBase, ageSeconds);
+        // 持有层在主动画之前：主体态（idle/walk）要能盖住它，否则模型全身被摆成持物姿势后呼吸和迈腿全停。
+        sampleHoldLayers(player, ageSeconds);
         runTimeline(clip, time, ageSeconds);
         for (int i = 0; i < bones.size(); i++) {
             samplePoseOver(clip, i, time, ageSeconds);
@@ -1373,28 +1424,35 @@ public final class ModelRuntime {
                 sampleOverlay(activeExtra, i, extraTime, ageSeconds);
             }
         }
-        // 控制器槽（parallel*/pre_parallel*）：模型自带的道具显隐、换装都写在这些片段里，
-        // 由状态机按 Molang 条件选一个当覆盖层，叠在基础姿态之上。
+        // 控制器槽（parallel*/pre_parallel*/模型自定义槽）：道具显隐、换装、连击链都写在这些片段里，
+        // 由状态机按 Molang 条件选出来当覆盖层，叠在基础姿态之上。
         for (ModelController controller : controllers) {
-            String overlayName = controller.tick(time, ageSeconds);
-            if (overlayName == null) {
-                continue;
+            List<String> overlayNames = controller.tick(ageSeconds, this::lengthOfClip);
+            if (!overlayNames.isEmpty()) {
+                // 同一状态里的动画共用一个起点；各自按自己的循环模式取时间 —— 单次动作播完停在最后一帧，
+                // 取模会让收尾帧永远播不到（连击链就是靠「播完 → all_animations_finished」往下走的）。
+                float elapsed = Math.max(0.0F, ageSeconds - controller.stateStart());
+                for (String overlayName : overlayNames) {
+                    RawYsmModel.RawAnimation overlayClip = clip(overlayName);
+                    if (overlayClip == null || overlayClip.boneAnimations == null) {
+                        continue;
+                    }
+                    float overlayLength = lengthOf(overlayClip);
+                    float overlayTime = overlayLength <= 0.0F ? 0.0F
+                            : overlayClip.loopMode == 1 ? elapsed % overlayLength : Math.min(elapsed, overlayLength);
+                    runTimeline(overlayClip, overlayTime, ageSeconds);
+                    for (int i = 0; i < bones.size(); i++) {
+                        sampleOverlay(overlayClip, i, overlayTime, ageSeconds);
+                    }
+                }
             }
-            RawYsmModel.RawAnimation overlayClip = clip(overlayName);
-            if (overlayClip == null || overlayClip.boneAnimations == null) {
-                continue;
-            }
-            float overlayLength = lengthOf(overlayClip);
-            float overlayTime = overlayLength <= 0.0F ? 0.0F : ageSeconds % overlayLength;
-            runTimeline(overlayClip, overlayTime, ageSeconds);
-            for (int i = 0; i < bones.size(); i++) {
-                sampleOverlay(overlayClip, i, overlayTime, ageSeconds);
-            }
+            controller.finishFrame();
         }
         // 手部条件动画：YSM 的控制器顺序是 pre_hold → hold_offhand → hold_mainhand → pre_swing → swing
         // → pre_use → use，全部排在主动画之后、parallel 之前，且是**覆盖**（绝对姿态）而不是相加。
         // 主副手各一层、互不覆盖（不同手臂），万一同骨骼则 mainhand 赢（顺序在后）。
-        sampleHandLayers(avatar, player, ageSeconds);
+        blendBasePose(ageSeconds);
+        sampleActionLayers(avatar, player, ageSeconds);
         // parallel 槽在 YSM 里排在 main 之后，所以它既能把通道加到主姿态上，也能在缩放上盖掉前面几层
         sampleLayers(parallelBase, ageSeconds);
         // 头部朝向：YSM 在动画求值之后把视线角度加到 Head 组骨骼上（CustomHumanoidEntity#codeAnimation），
@@ -1453,6 +1511,9 @@ public final class ModelRuntime {
             lastClipStart = ageSeconds;
         }
         MolangVariables.bind(Minecraft.getInstance().player, null, variables);
+        // 第一人称没有渲染状态，所有 ctrl.* 一律按未绑定（条件为假）
+        MolangVariables.bindControl("");
+        MolangVariables.clearControllerState();
         ModelPhysics.bind(physics);
         physics.advance(ageSeconds);
         float time = clipTime(clip, ageSeconds);
@@ -1614,6 +1675,34 @@ public final class ModelRuntime {
     }
 
     /**
+     * 控制器槽名 → 它驱动的片段名：YSM 的槽是 {@code parallel_6} / {@code pre_parallel_0}，
+     * 片段却是 {@code parallel6} / {@code pre_parallel0}，少一个下划线。
+     */
+    private static String clipNameOfSlot(String slot) {
+        int underscore = slot.lastIndexOf('_');
+        if (underscore > 0 && underscore + 2 == slot.length() && Character.isDigit(slot.charAt(underscore + 1))) {
+            return slot.substring(0, underscore) + slot.charAt(underscore + 1);
+        }
+        return slot;
+    }
+
+    /** 按名字取片段长度，给控制器判断「本状态的动画播完没有」。 */
+    private float lengthOfClip(String name) {
+        RawYsmModel.RawAnimation clip = clip(name);
+        return clip == null ? 0.0F : lengthOf(clip);
+    }
+
+    /** 片段名大小写不敏感查找：YSM 默认控制器里写的是 {@code Hair_Physics}，模型里却常写成小写。 */
+    private static String findClipIgnoreCase(Map<String, RawYsmModel.RawAnimation> clips, String wanted) {
+        for (String name : clips.keySet()) {
+            if (name.equalsIgnoreCase(wanted)) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    /**
      * 片段时间轴长度（秒）。{@code length} 是 {@code Infinity} 的片段要原样留着 —— 作者的用意是
      * 「不循环、{@code query.anim_time} 一直长下去」（pre_parallel 里那几条无限缠绕的发丝就是靠它算相位）；
      * 折成关键帧最大时间会让 {@code ageSeconds % length} 恒为 0，动画和相位一起冻在开头。
@@ -1661,6 +1750,24 @@ public final class ModelRuntime {
         //#endif
     }
 
+    /**
+     * 是否是新一次挥动。
+     *
+     * <p>26.3 的 {@code SwingDescription.durationTicks} 是<b>挥动总时长（常量）</b>，不随时间变化；
+     * 快连击时 {@code currentSwing} 又一直非空，递减判据永远不成立 —— 只能靠实例身份：
+     * 每次 {@code swing()} 都会新建一个 {@code SwingDescription} 记录。
+     */
+    private boolean isNewSwing(AvatarRenderState avatar, float swingTick) {
+        //#if MC >= 260300
+        //$$ Object current = avatar == null ? null : avatar.currentSwing;
+        //$$ boolean fresh = current != lastSwingMarker;
+        //$$ lastSwingMarker = current;
+        //$$ return fresh;
+        //#else
+        return swingTick < lastSwingTick;
+        //#endif
+    }
+
     /** 挥动进度（tick）。26.3 只有 {@code currentSwing.durationTicks()}，26.2 及以前是实体字段。 */
     private static float swingProgress(AvatarRenderState avatar, LocalPlayer player) {
         //#if MC >= 260300
@@ -1705,6 +1812,70 @@ public final class ModelRuntime {
             }
         }
         return null;
+    }
+
+    /**
+     * 主体态名字，供控制器的 {@code ctrl.idle} / {@code ctrl.run} 这类谓词读。
+     *
+     * <p>顺序照 YSM {@code ControlReadBuiltins#selectedControl}：死亡 → 激流 → 睡觉 → 游泳 →
+     * 游泳姿态（动/静）→ 攀爬 → 飞行 → 鞘翅 → 水中悬停 → 受击 → 跳跃 → 潜行（动/静）→ 疾跑 → 走 → 待机。
+     * 骑乘时 YSM 直接给空串（载具自己有控制器），所以 {@code ctrl.*} 在车上全为假。
+     *
+     * <p>和 {@link #pickClip} 分开算：那边要按「模型里有没有这条片段」逐级回退，这里要的是
+     * 「玩家当前处在哪个状态」这个纯判定，缺片段不该影响 {@code ctrl.*}。
+     */
+    private static String selectControlName(AvatarRenderState avatar, LocalPlayer player) {
+        if (player == null) {
+            return "";
+        }
+        if (player.isPassenger()) {
+            return "";
+        }
+        if (player.isDeadOrDying()) {
+            return "death";
+        }
+        if (player.isAutoSpinAttack()) {
+            return "riptide";
+        }
+        if (player.getPose() == Pose.SLEEPING) {
+            return "sleep";
+        }
+        if (player.isSwimming()) {
+            return "swim";
+        }
+        boolean moving = avatar != null && avatar.walkAnimationSpeed > MIN_MOVING;
+        if (player.getPose() == Pose.SWIMMING) {
+            return moving ? "climb" : "climbing";
+        }
+        if (player.onClimbable()) {
+            double vertical = player.getDeltaMovement().y;
+            return vertical > 1.0E-4 ? "ladder_up" : vertical < -1.0E-4 ? "ladder_down" : "ladder_stillness";
+        }
+        if (player.getAbilities().flying) {
+            return "fly";
+        }
+        if (player.isFallFlying()) {
+            return "elytra_fly";
+        }
+        if (player.isInWater() && !player.onGround()) {
+            return "swim_stand";
+        }
+        if (player.hurtTime > 0) {
+            return "attacked";
+        }
+        if (!player.onGround() && !player.isInWater()) {
+            return "jump";
+        }
+        if (player.onGround() && player.getPose() == Pose.CROUCHING) {
+            return moving ? "sneak" : "sneaking";
+        }
+        if (player.onGround() && player.isSprinting()) {
+            return "run";
+        }
+        if (player.onGround() && moving) {
+            return "walk";
+        }
+        return "idle";
     }
 
     /** 状态表按 YSM 的 {@code AnimationRegister} 排序；缺失的动画退回 idle，再退回静止。 */

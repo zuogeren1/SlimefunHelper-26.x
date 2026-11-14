@@ -21,6 +21,14 @@ public final class MolangExpression {
 
     public interface Expr {
         float eval(float animTime, float lifeTime);
+
+        /**
+         * 本帧这条表达式是不是「没有值」（{@code v.*} 还没被写过）。只有 {@code ??} 用到它：
+         * 其余场合未赋值的局部变量一律按 0 参与运算，与作者 {@code expr + v.hv} 的写法对得上。
+         */
+        default boolean isNull(float animTime, float lifeTime) {
+            return Float.isNaN(eval(animTime, lifeTime));
+        }
     }
 
     /** 时间轴上的语句：求值只为副作用（写 {@code v.*}），返回值丢弃。 */
@@ -265,8 +273,32 @@ public final class MolangExpression {
             return this.text.substring(start, this.index).toLowerCase(java.util.Locale.ROOT);
         }
 
+        /**
+         * Molang 的空值合并 {@code a ?? b}：左边没有值（{@code v.*} 还没被写过）时取右边。
+         *
+         * <p>优先级夹在三元与 {@code ||} 之间，正好避开 {@code ? :} 的首问号。
+         * 未赋值的 {@code v.*} 在算术里仍当 0 用（作者写成 {@code expr + v.hv}），只有 {@code ??}
+         * 这一处需要区分「没值」与「值是 0」，判定交给 {@link Variable#isNull}：表达式按原文缓存，
+         * 变量表每帧都在变，只能运行期问。
+         */
+        private Expr coalesce() {
+            Expr left = or();
+            while (true) {
+                skipSpace();
+                if (!peek("??")) {
+                    return left;
+                }
+                this.index += 2;
+                Expr right = or();
+                Expr first = left;
+                left = (animTime, lifeTime) -> first.isNull(animTime, lifeTime)
+                        ? right.eval(animTime, lifeTime)
+                        : first.eval(animTime, lifeTime);
+            }
+        }
+
         private Expr ternary() {
-            Expr condition = or();
+            Expr condition = coalesce();
             skipSpace();
             if (!peek('?')) {
                 return condition;
@@ -486,6 +518,20 @@ public final class MolangExpression {
             return new Literal(value);
         }
 
+        /** 变量引用：{@code v.*} 未赋值时 {@link #eval} 给 0，{@link #isNull} 给真。 */
+        private record Variable(String name) implements Expr {
+            @Override
+            public float eval(float animTime, float lifeTime) {
+                return MolangVariables.get(name);
+            }
+
+            @Override
+            public boolean isNull(float animTime, float lifeTime) {
+                // 未赋过值的 v.* 是「空」；查询量没有值（NaN）同样算空，?? 才会退到默认值
+                return !MolangVariables.isDefined(name) || Float.isNaN(eval(animTime, lifeTime));
+            }
+        }
+
         private record Literal(String text) implements Expr {
             @Override
             public float eval(float animTime, float lifeTime) {
@@ -542,8 +588,9 @@ public final class MolangExpression {
                     return (animTime, lifeTime) -> (float) Math.PI;
                 }
                 default -> {
-                    // ysm.* / query.* 的实体查询量：按每帧绑定的上下文取值；未实现的仍落 NaN
-                    return (animTime, lifeTime) -> MolangVariables.get(name);
+                    // ysm.* / query.* 的实体查询量按每帧绑定的上下文取值；未实现的仍落 NaN。
+                    // v.* 用 Variable 包一层：算术上当 0，但 ?? 能问出「有没有被赋过值」。
+                    return new Variable(name);
                 }
             }
         }
@@ -664,6 +711,36 @@ public final class MolangExpression {
                                 * (Math.max(low, high) - min);
                     };
                 }
+                // 控制器条件里的手持物判定：筛选串按 YSM 的 empty / $id / #tag / :分类 前缀解析
+                case "ctrl.hold" -> {
+                    return itemCheckCall(arguments, MolangVariables.CHECK_HOLD);
+                }
+                case "ctrl.swing" -> {
+                    return itemCheckCall(arguments, MolangVariables.CHECK_SWING);
+                }
+                case "ctrl.use" -> {
+                    return itemCheckCall(arguments, MolangVariables.CHECK_USE);
+                }
+                case "query.equipped_item_any_tag" -> {
+                    return equippedTagCall(arguments);
+                }
+                // YSM 的 math.random_integer 是 [min, max) 的整数；YSM 的 nextInt 在区间为空时会抛，
+                // 这里退化成返回下界，作者的随机抖动不该让整帧算不出来。
+                case "math.random_integer" -> {
+                    return (animTime, lifeTime) -> {
+                        int low = (int) a.eval(animTime, lifeTime);
+                        int high = (int) b.eval(animTime, lifeTime);
+                        if (low > high) {
+                            int swap = low;
+                            low = high;
+                            high = swap;
+                        }
+                        if (high <= low) {
+                            return (float) low;
+                        }
+                        return low + java.util.concurrent.ThreadLocalRandom.current().nextInt(high - low);
+                    };
+                }
                 case "query.position_delta" -> {
                     return (animTime, lifeTime) -> MolangVariables.positionDelta(a.eval(animTime, lifeTime));
                 }
@@ -689,6 +766,32 @@ public final class MolangExpression {
                     return (animTime, lifeTime) -> UNKNOWN;
                 }
             }
+        }
+
+        /** {@code ctrl.hold(slot, filter)}：两个字符串字面量，缺一个就恒假。 */
+        private static Expr itemCheckCall(List<Expr> arguments, int operation) {
+            String slot = literal(arguments, 0);
+            String filter = literal(arguments, 1);
+            if (slot.isEmpty() || filter.isEmpty()) {
+                return (animTime, lifeTime) -> 0.0F;
+            }
+            return (animTime, lifeTime) -> MolangVariables.itemCheck(slot, filter, operation);
+        }
+
+        /** {@code query.equipped_item_any_tag(slot, tag...)}：第一个实参是槽名，其余是物品标签。 */
+        private static Expr equippedTagCall(List<Expr> arguments) {
+            String slot = literal(arguments, 0);
+            List<String> tags = new ArrayList<>(Math.max(0, arguments.size() - 1));
+            for (int i = 1; i < arguments.size(); i++) {
+                String tag = literal(arguments, i);
+                if (!tag.isEmpty()) {
+                    tags.add(tag);
+                }
+            }
+            if (slot.isEmpty() || tags.isEmpty()) {
+                return (animTime, lifeTime) -> 0.0F;
+            }
+            return (animTime, lifeTime) -> MolangVariables.equippedItemAnyTag(slot, tags);
         }
 
         private static Expr argument(List<Expr> arguments, int index) {

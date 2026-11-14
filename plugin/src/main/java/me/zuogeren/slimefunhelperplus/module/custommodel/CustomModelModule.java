@@ -48,6 +48,16 @@ public class CustomModelModule extends BaseModule {
             .defaultValue(true)
             .build();
 
+    /**
+     * 轮盘选择落盘：一个模型一条 {@code 模型文件|服装|动作}，多条用 {@code ;} 连起来（最近的在末尾）。
+     *
+     * <p>模型文件名与选择键都不含 {@code |} / {@code ;}（Windows 文件名不允许），所以不用转义。
+     * 界面上是一行普通文本，真正的写入方是轮盘点击与模型加载，用户不需要手改。
+     */
+    public final StringRef rouletteSelection = builder(root.add("roulette-selection"), String.class)
+            .defaultValue("")
+            .build();
+
     /** 打开动画轮盘的热键；默认不绑，在模块配置页里设。 */
     public final KeyBindRef rouletteKey = hotkey(root.add("roulette-key"))
             .defaultValue(new MultiKeyBind())

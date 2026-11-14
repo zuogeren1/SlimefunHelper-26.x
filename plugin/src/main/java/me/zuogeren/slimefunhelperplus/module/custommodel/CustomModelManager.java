@@ -2,6 +2,8 @@ package me.zuogeren.slimefunhelperplus.module.custommodel;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import me.matl114.utils.Debug;
@@ -32,6 +34,11 @@ public final class CustomModelManager {
     private static volatile String selectedExtra = "";
 
     private static final String NO_EXTRA = "__none__";
+    /** 选择记录最多保存几个模型（够用且不会让配置行无限长）。 */
+    private static final int SELECTION_LIMIT = 8;
+    /** 一条记录的三段分隔符；模型名与选择键里都不会出现这两个字符。 */
+    private static final char FIELD_SEPARATOR = '|';
+    private static final char ENTRY_SEPARATOR = ';';
 
     private CustomModelManager() {}
 
@@ -64,6 +71,7 @@ public final class CustomModelManager {
         }
         selectedVariant = current.activeVariantKey();
         selectedExtra = current.activeExtraKey();
+        rememberSelection(loadedFile, selectedVariant, selectedExtra);
         Debug.info("[SFH+] 轮盘选择: 服装=" + (selectedVariant.isEmpty() ? "默认" : selectedVariant)
                 + " 动作=" + (selectedExtra.isEmpty() ? "无" : selectedExtra));
     }
@@ -80,6 +88,8 @@ public final class CustomModelManager {
         runtime = null;
         armRuntime = null;
         loadedFile = "";
+        selectedVariant = "";
+        selectedExtra = "";
     }
 
     /**
@@ -148,7 +158,7 @@ public final class CustomModelManager {
         if (loaded == null) {
             Debug.info("[SFH+] 模型加载失败（无可用贴图或几何）: " + fileName);
         } else {
-            applyExtraSelection(loaded);
+            applyExtraSelection(loaded, fileName);
             Debug.info("[SFH+] 模型已加载 " + fileName + " bones=" + loaded.boneCount()
                     + " arm=" + (armRuntime == null ? "-" : armRuntime.boneCount())
                     + " variant=" + (loaded.activeVariantKey().isEmpty() ? "-" : loaded.activeVariantKey())
@@ -157,21 +167,94 @@ public final class CustomModelManager {
         }
     }
 
-    /** 模型换了以后把选择接上：服装预设不存在就退回默认服装；动作不存在就丢掉。 */
-    private static void applyExtraSelection(ModelRuntime target) {
-        if (!selectedVariant.isEmpty()) {
-            target.setVariant(selectedVariant);
+    /**
+     * 模型换了以后把选择接上：先取这个模型上次落盘的选择，服装预设不存在就退回默认服装、动作不存在就丢掉。
+     *
+     * <p>按模型分别记：同一个轮盘键在不同模型里指向不同片段，混用会把别的模型的服装名套进来。
+     */
+    private static void applyExtraSelection(ModelRuntime target, String model) {
+        String[] recalled = recallSelection(model);
+        String variant = recalled[0];
+        String extra = recalled[1];
+        if (!variant.isEmpty()) {
+            target.setVariant(variant);
         }
-        if (selectedVariant.isEmpty() || !selectedVariant.equals(target.activeVariantKey())) {
+        if (variant.isEmpty() || !variant.equals(target.activeVariantKey())) {
             target.setVariant(target.defaultVariantKey());
         }
         selectedVariant = target.activeVariantKey();
-        if (!selectedExtra.isEmpty()) {
-            target.setExtra(selectedExtra);
-            if (!selectedExtra.equals(target.activeExtraKey())) {
-                selectedExtra = "";
+        selectedExtra = "";
+        if (!extra.isEmpty()) {
+            target.setExtra(extra);
+            if (extra.equals(target.activeExtraKey())) {
+                selectedExtra = extra;
             }
         }
+    }
+
+    /** 读这个模型上次的选择；没有记录返回两个空串。同一个模型出现多条时以最后一条为准。 */
+    private static String[] recallSelection(String model) {
+        String variant = "";
+        String extra = "";
+        if (model == null || model.isEmpty()) {
+            return new String[]{"", ""};
+        }
+        for (String entry : selectionEntries()) {
+            int first = entry.indexOf(FIELD_SEPARATOR);
+            int second = first < 0 ? -1 : entry.indexOf(FIELD_SEPARATOR, first + 1);
+            if (first <= 0 || second < 0) {
+                continue;
+            }
+            if (entry.substring(0, first).equals(model)) {
+                variant = entry.substring(first + 1, second);
+                extra = entry.substring(second + 1);
+            }
+        }
+        return new String[]{variant, extra};
+    }
+
+    /**
+     * 记下这个模型的选择：先删掉同模型的旧记录再追加，超出上限时丢最早的那条。
+     *
+     * <p>写回配置而不是另存文件 —— 配置本来就随模块一起落盘，且用户能看到当前记了哪些模型。
+     */
+    private static void rememberSelection(String model, String variant, String extra) {
+        CustomModelModule module = CustomModelModule.INSTANCE;
+        if (module == null || model == null || model.isEmpty()) {
+            return;
+        }
+        List<String> entries = new ArrayList<>();
+        for (String entry : selectionEntries()) {
+            int first = entry.indexOf(FIELD_SEPARATOR);
+            if (first > 0 && entry.substring(0, first).equals(model)) {
+                continue;
+            }
+            entries.add(entry);
+        }
+        entries.add(model + FIELD_SEPARATOR + (variant == null ? "" : variant)
+                + FIELD_SEPARATOR + (extra == null ? "" : extra));
+        while (entries.size() > SELECTION_LIMIT) {
+            entries.remove(0);
+        }
+        module.rouletteSelection.set(String.join(String.valueOf(ENTRY_SEPARATOR), entries));
+    }
+
+    private static List<String> selectionEntries() {
+        CustomModelModule module = CustomModelModule.INSTANCE;
+        List<String> entries = new ArrayList<>(2);
+        if (module == null) {
+            return entries;
+        }
+        String raw = module.rouletteSelection.get();
+        if (raw == null || raw.isBlank()) {
+            return entries;
+        }
+        for (String entry : raw.split(String.valueOf(ENTRY_SEPARATOR))) {
+            if (!entry.isBlank()) {
+                entries.add(entry.trim());
+            }
+        }
+        return entries;
     }
 
     private static RawYsmModel.RawTexture pickTexture(RawYsmModel model) {

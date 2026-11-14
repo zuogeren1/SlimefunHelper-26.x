@@ -1,9 +1,14 @@
 package me.zuogeren.slimefunhelperplus.module.custommodel.model;
 
+import java.util.List;
 import java.util.Map;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.TagKey;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
@@ -42,6 +47,14 @@ public final class MolangVariables {
     private static float lastYawSpeed;
     /** 时间轴语句写入的 {@code v.*} 变量表；每个模型实例一份，渲染前绑定。 */
     private static volatile Map<String, Float> variables;
+    /**
+     * 主体态名字（YSM {@code ControlReadBuiltins#selectedControl} 的那串判定），给 {@code ctrl.idle}
+     * 这类谓词用。空串表示当前不在渲染上下文里，所有 {@code ctrl.*} 按 NaN（条件为假）。
+     */
+    private static volatile String control = "";
+    /** 控制器求值时绑定的「本状态动画是否都播完」；不在控制器上下文里按 NaN，避免污染别处的条件。 */
+    private static volatile float controllerAllFinished = Float.NaN;
+    private static volatile float controllerAnyFinished = Float.NaN;
     /** 上一帧的插值位置与它所属的帧键：{@code query.position_delta} 同一帧只算一次，见 {@link #framePositionDelta()}。 */
     private static long lastPositionKey = Long.MIN_VALUE;
     private static double lastPositionX;
@@ -60,6 +73,136 @@ public final class MolangVariables {
         variables = table;
         avatar = state;
         player = localPlayer;
+    }
+
+    /** 本帧的主体态；{@code null} 或空串表示按未绑定处理。 */
+    public static void bindControl(String name) {
+        control = name == null ? "" : name;
+    }
+
+    /**
+     * 控制器求值前绑定「本状态里的动画是不是都播完了」，供 {@code query.all_animations_finished} 读。
+     *
+     * <p>YSM 的语义（{@code BedrockAnimationController#updateState}）：状态里没有生效动画时 all/any 都为真，
+     * 否则 all 要求每条都播完、any 只要有一条播完。
+     */
+    public static void bindControllerState(boolean allFinished, boolean anyFinished) {
+        controllerAllFinished = allFinished ? 1.0F : 0.0F;
+        controllerAnyFinished = anyFinished ? 1.0F : 0.0F;
+    }
+
+    /** 控制器之外的条件（主体态、手部层、物理）一律按 NaN：它们是另一套上下文，不该借到上一个控制器的结果。 */
+    public static void clearControllerState() {
+        controllerAllFinished = Float.NaN;
+        controllerAnyFinished = Float.NaN;
+    }
+
+    /** {@code ctrl.hold(slot, filter)} / {@code ctrl.swing} / {@code ctrl.use} 的三档操作。 */
+    public static final int CHECK_HOLD = 0;
+    public static final int CHECK_SWING = 1;
+    public static final int CHECK_USE = 2;
+
+    /**
+     * YSM {@code ControlBuiltins#itemCheck} 的移植：先按操作类型卡「正在挥 / 正在用」，再按
+     * {@code empty} / {@code $id} / {@code #tag} / {@code :分类} 匹配手持物。
+     *
+     * <p>与 {@link ItemClassifier} 的差别是语义：那里给的是「按优先级排好的候选后缀」，这里问的是
+     * 「这个选择器命中吗」，所以用单值分类而不是候选表。{@code :} 同时认内部分类与使用动画名
+     * （YSM 的原式就是两者取或）。
+     */
+    public static float itemCheck(String slotName, String filter, int operation) {
+        LocalPlayer p = player;
+        if (p == null || slotName == null || filter == null || filter.isEmpty()) {
+            return 0.0F;
+        }
+        EquipmentSlot slot = slotOf(slotName);
+        if (slot == null) {
+            return Float.NaN;
+        }
+        if (operation == CHECK_SWING && !isSwingingNow(p)) {
+            return 0.0F;
+        }
+        if (operation == CHECK_USE && !p.isUsingItem()) {
+            return 0.0F;
+        }
+        ItemStack stack = p.getItemBySlot(slot);
+        if (stack.isEmpty()) {
+            return "empty".equals(filter) ? 1.0F : 0.0F;
+        }
+        if (filter.length() < 2) {
+            return 0.0F;
+        }
+        String value = filter.substring(1);
+        return switch (filter.charAt(0)) {
+            case '$' -> {
+                Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+                yield id != null && value.equals(id.toString()) ? 1.0F : 0.0F;
+            }
+            case '#' -> {
+                try {
+                    yield stack.is(TagKey.create(Registries.ITEM, Identifier.parse(value))) ? 1.0F : 0.0F;
+                } catch (RuntimeException malformed) {
+                    yield Float.NaN;
+                }
+            }
+            case ':' -> {
+                String classify = ItemClassifier.classify(stack);
+                boolean match = value.equals(classify)
+                        || value.equals(stack.getUseAnimation().name().toLowerCase(java.util.Locale.ROOT));
+                yield match ? 1.0F : 0.0F;
+            }
+            default -> 0.0F;
+        };
+    }
+
+    /** {@code query.equipped_item_any_tag(slot, tag...)}：任一标签命中即真。 */
+    public static float equippedItemAnyTag(String slotName, List<String> tags) {
+        LocalPlayer p = player;
+        if (p == null || tags == null || tags.isEmpty()) {
+            return 0.0F;
+        }
+        EquipmentSlot slot = slotOf(slotName);
+        if (slot == null) {
+            return Float.NaN;
+        }
+        ItemStack stack = p.getItemBySlot(slot);
+        if (stack.isEmpty()) {
+            return 0.0F;
+        }
+        for (String tag : tags) {
+            if (tag == null || tag.isEmpty()) {
+                continue;
+            }
+            try {
+                if (stack.is(TagKey.create(Registries.ITEM, Identifier.parse(tag)))) {
+                    return 1.0F;
+                }
+            } catch (RuntimeException malformed) {
+                return Float.NaN;
+            }
+        }
+        return 0.0F;
+    }
+
+    private static EquipmentSlot slotOf(String name) {
+        return switch (name.toLowerCase(java.util.Locale.ROOT)) {
+            case "head", "helmet" -> EquipmentSlot.HEAD;
+            case "chest", "chestplate" -> EquipmentSlot.CHEST;
+            case "legs", "leggings" -> EquipmentSlot.LEGS;
+            case "feet", "boots" -> EquipmentSlot.FEET;
+            case "mainhand" -> EquipmentSlot.MAINHAND;
+            case "offhand" -> EquipmentSlot.OFFHAND;
+            default -> null;
+        };
+    }
+
+    /** 正在挥动；26.3 只认渲染状态里的 {@code currentSwing}。 */
+    private static boolean isSwingingNow(LocalPlayer p) {
+        //#if MC >= 260300
+        //$$ return avatar != null && avatar.currentSwing != null;
+        //#else
+        return p.swinging;
+        //#endif
     }
 
     /**
@@ -107,6 +250,14 @@ public final class MolangVariables {
         if (p == null) {
             return Float.NaN;
         }
+        // ctrl.idle / ctrl.run … 是「当前主体态是不是它」，同一个名字走一遍选中链即可
+        if (name.startsWith("ctrl.")) {
+            String state = control;
+            if (state.isEmpty()) {
+                return Float.NaN;
+            }
+            return state.equals(name.substring(5)) ? 1.0F : 0.0F;
+        }
         // 官方资源大量写短名（q.vertical_speed / q.yaw_speed / q.ground_speed），与 query.* 同一个量
         String query = name.startsWith("q.") ? "query." + name.substring(2) : name;
         try {
@@ -134,12 +285,13 @@ public final class MolangVariables {
                 case "ysm.arrow_count" -> p.getArrowCount();
                 case "ysm.stinger_count" -> p.getStingerCount();
                 //#if MC >= 260300
-                //$$ // 26.3 把实体上的 swinging/swingTime/attackAnim 收进了 ArmedEntityRenderState.currentSwing
-                //$$ // （LivingEntity.SwingDescription(hand, animation, durationTicks)）：只有「在挥」能判，
-                //$$ // 挥动进度/时长没有等价字段，仍然是 NaN。
+                //$$ // 26.3 把 swinging/swingTime/attackAnim 收进了 ArmedEntityRenderState：
+                //$$ // currentSwing（hand + durationTicks）与 swingAnimation（0..1 进度）。
+                //$$ // attackAnim 直接对应 swingAnimation；swingTime（已过 tick）用「进度 × 总时长」还原。
                 //$$ case "ysm.swinging" -> avatar != null && avatar.currentSwing != null ? 1.0F : 0.0F;
-                //$$ case "ysm.swing_time" -> Float.NaN;
-                //$$ case "ysm.attack_time" -> Float.NaN;
+                //$$ case "ysm.swing_time" -> avatar == null || avatar.currentSwing == null ? 0.0F
+                //$$         : avatar.swingAnimation * avatar.currentSwing.durationTicks();
+                //$$ case "ysm.attack_time" -> avatar == null ? 0.0F : avatar.swingAnimation;
                 //#else
                 case "ysm.swinging" -> p.swinging ? 1.0F : 0.0F;
                 case "ysm.swing_time" -> p.swingTime;
@@ -147,7 +299,13 @@ public final class MolangVariables {
                 //#endif
                 case "ysm.mainhand_charged_crossbow" -> p.getMainHandItem().is(Items.CROSSBOW) ? 1.0F : 0.0F;
                 case "ysm.offhand_charged_crossbow" -> p.getOffhandItem().is(Items.CROSSBOW) ? 1.0F : 0.0F;
-                case "ysm.swinging_arm" -> p.getUsedItemHand() == InteractionHand.MAIN_HAND ? 0.0F : 1.0F;
+                // 挥动的那只手（0=主手，1=副手）。原来读的是「正在使用的手」，语义不对。
+                //#if MC >= 260300
+                //$$ case "ysm.swinging_arm" -> avatar != null && avatar.currentSwing != null
+                //$$         && avatar.currentSwing.hand() == InteractionHand.OFF_HAND ? 1.0F : 0.0F;
+                //#else
+                case "ysm.swinging_arm" -> p.swingingArm == InteractionHand.OFF_HAND ? 1.0F : 0.0F;
+                //#endif
                 // 视线角度进表达式前先取负（YSM/SPM/OSM 的 AnimatableEntity 都是
                 // headPitch = -rawHeadPitch、netHeadYaw = -clamp(wrapDegrees(...), ±85)）：
                 // 模型按「负 = 俯视」写单侧夹取（math.max(ysm.head_pitch,-45) 之类），
@@ -162,6 +320,15 @@ public final class MolangVariables {
                 case "ysm.is_open_air" -> p.level().canSeeSky(p.blockPosition()) ? 1.0F : 0.0F;
                 case "ysm.rendering_in_paperdoll", "ysm.rendering_in_inventory" -> 0.0F;
                 case "ysm.person_view" -> Minecraft.getInstance().options.getCameraType().isFirstPerson() ? 0.0F : 1.0F;
+
+                // 控制器状态机里最常用的判定：本状态里那几条动画播完了没有
+                case "query.all_animations_finished" -> controllerAllFinished;
+                case "query.any_animation_finished" -> controllerAnyFinished;
+                // 移动输入相对朝向的分解（YSM PositionComponent#relativeMoveInput）：竖直是前后、水平是左右
+                case "ysm.input_vertical" -> moveInput(p, true);
+                case "ysm.input_horizontal" -> moveInput(p, false);
+                case "ysm.ground_speed2" -> horizontalSpeed(p);
+                case "ysm.is_fishing" -> p.fishing != null && !p.fishing.isRemoved() ? 1.0F : 0.0F;
 
                 case "query.ground_speed" -> horizontalSpeed(p);
                 case "query.vertical_speed" -> verticalSpeed(p);
@@ -293,7 +460,8 @@ public final class MolangVariables {
 
     private static float swingTicks(LocalPlayer p) {
         //#if MC >= 260300
-        //$$ return avatar == null || avatar.currentSwing == null ? 0.0F : avatar.currentSwing.durationTicks();
+        //$$ return avatar == null || avatar.currentSwing == null ? 0.0F
+        //$$         : avatar.swingAnimation * avatar.currentSwing.durationTicks();
         //#else
         return p.swingTime;
         //#endif
@@ -405,6 +573,18 @@ public final class MolangVariables {
     }
 
     /**
+     * {@code v.*} 是否已经被写过。Molang 的 {@code ??}（空值合并）靠它区分「未赋值」与「值为 0」：
+     * 模型里 {@code v.player_size??1} 这类写法要求未赋值时取默认值，而直接读默认给 0 就永远拿不到 1。
+     */
+    public static boolean isDefined(String name) {
+        if (!isLocalVariable(name)) {
+            return true;
+        }
+        Map<String, Float> table = variables;
+        return table != null && table.containsKey(name.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /**
      * 转向角速度（度/秒）：**身体**朝向的逐 tick 差分 ×20。
      *
      * <p>量的是 body yaw（YSM {@code PlayerStateTracker:151-153}、SPM {@code PlayerEntityFrameState:91-97}
@@ -462,6 +642,24 @@ public final class MolangVariables {
         lastPositionZ = z;
         lastPositionKey = key;
         return lastPositionDelta;
+    }
+
+    /**
+     * 移动输入相对朝向的分解（YSM {@code PositionComponent#relativeMoveInput}）：把「本 tick 走的位移方向」
+     * 减去视线朝向，取余弦（前后）或正弦（左右），落在 −1..1。
+     *
+     * <p>用位移而不是按键状态：模型拿它判断「在往前走还是在倒退」，跳起、被推、坐船时都该跟着实际运动走。
+     */
+    private static float moveInput(LocalPlayer entity, boolean vertical) {
+        double dx = entity.getX() - entity.xOld;
+        double dz = entity.getZ() - entity.zOld;
+        if (Math.sqrt(dx * dx + dz * dz) < 1.0E-4) {
+            return 0.0F;
+        }
+        double moveAngle = Math.toDegrees(Math.atan2(dz, dx));
+        double entityYaw = 90.0 - Mth.wrapDegrees(-entity.getYRot());
+        double relative = Mth.wrapDegrees(moveAngle - entityYaw);
+        return (float) (vertical ? Math.cos(Math.toRadians(relative)) : Math.sin(Math.toRadians(relative)));
     }
 
     private static float horizontalSpeed(LocalPlayer entity) {
