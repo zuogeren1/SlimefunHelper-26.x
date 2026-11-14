@@ -96,7 +96,7 @@ final class ModelPhysics {
         return simulation.value();
     }
 
-    /** NaN 会永久污染弹簧状态（之后每帧都是 NaN），遇到就按中性值处理，至少让通道保持不动。 */
+    /** NaN 会永久污染弹簧状态（之后每帧都是 NaN），遇到就按中性值处理，让积分继续跑下去。 */
     private static float finite(float value, float fallback) {
         return Float.isFinite(value) ? value : fallback;
     }
@@ -128,19 +128,18 @@ final class ModelPhysics {
 
         @Override
         public void update(float timeStep) {
-            // 参数与输入在积分时才消毒：setArgs 每帧都会被调用，消毒放在这里只做一次
-            if (!Float.isFinite(this.input) || !Float.isFinite(this.frequency)
-                    || !Float.isFinite(this.coefficient) || !Float.isFinite(this.response)) {
-                return;
-            }
+            // 消毒放在积分时而不是 setArgs：setArgs 每帧都会被调用，这里一帧只做一次。
+            // 非有限输入按 0 处理而不是跳过：跳过会让弹簧停在旧值上，通道再也回不到输入。
+            float input = finite(this.input, 0.0F);
             if (!Float.isFinite(timeStep) || timeStep <= 0.0F) {
+                this.inputFunction = input;
+                sanitizeSimulation(input);
                 return;
             }
             timeStep = Math.min(timeStep, MAX_TIME_STEP);
-            float input = this.input;
-            float frequency = Math.min(Math.max(this.frequency, MIN_FREQUENCY), MAX_FREQUENCY);
-            float coefficient = Math.min(Math.max(this.coefficient, 0.0F), 1.0F);
-            float response = this.response;
+            float frequency = Math.min(Math.max(finite(this.frequency, 0.0F), MIN_FREQUENCY), MAX_FREQUENCY);
+            float coefficient = Math.min(Math.max(finite(this.coefficient, 0.0F), 0.0F), 1.0F);
+            float response = finite(this.response, 0.0F);
 
             float k1 = coefficient / PI / frequency;
             float k2 = 1.0F / (2.0F * PI * frequency) / (2.0F * PI * frequency);
@@ -176,6 +175,13 @@ final class ModelPhysics {
             }
             this.simulation = value;
             this.simulationDot = velocity;
+        }
+
+        /** 状态里残留的 NaN 会永久污染后续积分，遇到就按输入重建。 */
+        private void sanitizeSimulation(float input) {
+            if (!Float.isFinite(this.simulation) || !Float.isFinite(this.simulationDot)) {
+                snapToInput(input);
+            }
         }
 
         /** 状态已经不可用（参数退化或积分发散）：直接落到输入上，速度清零，下一帧从静止重新起算。 */
