@@ -10,8 +10,9 @@ import java.util.Map;
  * <p>key 在 YSM 里是全局字符串池 id，所以 <b>同名即同一个模拟器</b> —— 这是它区别于「每根骨骼一条弹簧」的
  * 关键：作者让多条头发骨写同一个名字，它们就共享同一条弹簧、永远同步。这里直接拿字符串当表键。
  *
- * <p>k1/k2/k3 与子步上限照 YSM 的 {@code SecondOrder}（论文 KPoeNZZ6H4s）；一帧延迟也照它：调用方先
- * {@code setArgs} 再取 {@code value()}，用完的输入给下一帧积分，返回的是上一帧的结果。
+ * <p>k1/k2/k3 与子步切分照 YSM 的 {@code SecondOrder}（论文 KPoeNZZ6H4s），步长上限与子步数上限照 SPM 的同名实现
+ * （YSM 不钳步长，卡顿时会切出上千个子步）。一帧延迟也照 YSM：调用方先 {@code setArgs} 再取 {@code value()}，
+ * 用完的输入给下一帧积分，返回的是上一帧的结果。
  */
 final class ModelPhysics {
 
@@ -19,11 +20,11 @@ final class ModelPhysics {
     private static final float DEFAULT_ARGUMENT = 1.0F;
     /** 固有频率的上界照 YSM 的 clamp；下限取非零值，因为 k1/k2/k3 都要除以频率。 */
     private static final float MAX_FREQUENCY = 5.0F;
-    private static final float MIN_FREQUENCY = 0.05F;
+    private static final float MIN_FREQUENCY = 0.001F;
     /** 单帧时长上限：卡顿或暂停后回来的一帧不该把弹簧推飞。 */
-    private static final float MAX_TIME_STEP = 0.25F;
-    /** 子步数上限：最硬的弹簧（5Hz）配最长的一帧也只要十几个子步，再多只是浪费。 */
-    private static final int MAX_SUBSTEPS = 64;
+    private static final float MAX_TIME_STEP = 0.1F;
+    /** 子步数上限（SPM {@code SecondOrder:14} 的 {@code MAX_CYCLES}）：最硬的弹簧配 0.1 秒的一帧只要 4 个子步。 */
+    private static final int MAX_SUBSTEPS = 16;
     private static final float PI = (float) Math.PI;
 
     /** 正在出图的模型实例；表达式只在渲染线程求值，出图期间由调用方设置。 */
@@ -57,15 +58,23 @@ final class ModelPhysics {
                 : physics.sample(key, true, input, response, DEFAULT_ARGUMENT, DEFAULT_ARGUMENT);
     }
 
-    /** 每帧出图前推进一次；{@code ageSeconds} 是调用方那根渲染时钟。 */
+    /**
+     * 每帧出图前推进一次；{@code ageSeconds} 是调用方那根渲染时钟。
+     *
+     * <p>只在时钟**前进**时积分（YSM {@code PhysicsManager:11-21} 的 {@code renderTicks > lastRenderTicks}）：
+     * 首帧没有历史、同一帧的多次出图、时钟回退都不推进。大步长不在这里处理 —— 两个积分器各自把
+     * 步长钳到 {@code MAX_TIME_STEP} 并按稳定性条件切子步，钳在调用方会让子步数算错。
+     */
     void advance(float ageSeconds) {
-        float previous = lastTime;
-        lastTime = ageSeconds;
-        if (Float.isNaN(previous) || ageSeconds <= previous) {
-            // 首帧没有历史、同一帧的多次出图、时钟回退：都不积分（YSM 的 PhysicsManager 同样只跳过）
+        if (!Float.isFinite(ageSeconds)) {
             return;
         }
-        float timeStep = Math.min(ageSeconds - previous, MAX_TIME_STEP);
+        float previous = lastTime;
+        lastTime = ageSeconds;
+        if (!Float.isFinite(previous) || ageSeconds <= previous) {
+            return;
+        }
+        float timeStep = ageSeconds - previous;
         for (Simulation simulation : simulations.values()) {
             simulation.update(timeStep);
         }
@@ -78,10 +87,10 @@ final class ModelPhysics {
         }
         Simulation simulation = simulations.get(key);
         if (simulation == null) {
+            // 首帧没有历史可用，给输入值本身，避免通道从 0 弹起
             simulation = first ? new FirstOrder(input, a) : new SecondOrder(input, a, b, c);
             simulations.put(key, simulation);
-            // 首帧没有历史可用，给输入值本身，避免通道从 0 弹起
-            return input;
+            return simulation.value();
         }
         simulation.setArgs(input, a, b, c);
         return simulation.value();
@@ -105,39 +114,75 @@ final class ModelPhysics {
 
         SecondOrder(float input, float frequency, float coefficient, float response) {
             setArgs(input, frequency, coefficient, response);
+            // 新建的模拟器没有历史，直接落在输入上，避免通道从 0 弹起
+            snapToInput(finite(input, 0.0F));
         }
 
         @Override
         public void setArgs(float input, float a, float b, float c) {
-            this.input = finite(input, 0.0F);
-            this.frequency = Math.min(Math.max(finite(a, DEFAULT_ARGUMENT), MIN_FREQUENCY), MAX_FREQUENCY);
-            this.coefficient = Math.min(Math.max(finite(b, DEFAULT_ARGUMENT), 0.0F), 1.0F);
-            this.response = finite(c, DEFAULT_ARGUMENT);
+            this.input = input;
+            this.frequency = a;
+            this.coefficient = b;
+            this.response = c;
         }
 
         @Override
         public void update(float timeStep) {
-            float k1 = this.coefficient / PI / this.frequency;
-            float k2 = 1.0F / (2.0F * PI * this.frequency) / (2.0F * PI * this.frequency);
-            float k3 = this.response * this.coefficient / 2.0F / PI / this.frequency;
+            // 参数与输入在积分时才消毒：setArgs 每帧都会被调用，消毒放在这里只做一次
+            if (!Float.isFinite(this.input) || !Float.isFinite(this.frequency)
+                    || !Float.isFinite(this.coefficient) || !Float.isFinite(this.response)) {
+                return;
+            }
+            if (!Float.isFinite(timeStep) || timeStep <= 0.0F) {
+                return;
+            }
+            timeStep = Math.min(timeStep, MAX_TIME_STEP);
+            float input = this.input;
+            float frequency = Math.min(Math.max(this.frequency, MIN_FREQUENCY), MAX_FREQUENCY);
+            float coefficient = Math.min(Math.max(this.coefficient, 0.0F), 1.0F);
+            float response = this.response;
 
-            float inputFunctionDot = (this.input - this.inputFunction) / timeStep;
-            this.inputFunction = this.input;
+            float k1 = coefficient / PI / frequency;
+            float k2 = 1.0F / (2.0F * PI * frequency) / (2.0F * PI * frequency);
+            float k3 = response * coefficient / 2.0F / PI / frequency;
+            if (!Float.isFinite(k1) || !Float.isFinite(k2) || k2 <= 0.0F || !Float.isFinite(k3)) {
+                snapToInput(input);
+                return;
+            }
+
+            float inputFunctionDot = (input - this.inputFunction) / timeStep;
+            if (!Float.isFinite(inputFunctionDot)) {
+                inputFunctionDot = 0.0F;
+            }
+            this.inputFunction = input;
 
             // 子步长超过 sqrt(4k2 + k1^2) - k1 时显式积分会发散，按它切分
             float maxTimeStep = (float) Math.sqrt(4.0F * k2 + k1 * k1) - k1;
-            int substeps = maxTimeStep <= 0.0F ? MAX_SUBSTEPS : (int) Math.ceil(timeStep / maxTimeStep);
-            substeps = Math.min(Math.max(substeps, 1), MAX_SUBSTEPS);
+            if (!Float.isFinite(maxTimeStep) || maxTimeStep <= 0.0F) {
+                maxTimeStep = timeStep;
+            }
+            int substeps = Math.min(Math.max((int) Math.ceil(timeStep / maxTimeStep), 1), MAX_SUBSTEPS);
             float step = timeStep / substeps;
 
-            float value = this.simulation;
-            float velocity = this.simulationDot;
+            float value = Float.isFinite(this.simulation) ? this.simulation : input;
+            float velocity = Float.isFinite(this.simulationDot) ? this.simulationDot : 0.0F;
             for (int i = 0; i < substeps; i++) {
                 value += step * velocity;
-                velocity += step * (k3 * inputFunctionDot + this.input - value - k1 * velocity) / k2;
+                velocity += step * (k3 * inputFunctionDot + input - value - k1 * velocity) / k2;
+                if (!Float.isFinite(value) || !Float.isFinite(velocity)) {
+                    snapToInput(input);
+                    return;
+                }
             }
             this.simulation = value;
             this.simulationDot = velocity;
+        }
+
+        /** 状态已经不可用（参数退化或积分发散）：直接落到输入上，速度清零，下一帧从静止重新起算。 */
+        private void snapToInput(float input) {
+            this.inputFunction = input;
+            this.simulation = input;
+            this.simulationDot = 0.0F;
         }
 
         @Override
@@ -155,20 +200,33 @@ final class ModelPhysics {
 
         FirstOrder(float input, float response) {
             setArgs(input, response, DEFAULT_ARGUMENT, DEFAULT_ARGUMENT);
+            // 新建的模拟器没有历史，直接落在输入上，避免通道从 0 弹起
+            this.simulation = finite(input, 0.0F);
         }
 
         @Override
         public void setArgs(float input, float a, float b, float c) {
-            this.input = finite(input, 0.0F);
-            float constant = finite(a, DEFAULT_ARGUMENT);
-            // 时间常数 0 会让 dt/response 变成 Infinity
-            this.response = constant > 0.0F ? constant : DEFAULT_ARGUMENT;
+            this.input = input;
+            this.response = a;
         }
 
         @Override
         public void update(float timeStep) {
-            float alpha = timeStep / this.response;
-            this.simulation = (1.0F - alpha) * this.simulation + alpha * this.input;
+            if (!Float.isFinite(this.input) || !Float.isFinite(this.response)
+                    || !Float.isFinite(timeStep) || timeStep <= 0.0F) {
+                return;
+            }
+            float input = this.input;
+            float response = this.response;
+            if (response <= 0.0F) {
+                // 时间常数 0 会让 dt/response 变成 Infinity，直接跟随输入
+                this.simulation = input;
+                return;
+            }
+            // 步长钳到时间常数：离屏或跳帧后的大步长会让 (1 - step/response) 变负，低通变成过冲震荡
+            float step = Math.min(timeStep, response);
+            float alpha = step / response;
+            this.simulation = (1.0F - alpha) * this.simulation + alpha * input;
         }
 
         @Override
