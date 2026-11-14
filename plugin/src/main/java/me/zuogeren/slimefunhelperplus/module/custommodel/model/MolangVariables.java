@@ -515,7 +515,11 @@ public final class MolangVariables {
                 case "query.is_in_water" -> p.isInWater() ? 1.0F : 0.0F;
                 case "query.is_in_water_or_rain" -> (p.isInWater() || p.level().isRainingAt(p.blockPosition())) ? 1.0F : 0.0F;
                 case "query.is_on_ground" -> p.onGround() ? 1.0F : 0.0F;
-                case "query.is_jumping" -> !p.onGround() && p.getDeltaMovement().y > 0.0 ? 1.0F : 0.0F;
+                // 整个腾空期间都算「跳跃」，不区分上升/下降（YSM EntityBuiltins:125-132、
+                // SPM QueryBinding:108 都是这个判据）。要求「正在上升」会让下落段的条件动画全部失效 ——
+                // 默认模型的 swing:sword 用 v.jump 选跳跃挥剑姿势，只判上升就只剩起跳那一下。
+                case "query.is_jumping" -> !p.getAbilities().flying && !p.isPassenger()
+                        && !p.onGround() && !p.isInWater() ? 1.0F : 0.0F;
                 case "query.is_sprinting" -> p.isSprinting() ? 1.0F : 0.0F;
                 case "query.is_sneaking" -> p.isCrouching() ? 1.0F : 0.0F;
                 case "query.is_swimming" -> p.isSwimming() ? 1.0F : 0.0F;
