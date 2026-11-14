@@ -62,6 +62,7 @@ public final class ModelRuntime {
     private static final String[] USE_MAIN = {"use_mainhand"};
     private static final String[] USE_OFF = {"use_offhand"};
     private static final String[] JUMP = {"jump"};
+    private static final String[] FP_ARM = {"fp_arm", "arm", "idle", "empty"};
 
     /** 只播一次的状态；其余主状态按 YSM 的 {@code playLoopAnimation} 语义一律循环。 */
     private static final Set<String> ONE_SHOT = Set.of("death", "attacked");
@@ -112,6 +113,10 @@ public final class ModelRuntime {
     private float activeExtraStart = Float.NaN;
     private boolean frameValid;
     private boolean logged;
+    /** 手臂模型专用：每根骨骼的根、根 pivot 的 X（用来分左右手）；主模型上是 null。 */
+    private int[] armRootOf;
+    private float[] armRootX;
+    private boolean[] renderMask;
 
     /** 轮盘里的一条：{@code key} 是动画名，{@code variant} 标记「服装预设」而不是额外动作。 */
     public record ExtraOption(String key, String label, boolean variant) {}
@@ -338,6 +343,71 @@ public final class ModelRuntime {
                 + " hands=" + rightHand + "/" + leftHand);
         return new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot, children,
                 extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand);
+    }
+
+    /**
+     * 第一人称手臂：{@code mainEntity.armModel} 是独立的一套骨骼，动画在 {@code animType=2/11} 的两份文件里
+     * （{@code animation-arm} / {@code animation-fp_arm}）。
+     *
+     * <p>做法是把它包成一个「只有手臂几何 + 手臂动画」的临时模型再走同一个 {@link #build}，
+     * 矩阵、采样、UV 全部复用，不用给主模型开分支。动画文件在这里改标成 {@code animType=1}，
+     * 因为 {@code build} 只收主模型那一类。
+     * {@code hideProps} 固定 false —— 手臂动画里没有基础状态名，道具启发式会把整条手臂当成道具藏掉。
+     */
+    public static ModelRuntime buildArm(RawYsmModel model, Identifier texture) {
+        if (model == null || model.mainEntity == null) {
+            return null;
+        }
+        RawYsmModel.RawGeometry geometry = model.mainEntity.armModel;
+        if (geometry == null || geometry.bones == null || geometry.bones.isEmpty()) {
+            return null;
+        }
+        RawYsmModel.RawMainEntity main = new RawYsmModel.RawMainEntity();
+        main.mainModel = geometry;
+        main.textures = model.mainEntity.textures;
+        main.animationFiles = new LinkedHashMap<>();
+        for (Map.Entry<String, RawYsmModel.RawAnimationFile> entry : model.mainEntity.animationFiles.entrySet()) {
+            RawYsmModel.RawAnimationFile file = entry.getValue();
+            if (file == null || (file.animType != 2 && file.animType != 11)) {
+                continue;
+            }
+            RawYsmModel.RawAnimationFile copy = new RawYsmModel.RawAnimationFile();
+            copy.animType = 1;
+            copy.fileHash = file.fileHash;
+            copy.animations = file.animations;
+            main.animationFiles.put(entry.getKey(), copy);
+        }
+        RawYsmModel proxy = new RawYsmModel();
+        proxy.formatVersion = model.formatVersion;
+        proxy.metadata = model.metadata;
+        proxy.properties = model.properties;
+        proxy.mainEntity = main;
+        ModelRuntime runtime = build(proxy, texture, false);
+        if (runtime != null) {
+            runtime.initArmSides();
+        }
+        return runtime;
+    }
+
+    /**
+     * 手臂模型里通常左右两条手臂各成一根，这里按根 pivot 的 X 正负把它们分开。
+     *
+     * <p>反序列化阶段已经把 YSM 的 X 取负。渲染时右手还有 {@code x' = -p.x - 0.25} 这一步，
+     * 要落在屏幕右侧需要 {@code p.x > 0}，所以「X 为正」才是右手那一条。
+     */
+    private void initArmSides() {
+        int count = bones.size();
+        armRootOf = new int[count];
+        armRootX = new float[count];
+        renderMask = new boolean[count];
+        for (int i = 0; i < count; i++) {
+            int node = i;
+            while (parents[node] >= 0) {
+                node = parents[node];
+            }
+            armRootOf[i] = node;
+            armRootX[i] = bones.get(node).pivot[0];
+        }
     }
 
     private static boolean hasZeroScale(RawYsmModel.RawBoneAnimation boneAnimation) {
@@ -844,6 +914,40 @@ public final class ModelRuntime {
         }
     }
 
+    /**
+     * 第一人称手臂的每帧出图：只播 {@code fp_arm}（没有就退回 {@code arm}），循环。
+     *
+     * <p>不按实体状态选片段 —— 第一人称看不到身体，YSM 在这里也只播手臂动画。
+     */
+    public void renderFirstPerson(PoseStack.Pose pose, VertexConsumer buffer, int light, float ageSeconds,
+            boolean rightArm) {
+        if (armRootOf != null) {
+            for (int i = 0; i < bones.size(); i++) {
+                renderMask[i] = rightArm ? armRootX[i] >= 0.0F : armRootX[i] < 0.0F;
+            }
+        }
+        RawYsmModel.RawAnimation clip = firstOf(FP_ARM);
+        if (clip == null) {
+            render(pose, buffer, light);
+            return;
+        }
+        if (clip != lastClip) {
+            lastClip = clip;
+            lastClipStart = ageSeconds;
+        }
+        float time = clipTime(clip, ageSeconds);
+        java.util.Arrays.fill(frameState, (byte) 0);
+        for (int i = 0; i < bones.size(); i++) {
+            samplePose(clip, i, time, ageSeconds);
+        }
+        for (int i = 0; i < bones.size(); i++) {
+            computeFrame(i);
+            frameNormals[i] = normalOf(frameMatrices[i]);
+        }
+        frameValid = true;
+        emit(pose, buffer, light, frameMatrices, frameNormals);
+    }
+
     private Matrix4f computeFrame(int index) {
         if (frameState[index] == 2) {
             return frameMatrices[index];
@@ -1110,6 +1214,9 @@ public final class ModelRuntime {
                 continue;
             }
             if (hiddenCurrent[i]) {
+                continue;
+            }
+            if (renderMask != null && !renderMask[i]) {
                 continue;
             }
             Matrix3f normalMatrix = normals[i];

@@ -24,6 +24,8 @@ public final class CustomModelManager {
     private static final AtomicInteger VERSION = new AtomicInteger();
 
     private static volatile ModelRuntime runtime;
+    /** 第一人称手臂（{@code mainEntity.armModel}）；模型没有手部几何时是 null。 */
+    private static volatile ModelRuntime armRuntime;
     private static volatile String loadedFile = "";
     /** 轮盘选择：服装预设与额外动作各记一份；空串 = 没选（新模型自动用默认服装）。 */
     private static volatile String selectedVariant = "";
@@ -35,6 +37,10 @@ public final class CustomModelManager {
 
     public static ModelRuntime runtime() {
         return runtime;
+    }
+
+    public static ModelRuntime armRuntime() {
+        return armRuntime;
     }
 
     public static String loadedFile() {
@@ -72,6 +78,7 @@ public final class CustomModelManager {
     public static void clear() {
         VERSION.incrementAndGet();
         runtime = null;
+        armRuntime = null;
         loadedFile = "";
     }
 
@@ -99,6 +106,7 @@ public final class CustomModelManager {
         } catch (Throwable throwable) {
             if (VERSION.get() == version) {
                 runtime = null;
+                armRuntime = null;
                 loadedFile = "";
             }
             Debug.info("[SFH+] 模型加载异常 " + fileName + ": " + throwable);
@@ -118,12 +126,14 @@ public final class CustomModelManager {
             return;
         }
         runtime = loaded;
+        armRuntime = textureId == null ? null : ModelRuntime.buildArm(model, textureId);
         loadedFile = loaded == null ? "" : fileName;
         if (loaded == null) {
             Debug.info("[SFH+] 模型加载失败（无可用贴图或几何）: " + fileName);
         } else {
             applyExtraSelection(loaded);
             Debug.info("[SFH+] 模型已加载 " + fileName + " bones=" + loaded.boneCount()
+                    + " arm=" + (armRuntime == null ? "-" : armRuntime.boneCount())
                     + " variant=" + (loaded.activeVariantKey().isEmpty() ? "-" : loaded.activeVariantKey())
                     + " extra=" + (loaded.activeExtraKey().isEmpty() ? "-" : loaded.activeExtraKey())
                     + " texture=" + textureId);

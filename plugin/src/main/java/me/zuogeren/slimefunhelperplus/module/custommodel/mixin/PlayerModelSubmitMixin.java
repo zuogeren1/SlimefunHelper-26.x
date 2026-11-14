@@ -18,12 +18,15 @@ import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -42,6 +45,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(value = LivingEntityRenderer.class, priority = 900)
 public abstract class PlayerModelSubmitMixin {
+
+    @Shadow
+    protected abstract void setupRotations(LivingEntityRenderState state, PoseStack poseStack, float bodyRot,
+            float entityScale);
 
     private static final float HALF_WIDTH = 0.3F;
     private static final float HEIGHT = 1.8F;
@@ -73,7 +80,7 @@ public abstract class PlayerModelSubmitMixin {
         ModelRuntime runtime = CustomModelManager.runtime();
         if (runtime != null) {
             poseStack.pushPose();
-            poseStack.last().pose().rotateY((float) Math.toRadians(180.0F - avatar.bodyRot));
+            applyEntityTransform(avatar, poseStack);
             float ageSeconds = avatar.ageInTicks / 20.0F;
             collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(runtime.texture()),
                     (pose, buffer) -> runtime.render(pose, buffer, light, avatar, localPlayer, ageSeconds));
@@ -95,6 +102,27 @@ public abstract class PlayerModelSubmitMixin {
             }
         }
         callbackInfo.cancel();
+    }
+
+    /**
+     * 复刻 {@code LivingEntityRenderer#submit} 出模型之前的实体系变换。
+     *
+     * <p>只取「姿势」那一段：鞘翅平飞、游泳、死亡倒地、激流旋转都写在 {@code setupRotations} 里，
+     * 模型自己再算一遍就会与实体姿态脱节。
+     * 后面的 {@code scale(-1,-1,1)} 与 {@code translate(0,-1.501,0)} 不复刻 ——
+     * 反序列化阶段已经把 YSM 的坐标烘成「Y 向上、脚在原点」，再翻一次会把模型倒过来。
+     */
+    private void applyEntityTransform(AvatarRenderState state, PoseStack poseStack) {
+        if (state.hasPose(Pose.SLEEPING)) {
+            Direction bedOrientation = state.bedOrientation;
+            if (bedOrientation != null) {
+                float headOffset = state.eyeHeight - 0.1F;
+                poseStack.translate(-bedOrientation.getStepX() * headOffset, 0.0F,
+                        -bedOrientation.getStepZ() * headOffset);
+            }
+        }
+        poseStack.scale(state.scale, state.scale, state.scale);
+        this.setupRotations(state, poseStack, state.bodyRot, state.scale);
     }
 
     private static void renderHeldItems(ModelRuntime runtime, LocalPlayer player, PoseStack poseStack,
