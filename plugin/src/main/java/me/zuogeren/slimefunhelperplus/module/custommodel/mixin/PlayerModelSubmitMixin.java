@@ -87,6 +87,7 @@ public abstract class PlayerModelSubmitMixin {
 
     private static final AtomicBoolean LOGGED = new AtomicBoolean();
 
+
     @Inject(
             method = "submit(Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V",
             at = @At("HEAD"),
@@ -118,7 +119,12 @@ public abstract class PlayerModelSubmitMixin {
         boolean glowing = avatar.appearsGlowing();
         int overlay = LivingEntityRenderer.getOverlayCoords(avatar, this.getWhiteOverlayProgress(avatar));
         int tint = translucent ? INVISIBLE_TINT : OPAQUE_TINT;
-        ModelRuntime runtime = CustomModelManager.runtime();
+        // 预览页的实体走 GUI 的 PiP 通道：GuiEntityRenderer 自己 new 一个 CameraRenderState，
+        // 从不经过 Camera#extractRenderState，initialized 恒为 false；世界里的实体拿的是
+        // GameRenderer 每帧填好的那份，initialized 为 true。世界玩家必须继续用世界实例，
+        // 否则面板背后的角色会跟着预览实例播动作。
+        boolean previewRender = camera != null && !camera.initialized;
+        ModelRuntime runtime = previewRender ? CustomModelManager.runtime() : CustomModelManager.worldRuntime();
         if (runtime != null) {
             poseStack.pushPose();
             applyEntityTransform(avatar, poseStack, runtime);
@@ -351,12 +357,12 @@ public abstract class PlayerModelSubmitMixin {
             }
             poseStack.pushPose();
             poseStack.mulPose(locator);
+            // 与 SPM 的 CustomPlayerElytraLayer:50-58 逐行一致：locator 矩阵之后直接
+            // translate(0,1.5,0) · rotZ(180) · scale(2)，**不做 widthScale 补偿**。
+            // SPM 的图层同样跑在模型整体缩放之后，它没补偿就是对的 —— 补偿反而把翅膀推偏。
             poseStack.translate(0.0F, 1.5F, 0.0F);
             rotateDegrees(poseStack, Axis.ZP, 180.0F);
-            // 抵消 applyEntityTransform 已经乘上的模型整体缩放（X/Z 取 heightScale、Y 取 widthScale）
-            float inverseHeight = 1.0F / runtime.heightScale();
-            float inverseWidth = 1.0F / runtime.widthScale();
-            poseStack.scale(2.0F * inverseHeight, 2.0F * inverseWidth, 2.0F * inverseHeight);
+            poseStack.scale(2.0F, 2.0F, 2.0F);
             submitModel(collector, model, avatar, poseStack, texture, light);
             poseStack.popPose();
         }
