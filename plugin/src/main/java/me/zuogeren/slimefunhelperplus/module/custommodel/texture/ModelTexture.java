@@ -39,6 +39,35 @@ public final class ModelTexture {
         return CACHE.computeIfAbsent(cacheKey, ignored -> load(texture, cacheKey));
     }
 
+    /**
+     * 释放所有已注册的模型贴图。
+     *
+     * <p>{@link DynamicTexture} 持有 GPU 贴图，{@link Identifier} 被丢弃不会让
+     * {@code TextureManager} 回收它 —— 换模型时必须显式释放，否则每换一次模型就多占一张显存。
+     * 占位图是跨模型共享的常量，不随模型释放。
+     *
+     * <p>必须在渲染线程调用。
+     */
+    public static void releaseAll() {
+        // 先拷一份 key：release 会从 CACHE 里删，边遍历边删会漏掉一部分贴图
+        for (String key : new java.util.ArrayList<>(CACHE.keySet())) {
+            release(key);
+        }
+    }
+
+    /** 释放单张贴图；key 不在缓存里时什么也不做。 */
+    public static void release(String key) {
+        Identifier id = CACHE.remove(key);
+        if (id == null) {
+            return;
+        }
+        try {
+            Minecraft.getInstance().getTextureManager().release(id);
+        } catch (Throwable throwable) {
+            Debug.info("[SFH+] 贴图释放失败 key=" + key + ": " + throwable);
+        }
+    }
+
     /** 模型一张贴图都没有时用的占位图；同一个 Identifier 复用，避免每次加载都注册新纹理。 */
     public static Identifier placeholder() {
         Identifier cached = placeholder;

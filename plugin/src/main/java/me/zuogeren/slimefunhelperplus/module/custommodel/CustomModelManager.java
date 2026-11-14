@@ -99,6 +99,8 @@ public final class CustomModelManager {
 
     public static void clear() {
         VERSION.incrementAndGet();
+        // 贴图是 GPU 资源，Identifier 被丢弃不会让 TextureManager 回收它
+        ModelTexture.releaseAll();
         runtime = null;
         armRuntime = null;
         loadedFile = "";
@@ -175,6 +177,9 @@ public final class CustomModelManager {
         Map<String, String> categories = mergeClassifiedExtras(model);
         Map<String, RawYsmModel.RawTexture> textures = collectTextures(model);
         String defaultName = pickDefaultTextureName(model, textures);
+        // 先释放旧模型的贴图再注册新的：反过来的话 releaseAll 会把刚注册的那张一起释放掉，
+        // 渲染时拿到的是已释放的 Identifier，整模型变成 missing texture。
+        ModelTexture.releaseAll();
         Identifier textureId = ModelTexture.register(textures.get(defaultName));
         if (textureId == null) {
             // 贴图注册失败（GPU 未就绪等）不该连几何一起丢：占位图至少让模型能画出来
@@ -504,8 +509,18 @@ public final class CustomModelManager {
             Debug.info("[SFH+] 贴图切换失败（几何为空）: " + name);
             return;
         }
+        // 旧 runtime 持有音效句柄，换图后要显式释放；旧贴图同理（新贴图已注册好，此时释放不会误伤）
+        ModelRuntime previous = runtime;
+        ModelRuntime previousArm = armRuntime;
+        ModelTexture.release(activeTexture);
         runtime = rebuilt;
         armRuntime = ModelRuntime.buildArm(model, textureId);
+        if (previous != null) {
+            previous.release();
+        }
+        if (previousArm != null) {
+            previousArm.release();
+        }
         activeTexture = name;
         // 重建出来的 runtime 是全新的，服装/动作选择要按这个模型重新接上
         applyExtraSelection(rebuilt, loadedFile);
