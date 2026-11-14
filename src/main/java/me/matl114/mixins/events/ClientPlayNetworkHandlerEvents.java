@@ -479,7 +479,7 @@ public abstract class ClientPlayNetworkHandlerEvents {
     @Inject(method = "handleMoveEntity", at = @At("HEAD"))
     private void sfh$captureMovedEntity(ClientboundMoveEntityPacket packet, CallbackInfo ci) {
         if (!packet.hasPosition()) return;
-        Entity entity = packet.getEntity(Minecraft.getInstance().level);
+        Entity entity = sfh$movedEntity(packet);
         if (entity != null) {
             sfh$trackedPosBefore.put(entity.getId(), entity.position());
         }
@@ -488,10 +488,23 @@ public abstract class ClientPlayNetworkHandlerEvents {
     @Inject(method = "handleMoveEntity", at = @At("RETURN"))
     private void sfh$broadcastMovedEntity(ClientboundMoveEntityPacket packet, CallbackInfo ci) {
         if (!packet.hasPosition()) return;
-        Entity entity = packet.getEntity(Minecraft.getInstance().level);
+        Entity entity = sfh$movedEntity(packet);
         if (entity != null) {
             sfh$publishTrackedPosition(entity);
         }
+    }
+
+    /**
+     * 移动包的目标实体。
+     *
+     * <p>{@code ClientboundMoveEntityPacket#getEntity(Level)} 内部直接 {@code level.getEntity(id)}，
+     * 不判空；而这两处注入都在 {@code PacketUtils.ensureRunningOnSameThread} 之前，
+     * 退世界时 {@code mc.level} 已被清空，传进去就是 NPE（被 PacketUtils 吞成一行 toString，没有堆栈）。
+     */
+    @Unique
+    private Entity sfh$movedEntity(ClientboundMoveEntityPacket packet) {
+        ClientLevel level = Minecraft.getInstance().level;
+        return level == null ? null : packet.getEntity(level);
     }
 
     @Inject(method = "handleEntityPositionSync", at = @At("HEAD"))
