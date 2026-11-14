@@ -1225,15 +1225,29 @@ public final class ModelRuntime {
         return null;
     }
 
+    /**
+     * 重算本帧的隐藏表：默认隐藏的道具，只要「当前有东西在驱动它」就放出来。
+     *
+     * <p>三种驱动源：轮盘的服装预设、轮盘的额外动作、以及**正在播的控制器状态**。
+     * 第三种是 YSM 的常规做法 —— 作者在 {@code pre_parallel} 里把道具缩到 0 当默认隐藏，
+     * 再由 {@code parallel_6} 这类控制器槽把 scale 写回 1 放出来（丛雨的剑就是）。
+     * 只认轮盘的话，控制器放出来的道具仍然是全透明的。
+     */
     private void recomputeHidden() {
         System.arraycopy(hiddenDefault, 0, hiddenCurrent, 0, hiddenCurrent.length);
         Set<Integer> roots = new HashSet<>();
         collectPropRoots(activeVariant, roots);
         collectPropRoots(activeExtra, roots);
+        for (RawYsmModel.RawAnimation playing : controllerPlayingClips) {
+            collectPropRoots(playing, roots);
+        }
         for (int root : roots) {
             unhideSubtree(root);
         }
     }
+
+    /** 本帧控制器状态机选中的片段（{@link #sampleControllerLayers} 每帧重填）。 */
+    private final List<RawYsmModel.RawAnimation> controllerPlayingClips = new ArrayList<>();
 
     private void collectPropRoots(RawYsmModel.RawAnimation clip, Set<Integer> roots) {
         if (clip == null) {
@@ -1344,6 +1358,12 @@ public final class ModelRuntime {
         for (ModelController controller : layer) {
             List<String> overlayNames = controller.tick(ageSeconds, this::lengthOfClip);
             if (!overlayNames.isEmpty()) {
+                for (String overlayName : overlayNames) {
+                    RawYsmModel.RawAnimation playing = clip(overlayName);
+                    if (playing != null) {
+                        controllerPlayingClips.add(playing);
+                    }
+                }
                 // 状态切换那一帧把切换前的姿态存下来，之后按目标状态的 blend_transition 淡过去。
                 // 放在这里而不是 tick 之后：空状态不产生姿态，没有「旧姿态」可混。
                 ControllerTransition transition = trackTransition(controller, ageSeconds);
@@ -2344,6 +2364,8 @@ public final class ModelRuntime {
         weightClip = null;
         weightTime = Float.NaN;
         lastFrameAge = ageSeconds;
+        // 控制器本帧会播哪些片段还不知道，先清空；采样完再按实际播的重算一次隐藏表
+        controllerPlayingClips.clear();
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
         }
@@ -2406,6 +2428,9 @@ public final class ModelRuntime {
         // 它是 YSM 里唯一带 blendRotation 的控制器，合成方式就是相加。
         sampleLayers(parallelBase, ageSeconds, false);
         sampleControllerLayers("parallel", ageSeconds);
+        // 本帧控制器播的片段都收集完了，按它们重算一次隐藏表：作者用控制器把道具放出来时，
+        // 默认隐藏的那棵子树要跟着解除，否则 scale 写回 1 也画不出来。
+        recomputeHidden();
         // 头部朝向：YSM 在动画求值之后把视线角度加到 Head 组骨骼上（CustomHumanoidEntity#codeAnimation），
         // 加的是「头相对身体」的分量 —— 身体朝向由实体变换那一层（applyEntityTransform）负责，这里只管头怎么偏。
         // YSM / SPM 在同一个（X/Y 已取负的）骨骼空间里加 headPitch = -xRot、netHeadYaw = -clamp(±85)，
