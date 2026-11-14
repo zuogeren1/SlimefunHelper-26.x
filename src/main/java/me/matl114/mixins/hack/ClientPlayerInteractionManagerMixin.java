@@ -292,6 +292,21 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                 MineExtra.INSTANCE.cooldownOverride.get() ? MineExtra.INSTANCE.getMiningPacketCooldown(0) : 5;
     }
 
+    /**
+     * 创造模式即时破坏之后的冷却收尾。
+     *
+     * <p>创造模式一次破坏只发 START_DESTROY_BLOCK，包冷却的记账点不会推进，
+     * {@link MineExtra#getMiningPacketCooldown(int)} 恒为 0；直接套 {@link #applyPostStopState} 会把原版写入的
+     * 5 tick 冷却抹成 0，于是按住左键时每 tick 都能破一块。包冷却确实在计时时才允许覆盖。
+     */
+    @Unique
+    private void applyCreativeBreakCooldown() {
+        int cooldown = MineExtra.INSTANCE.getMiningPacketCooldown(0);
+        if (cooldown > 0) {
+            this.destroyDelay = cooldown;
+        }
+    }
+
     @Override
     @Unique
     public void sendBreakPacket(BlockPos pos, Direction direction, boolean silent) {
@@ -657,7 +672,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                             target = "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;destroyDelay:I",
                             shift = At.Shift.AFTER))
     public void creativeCooldownOverride(BlockPos pos, Direction direction, CallbackInfoReturnable<Boolean> cir) {
-        applyPostStopState(false);
+        applyCreativeBreakCooldown();
     }
 
     @WrapOperation(
@@ -686,7 +701,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                             ordinal = 0,
                             shift = At.Shift.AFTER))
     public void instaBreakPacketWhenUpdate(BlockPos pos, Direction direction, CallbackInfoReturnable<Boolean> cir) {
-        applyPostStopState(false);
+        applyCreativeBreakCooldown();
     }
 
     //    @Inject(method = "getReachDistance",at = @At(value = "HEAD"),cancellable = true)
