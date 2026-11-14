@@ -1,5 +1,6 @@
 package me.zuogeren.slimefunhelperplus.module.custommodel.model;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.ArrayDeque;
@@ -14,10 +15,13 @@ import java.util.Map;
 import java.util.Set;
 import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
+import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSound;
+import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSoundCursorTable;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.InteractionHand;
@@ -42,6 +46,9 @@ import org.joml.Vector3f;
  * （吉他、手机、备用服装）。{@code show-props} 打开时全部显示。
  */
 public final class ModelRuntime {
+
+    /** 发光骨的骨名前缀：YSM 的 {@code GeoBone:6,50} 与 SPM 的 {@code GeometryBaker:60} 都用它。 */
+    private static final String GLOW_BONE_PREFIX = "ysmGlow";
 
     private static final String[] IDLE = {"idle", "empty"};
     private static final String[] WALK = {"walk"};
@@ -76,6 +83,31 @@ public final class ModelRuntime {
     /** 只播一次的状态；其余主状态按 YSM 的 {@code playLoopAnimation} 语义一律循环。 */
     private static final Set<String> ONE_SHOT = Set.of("death", "attacked");
 
+    /**
+     * 控制器槽名（去掉 {@code player.} 前缀），按 YSM {@code PlayerControllerCollection:33-74} 的注册顺序排列。
+     *
+     * <p>顺序即合成顺序：越靠后越晚叠上去。{@code pre_*} 在对应主槽之前、{@code post_*} 之后，
+     * {@code parallel} 排在 {@code use} 之上。
+     */
+    private static final List<String> CONTROLLER_LAYERS = List.of(
+            "pre_parallel",
+            "pre_main", "main", "post_main",
+            "pre_hold", "hold_offhand", "hold_mainhand", "post_hold",
+            "pre_swing", "swing", "post_swing",
+            "pre_use", "use", "post_use",
+            "parallel");
+
+    /**
+     * 允许多实例的槽：YSM 用 {@code multi(...)} 注册，槽名是 {@code player.<槽>_<后缀>}。
+     *
+     * <p>其余槽（{@code main} / {@code hold_*} / {@code swing} / {@code use}）是 {@code simple(...)} 单实例，
+     * 带后缀的名字不是 YSM 的槽，归到自定义桶，否则会落进一个没人采样的桶里。
+     */
+    private static final List<String> MULTI_SLOTS = List.of(
+            "pre_parallel", "pre_main", "post_main",
+            "pre_hold", "post_hold", "pre_swing", "post_swing", "pre_use", "post_use",
+            "parallel");
+
     /** 参与「基础动作」的动画名：被这些动画驱动的骨骼不算舞台道具。 */
     private static final Set<String> MAIN_STATES = Set.of(
             "idle", "walk", "run", "sneak", "sneaking", "fly", "elytra_fly", "swim", "swim_stand",
@@ -93,6 +125,32 @@ public final class ModelRuntime {
             "head", "body", "arm", "hand", "leg", "foot", "hair", "eye", "finger", "neck", "waist", "chest"
     };
 
+    /**
+     * 手持物挂点候选链，按优先级短路取第一根存在的骨骼。
+     *
+     * <p>YSM 只认 {@code RightHandLocator}/{@code LeftHandLocator}，没有这两根骨的模型在原版里就不画手持物；
+     * 而原版手持物渲染已被 cancel（{@code PlayerModelSubmitMixin}），这里找不到骨就等于物品完全不出现，
+     * 所以按 SPM {@code GeometryBaker#buildPathFirst} 的顺序回退：先专用定位组，再退到手臂链。
+     *
+     * <p>主链（{@code *HandLocator → *Item → *Hand → *Palm → *Wrist → *ForeArm → *LowerArm → *Arm}）
+     * 的相对顺序与 SPM 一致；{@code *HandLocator2..8} 与 {@code *Sword} 是 YSM 2.4.0 起的额外定位组，
+     * 插在专用定位组之后、手臂链之前 —— 它们和 {@code *HandLocator} 一样落在手上，而手臂骨的 pivot
+     * 在肩关节（内置 27 个模型里 RightArm 的 pivot Y 比 RightHandLocator 高 7~14 像素），
+     * 拿手臂骨当挂点会把物品画到肩上；若把它们排到手臂链之后，有手臂骨的模型就永远走不到。
+     */
+    private static final String[] RIGHT_HAND_CHAIN = {
+            "righthandlocator", "rightitem", "righthand",
+            "righthandlocator2", "righthandlocator3", "righthandlocator4", "righthandlocator5",
+            "righthandlocator6", "righthandlocator7", "righthandlocator8", "rightsword",
+            "rightpalm", "rightwrist", "rightforearm", "rightlowerarm", "rightarm"
+    };
+    private static final String[] LEFT_HAND_CHAIN = {
+            "lefthandlocator", "leftitem", "lefthand",
+            "lefthandlocator2", "lefthandlocator3", "lefthandlocator4", "lefthandlocator5",
+            "lefthandlocator6", "lefthandlocator7", "lefthandlocator8", "leftsword",
+            "leftpalm", "leftwrist", "leftforearm", "leftlowerarm", "leftarm"
+    };
+
     private final List<RawYsmModel.RawBone> bones;
     private final Map<String, Integer> boneIndex;
     private final Map<String, RawYsmModel.RawAnimation> clips;
@@ -105,6 +163,13 @@ public final class ModelRuntime {
     private final Matrix3f[] frameNormals;
     private final byte[] frameState;
     private final float[] poses;
+    /**
+     * 上一帧结束时的姿态快照（布局同 {@link #poses}）。
+     *
+     * <p>{@code ysm.bone_rot} 这类查询量在采样过程中求值，此时本帧的 {@link #poses} 只填了一部分，
+     * 读到哪根骨骼取决于层序；按上一帧的完整姿态回答才是确定的，也与 SPM 的 PhysicsManager 一致。
+     */
+    private float[] lastFramePoses;
     private final boolean[] hiddenDefault;
     private final boolean[] hiddenCurrent;
     private final int[] propRoot;
@@ -131,6 +196,42 @@ public final class ModelRuntime {
     private float blendStart = Float.NaN;
     /** 过渡时长（秒），对齐 SPM 主控制器的 0.1f（TicksInterpolator 内部乘 20，即 2 tick）。 */
     private static final float BLEND_SECONDS = 0.1F;
+    /** 播完后的退场淡出时长（秒）：SPM 的 {@code defaultTransitionTick} 是 3 tick。 */
+    private static final float ENDING_SECONDS = 3.0F / 20.0F;
+    /** 骨骼失去驱动后回到中性的时长（秒）：SPM 的 {@code AnimationData.resetSpeed} 默认 3 tick。 */
+    private static final float DECAY_SECONDS = 3.0F / 20.0F;
+    /** 本帧被任何层写过的骨骼；没被写过的走逐骨衰减。 */
+    private final boolean[] poseDriven;
+    /** 骨骼最后一次被驱动的时刻；{@code NaN} 表示当前没有在衰减。 */
+    private final float[] decayStart;
+    /** 骨骼最后一次被驱动时的姿态（布局同 {@link #poses}），衰减从这里出发。 */
+    private final float[] decayPoses;
+    /** 上一帧的时间戳：{@link #markDriven} 记的是「最后一次被驱动」的 tick，衰减进度按它算。 */
+    private float lastFrameAge = Float.NaN;
+    /**
+     * 本帧 {@code blend_weight} 的单条缓存：同一片段在逐骨循环里被问很多次，
+     * 而 Molang 求值不便宜。每帧开头清空，跨帧不保留（{@code query.life_time} 会变）。
+     */
+    private RawYsmModel.RawAnimation weightClip;
+    private float weightTime = Float.NaN;
+    private float weightValue = 1.0F;
+    /** 通道组位掩码：{@link #blendChannels} 用。 */
+    private static final byte ROTATION = 1;
+    private static final byte POSITION = 2;
+    private static final byte SCALE = 4;
+
+    /** 同一控制器状态里多条动画的合成暂存（布局同 {@link #poses}）：旋转/位移加权和，缩放连乘。 */
+    private final float[] blendPose;
+    /**
+     * {@link #blendPose} 里本帧真的被写过的通道组，按位记：{@code 1}=旋转、{@code 2}=位移、{@code 4}=缩放。
+     *
+     * <p>YSM 的 {@code pollRotationPoint} / {@code pollPositionPoint} / {@code pollScalePoint} 是三个独立
+     * 通道，动画没写的那一组返回空、快照保持原值。所以覆盖也只能按组来 —— 整骨覆盖会把
+     * {@code pre_parallel} 藏道具用的 {@code scale=0} 一起抹成 1。
+     */
+    private final byte[] blendChannels;
+    /** {@link #bonePivotAbs} 的累乘暂存，避免每次查询都新建矩阵。 */
+    private final Matrix4f pivotAbsScratch = new Matrix4f();
 
     /** 26.3 上用来识别「新一次挥动」的 {@code SwingDescription} 实例。 */
     private Object lastSwingMarker;
@@ -141,6 +242,9 @@ public final class ModelRuntime {
     /** 已锁存的挥动/使用片段：起手时解析一次，播完才释放。 */
     private RawYsmModel.RawAnimation swingClip;
     private RawYsmModel.RawAnimation useClip;
+    /** 正在做退场过渡的挥动片段与它的起点：播完之后按 {@link #ENDING_SECONDS} 淡回中性。 */
+    private RawYsmModel.RawAnimation swingEndClip;
+    private float swingEndStart = Float.NaN;
     private RawYsmModel.RawAnimation activeVariant;
     private String activeVariantKey = "";
     private RawYsmModel.RawAnimation activeExtra;
@@ -152,7 +256,24 @@ public final class ModelRuntime {
     private int[] armRootOf;
     private float[] armRootX;
     private boolean[] renderMask;
+    /**
+     * 发光骨掩膜：骨名前缀 {@code ysmGlow} 的骨骼（YSM 的 {@code GeoBone:6,50} 判据）。
+     *
+     * <p>这些骨要单独用 emissive 渲染类型再画一遍，否则眼睛/灯/魔法件在夜里是全黑的。
+     * 掩膜在构建期算好，出图时按它分两趟（见 {@link #renderGlow}）。
+     */
+    private boolean[] glowMask;
+    /** 贴图半透明像素的扫描结果；{@code null} 表示还没扫过（首次出图时才扫，避免加载期卡顿）。 */
+    private Boolean translucentPixels;
     private List<ModelController> controllers = List.of();
+    /**
+     * 控制器按 YSM 的注册顺序分桶：键是槽名前缀（{@code pre_main} 这类），值是这一层要采样的控制器。
+     *
+     * <p>YSM 的 {@code PlayerControllerCollection:33-74} 按固定顺序注册控制器，后注册的覆盖先注册的。
+     * 全塞进一个桶压在主层之上，{@code pre_parallel} 就会盖掉主动画的 {@code scale=1}（道具不露），
+     * {@code parallel} 又会被 swing/use 盖住。
+     */
+    private Map<String, List<ModelController>> controllerBuckets = Map.of();
     /** 模型属性里的渲染缩放（YSM 默认 0.7）；作者可以用它整体调大小。 */
     private float widthScale = 1.0F;
     private float heightScale = 1.0F;
@@ -166,8 +287,14 @@ public final class ModelRuntime {
     private List<String> parallelBase = List.of();
     /** 时间轴语句写入的 {@code v.*} 变量表：物理跨帧的状态全存在这里，按模型实例一份。 */
     private final Map<String, Float> variables = new HashMap<>();
-    /** 片段名 → 时间轴执行游标。 */
-    private final Map<String, TimelineCursor> timelines = new HashMap<>();
+    /** 层 + 片段名 → 时间轴执行游标。 */
+    private final Map<CursorKey, TimelineCursor> timelines = new HashMap<>();
+
+    /**
+     * 层 + 片段名 → 音效游标。键与 {@link #timelines} 一致：音效和动作必须吃同一份片段内时间，
+     * 否则循环回卷时两者对不上。模型没有自带音频时为 {@code null}，整条音效路径跳过。
+     */
+    private ModelSoundCursorTable soundCursors;
 
     /**
      * 本实例的物理状态表：{@code ysm.second_order} / {@code ysm.first_order} 的模拟器都挂在这里。
@@ -187,7 +314,7 @@ public final class ModelRuntime {
             Matrix3f[] restNormals, boolean[] hidden, int[] propRoot, Map<Integer, List<Integer>> children,
             Map<String, RawYsmModel.RawAnimation> extraClips, List<ExtraOption> extraOptions, String defaultExtraKey,
             Identifier texture, int rightHandBone, int leftHandBone,
-            Map<String, RawYsmModel.RawAnimation> defaultClips) {
+            Map<String, RawYsmModel.RawAnimation> defaultClips, boolean[] glow) {
         this.bones = bones;
         this.boneIndex = boneIndex;
         this.clips = clips;
@@ -199,6 +326,22 @@ public final class ModelRuntime {
         this.frameNormals = new Matrix3f[bones.size()];
         this.frameState = new byte[bones.size()];
         this.poses = new float[bones.size() * 9];
+        this.lastFramePoses = new float[bones.size() * 9];
+        this.poseDriven = new boolean[bones.size()];
+        this.decayStart = new float[bones.size()];
+        this.decayPoses = new float[bones.size() * 9];
+        this.blendPose = new float[bones.size() * 9];
+        this.blendChannels = new byte[bones.size()];
+        java.util.Arrays.fill(this.decayStart, Float.NaN);
+        // 缩放的「中性」是 1 不是 0：首帧快照若留 0，衰减会从 0 长回 1，模型第一帧是扁的
+        for (int i = 0; i < bones.size(); i++) {
+            this.decayPoses[i * 9 + 6] = 1.0F;
+            this.decayPoses[i * 9 + 7] = 1.0F;
+            this.decayPoses[i * 9 + 8] = 1.0F;
+            this.lastFramePoses[i * 9 + 6] = 1.0F;
+            this.lastFramePoses[i * 9 + 7] = 1.0F;
+            this.lastFramePoses[i * 9 + 8] = 1.0F;
+        }
         this.hiddenDefault = hidden.clone();
         this.hiddenCurrent = hidden.clone();
         this.propRoot = propRoot;
@@ -209,6 +352,7 @@ public final class ModelRuntime {
         this.texture = texture;
         this.rightHandBone = rightHandBone;
         this.leftHandBone = leftHandBone;
+        this.glowMask = glow;
     }
 
     public static ModelRuntime build(RawYsmModel model, Identifier texture, boolean hideProps) {
@@ -347,10 +491,14 @@ public final class ModelRuntime {
             }
         }
         // 挂在身体根下面的道具（吉他、手机、备用服装）：pre_parallel* 里缩放到 0、且基础动画不驱动。
+        // 但「被控制器槽引用」的骨骼不能藏：作者用 pre_parallel 把它缩到 0 当默认隐藏，
+        // 再由 parallel_6 这类控制器槽把 scale 写回 1 放出来（丛雨的 cyw 就是剑）。
+        // 藏掉之后控制器写多少都画不出来，所以这里先排除掉控制器引用集。
+        Set<String> controllerDriven = controllerReferencedBones(model);
         for (int i = 0; i < count; i++) {
             String name = bones.get(i).name;
             if (name != null && zeroScaled.contains(name) && !mainAnimated.contains(name)
-                    && extent[i] >= PROP_MIN_SIZE) {
+                    && !controllerDriven.contains(name) && extent[i] >= PROP_MIN_SIZE) {
                 hidden[i] = true;
             }
         }
@@ -406,14 +554,26 @@ public final class ModelRuntime {
                 }
             }
         }
-        int rightHand = findHand(bones, "righthandlocator", "rightitem", "righthand");
-        int leftHand = findHand(bones, "lefthandlocator", "leftitem", "lefthand");
+        int rightHand = findHand(bones, RIGHT_HAND_CHAIN);
+        int leftHand = findHand(bones, LEFT_HAND_CHAIN);
+        // 发光骨：YSM 按骨名前缀判（SPM 的 GeometryBaker:60 是 name.startsWith("ysmGlow")）
+        boolean[] glow = new boolean[count];
+        int glowCount = 0;
+        for (int i = 0; i < count; i++) {
+            String name = bones.get(i).name;
+            if (name != null && name.startsWith(GLOW_BONE_PREFIX)) {
+                glow[i] = true;
+                glowCount++;
+            }
+        }
         Debug.info("[SFH+] geo bones=" + count + " roots=" + roots + " unresolvedParents=" + unresolved
                 + " clips=" + clips.size() + " hidden=" + hiddenCount + " extras=" + extraOptions.size()
-                + " hands=" + rightHand + "/" + leftHand);
+                + " hands=" + rightHand + "/" + leftHand + " glow=" + glowCount);
         ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
-                children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand, defaultClips);
+                children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand, defaultClips, glow);
+        runtime.soundCursors = ModelSoundCursorTable.build(ModelSound.build(model));
         runtime.controllers = parseControllers(model);
+        runtime.controllerBuckets = bucketControllers(runtime.controllers);
         StringBuilder slots = new StringBuilder();
         for (ModelController controller : runtime.controllers) {
             slots.append(' ').append(controller.slot());
@@ -479,6 +639,37 @@ public final class ModelRuntime {
         return runtime;
     }
 
+    /**
+     * 控制器按槽名前缀分桶，键是 YSM 的注册顺序里那一层的名字。
+     *
+     * <p>{@code PlayerControllerCollection:33-74} 的注册顺序就是合成顺序：{@code pre_parallel} 最底，
+     * 然后 {@code pre_main} / {@code main} / {@code post_main}、{@code pre_hold} / {@code hold_*} /
+     * {@code post_hold}、{@code pre_swing} / {@code swing} / {@code post_swing}、
+     * {@code pre_use} / {@code use} / {@code post_use}，{@code parallel} 在 {@code use} 之上。
+     * 槽名是 {@code player.<槽>}，多实例槽再带 {@code _<后缀>}（{@code MultiControllerDiscovery:22}），
+     * 所以按「最长匹配的已知槽名」归类，{@code parallel_6} 归 {@code parallel} 而不是 {@code pre_parallel}。
+     */
+    private static Map<String, List<ModelController>> bucketControllers(List<ModelController> controllers) {
+        if (controllers.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<ModelController>> buckets = new LinkedHashMap<>();
+        for (ModelController controller : controllers) {
+            String slot = controller.slot();
+            String bucket = null;
+            for (String known : CONTROLLER_LAYERS) {
+                boolean matched = slot.equals(known)
+                        || (MULTI_SLOTS.contains(known) && slot.startsWith(known + "_"));
+                if (matched && (bucket == null || known.length() > bucket.length())) {
+                    bucket = known;
+                }
+            }
+            // 槽名不在注册表里的（模型自定义槽）归到空串桶，保持它们原来的位置
+            buckets.computeIfAbsent(bucket == null ? "" : bucket, key -> new ArrayList<>()).add(controller);
+        }
+        return buckets;
+    }
+
     /** 模型自带的控制器（{@code animationControllerFiles}）解析成状态机列表；没有就是空表。 */
     private static List<ModelController> parseControllers(RawYsmModel model) {
         if (model.mainEntity == null || model.mainEntity.animationControllerFiles == null) {
@@ -537,6 +728,8 @@ public final class ModelRuntime {
         proxy.formatVersion = model.formatVersion;
         proxy.metadata = model.metadata;
         proxy.properties = model.properties;
+        // 音效表挂在模型根上而不是 mainEntity 上：不搬过来，第一人称手臂那层的音效游标恒为空
+        proxy.soundFiles = model.soundFiles;
         proxy.mainEntity = main;
         ModelRuntime runtime = build(proxy, texture, false, Map.of());
         if (runtime != null) {
@@ -694,6 +887,77 @@ public final class ModelRuntime {
         return depths;
     }
 
+    /**
+     * 被模型自带控制器槽引用到的骨骼名（小写）。
+     *
+     * <p>道具启发式靠「pre_parallel 里 scale=0」判断默认隐藏，但作者也会用同一手法做
+     * 「默认藏、控制器放」：丛雨的 {@code cyw}（剑）在 {@code pre_parallel0} 里 scale=0，
+     * 由 {@code player.parallel_6} 的 {@code 手持剑} 状态写回 1。这类骨骼一旦被藏掉，
+     * 控制器写多少都画不出来，所以构建期先收集控制器引用集，把它们排除出隐藏名单。
+     *
+     * <p>只收控制器状态里真正会播的动画名（{@code animations} 的 key），不看转移条件 ——
+     * 条件里出现的是状态名，不是骨骼。
+     */
+    private static Set<String> controllerReferencedBones(RawYsmModel model) {
+        if (model.mainEntity == null || model.mainEntity.animationControllerFiles == null) {
+            return Set.of();
+        }
+        Set<String> animationNames = new HashSet<>();
+        for (RawYsmModel.RawAnimationControllerFile file : model.mainEntity.animationControllerFiles) {
+            if (file == null || file.controllers == null) {
+                continue;
+            }
+            for (RawYsmModel.RawAnimationController controller : file.controllers.values()) {
+                if (controller == null || controller.states == null) {
+                    continue;
+                }
+                for (RawYsmModel.RawControllerState state : controller.states) {
+                    if (state == null || state.animations == null) {
+                        continue;
+                    }
+                    for (Map.Entry<String, String> entry : state.animations) {
+                        if (entry.getKey() != null && !entry.getKey().isEmpty()) {
+                            animationNames.add(entry.getKey());
+                        }
+                    }
+                }
+            }
+        }
+        if (animationNames.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> bones = new HashSet<>();
+        if (model.mainEntity.animationFiles == null) {
+            return Set.of();
+        }
+        for (RawYsmModel.RawAnimationFile file : model.mainEntity.animationFiles.values()) {
+            if (file == null || file.animations == null) {
+                continue;
+            }
+            for (Map.Entry<String, RawYsmModel.RawAnimation> entry : file.animations.entrySet()) {
+                if (!animationNames.contains(entry.getKey())) {
+                    continue;
+                }
+                RawYsmModel.RawAnimation animation = entry.getValue();
+                if (animation == null || animation.boneAnimations == null) {
+                    continue;
+                }
+                for (RawYsmModel.RawBoneAnimation boneAnimation : animation.boneAnimations) {
+                    if (boneAnimation.boneName != null) {
+                        bones.add(boneAnimation.boneName.toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        }
+        return bones;
+    }
+
+    /**
+     * 按候选链顺序找第一根存在的骨骼，全部未命中返回 -1。
+     *
+     * <p>候选名一律小写，与骨骼名 {@code toLowerCase} 后全等比较；-1 是合法结果，
+     * 调用方据此不挂手持物，不抛异常。
+     */
     private static int findHand(List<RawYsmModel.RawBone> bones, String... candidates) {
         for (String candidate : candidates) {
             for (int i = 0; i < bones.size(); i++) {
@@ -865,6 +1129,19 @@ public final class ModelRuntime {
         recomputeHidden();
     }
 
+    /**
+     * 模型卸载：停掉还在解码的音效播放并释放 ogg 字节引用。
+     *
+     * <p>由持有本实例的一方在换模型时调用 —— 本类自己不知道「什么时候不再渲染」。
+     * 不能挂在 {@link #clearAll()} 上：那是轮盘取消选择，模型还在用，释放后音效就再也响不了。
+     */
+    public void release() {
+        if (soundCursors != null) {
+            soundCursors.release();
+            soundCursors = null;
+        }
+    }
+
     private ExtraOption findOption(String key) {
         for (ExtraOption option : extraOptions) {
             if (option.key().equals(key)) {
@@ -915,6 +1192,22 @@ public final class ModelRuntime {
         }
     }
 
+    /**
+     * 片段内时间：按 {@code loopMode} 决定循环还是停在末帧。
+     *
+     * <p>与 SPM {@code AnimationMapper:48-50} 一致：0=PLAY_ONCE、1=LOOP、3=HOLD_ON_LAST_FRAME。
+     * 只有 LOOP 取模，其余一律 {@code min(elapsed, length)} —— 取模会让单次动作的收尾帧永远播不到，
+     * 而物理片段若被当成单次，弹簧每轮只积分一次就冻住。
+     */
+    private static float layerTime(RawYsmModel.RawAnimation clip, float ageSeconds) {
+        float length = lengthOf(clip);
+        if (length <= 0.0F) {
+            return 0.0F;
+        }
+        float elapsed = Math.max(0.0F, ageSeconds);
+        return clip.loopMode == 1 ? elapsed % length : Math.min(elapsed, length);
+    }
+
     private float overlayTime(RawYsmModel.RawAnimation clip, float ageSeconds) {
         float length = lengthOf(clip);
         if (length <= 0.0F) {
@@ -930,20 +1223,210 @@ public final class ModelRuntime {
      * <p>顺序不能反过来 —— 同一片段里先写变量、后读变量，与 YSM 的
      * {@code AnimationControllerInstance#process}（先 {@code executeTimelineEvents} 再
      * {@code processRunningAnimation}）一致。
+     *
+     * <p>{@code override} 是这一层并进当前姿态的方式：{@code true} 时写到的通道整体取代原值，
+     * {@code false} 时加到原值上。YSM 里只有高并行控制器是 additive —— {@code AnimationProcessor}
+     * 对 {@code blendRotation} 的控制器把旋转 {@code add} 进快照，其余走 {@code AnimationVec3#applyRotation}
+     * 的 {@code dst.set(this)}（无退场过渡时）。{@code PlayerControllerCollection} 装配 pre_parallel 时
+     * 没传 {@code blendRotation}，只有 parallel 传了，所以前者覆盖、后者相加。
+     * 相加会让同通道被多个 pre_parallel 片段写入时成倍放大。
      */
-    private void sampleLayers(List<String> names, float ageSeconds) {
+    private void sampleLayers(List<String> names, float ageSeconds, boolean override) {
         for (String name : names) {
             RawYsmModel.RawAnimation layer = clip(name);
             if (layer == null) {
                 continue;
             }
-            float length = lengthOf(layer);
-            float time = length <= 0.0F ? 0.0F : ageSeconds % length;
-            runTimeline(layer, time, ageSeconds);
+            float time = layerTime(layer, ageSeconds);
+            runTimeline(layer, time, ageSeconds, name);
+            advanceSound(name, layer, time);
             for (int i = 0; i < bones.size(); i++) {
-                sampleOverlay(layer, i, time, ageSeconds);
+                if (override) {
+                    sampleOverride(layer, i, time, ageSeconds);
+                } else {
+                    sampleOverlay(layer, i, time, ageSeconds);
+                }
             }
         }
+    }
+
+    /**
+     * 采样一个控制器桶：状态机选出本帧该播的动画，按覆盖层叠上去。
+     *
+     * <p>桶的键是 YSM 注册顺序里的槽名（见 {@link #CONTROLLER_LAYERS}），空串是模型自定义槽。
+     * 同一状态里的动画共用一个起点，各自按自己的 {@code loopMode} 取时间 —— 单次动作播完停在最后一帧，
+     * 取模会让收尾帧永远播不到（连击链就是靠「播完 → all_animations_finished」往下走的）。
+     *
+     * <p>同一状态里的多条动画先按 {@code blend_weight} 合成再一次性叠上去：SPM 的
+     * {@code BoneBlendState} 对同一根骨骼的多个来源做 {@code fma(blendWeight)}（旋转/位移）与
+     * {@code result.mul}（缩放），逐条覆盖会让先写的动画完全消失 —— 默认控制器的
+     * {@code pre_parallel_0/default} 一次就挂 8 条片段。
+     */
+    private void sampleControllerLayers(String bucket, float ageSeconds) {
+        List<ModelController> layer = controllerBuckets.get(bucket);
+        if (layer == null || layer.isEmpty()) {
+            return;
+        }
+        for (ModelController controller : layer) {
+            List<String> overlayNames = controller.tick(ageSeconds, this::lengthOfClip);
+            if (!overlayNames.isEmpty()) {
+                float elapsed = Math.max(0.0F, ageSeconds - controller.stateStart());
+                java.util.Arrays.fill(blendChannels, (byte) 0);
+                boolean blended = false;
+                for (String overlayName : overlayNames) {
+                    RawYsmModel.RawAnimation overlayClip = clip(overlayName);
+                    if (overlayClip == null || overlayClip.boneAnimations == null) {
+                        continue;
+                    }
+                    float overlayLength = lengthOf(overlayClip);
+                    float overlayTime = overlayLength <= 0.0F ? 0.0F
+                            : overlayClip.loopMode == 1 ? elapsed % overlayLength : Math.min(elapsed, overlayLength);
+                    runTimeline(overlayClip, overlayTime, ageSeconds, controller.slot());
+                    advanceSound(controller.slot(), overlayClip, overlayTime);
+                    // 单条动画也要过 blend_weight：SPM 的 processRunningAnimation 对每条队列都设权重，
+                    // 酒狐的 pre_parallel2 就是靠单条片段的 blend_weight 做尾巴摆动的
+                    blended = true;
+                    accumulateBlend(overlayClip, overlayTime, ageSeconds);
+                }
+                if (blended) {
+                    applyBlend();
+                }
+            }
+            controller.finishFrame();
+        }
+    }
+
+    /**
+     * 把一条动画按 {@code blend_weight} 累进 {@link #blendPose}：旋转与位移加权求和，缩放连乘。
+     *
+     * <p>与 SPM {@code BoneBlendState:565-573}（{@code fma(blendWeight, lerpPoint)}）和
+     * {@code :694-711}（{@code result.mul}）同形。缩放用连乘而不是加权和：缩放的中性值是 1，
+     * 加权和会让两条各写 1.0 的动画合成 2.0，而作者的本意是「两条都生效」。
+     */
+    private void accumulateBlend(RawYsmModel.RawAnimation clip, float time, float ageSeconds) {
+        float weight = blendWeightOf(clip, time, ageSeconds);
+        if (weight <= 0.0F) {
+            return;
+        }
+        for (int i = 0; i < bones.size(); i++) {
+            String boneName = bones.get(i).name;
+            if (boneName == null) {
+                continue;
+            }
+            for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
+                if (!boneName.equals(animation.boneName)) {
+                    continue;
+                }
+                int offset = i * 9;
+                float[] rotation = sampleChannel(animation.rotation, time, ageSeconds);
+                if (rotation != null) {
+                    if ((blendChannels[i] & ROTATION) == 0) {
+                        blendChannels[i] |= ROTATION;
+                        blendPose[offset] = 0.0F;
+                        blendPose[offset + 1] = 0.0F;
+                        blendPose[offset + 2] = 0.0F;
+                    }
+                    blendPose[offset] += weight * (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                    blendPose[offset + 1] += weight * (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                    blendPose[offset + 2] += weight * (float) Math.toRadians(finite(rotation[2], 0.0F));
+                }
+                float[] position = sampleChannel(animation.position, time, ageSeconds);
+                if (position != null) {
+                    if ((blendChannels[i] & POSITION) == 0) {
+                        blendChannels[i] |= POSITION;
+                        blendPose[offset + 3] = 0.0F;
+                        blendPose[offset + 4] = 0.0F;
+                        blendPose[offset + 5] = 0.0F;
+                    }
+                    blendPose[offset + 3] += weight * finite(position[0], 0.0F);
+                    blendPose[offset + 4] += weight * finite(position[1], 0.0F);
+                    blendPose[offset + 5] += weight * finite(position[2], 0.0F);
+                }
+                float[] scale = sampleChannel(animation.scale, time, ageSeconds);
+                if (scale != null) {
+                    if ((blendChannels[i] & SCALE) == 0) {
+                        blendChannels[i] |= SCALE;
+                        blendPose[offset + 6] = 1.0F;
+                        blendPose[offset + 7] = 1.0F;
+                        blendPose[offset + 8] = 1.0F;
+                    }
+                    blendPose[offset + 6] *= finite(scale[0], 1.0F);
+                    blendPose[offset + 7] *= finite(scale[1], 1.0F);
+                    blendPose[offset + 8] *= finite(scale[2], 1.0F);
+                }
+                break;
+            }
+        }
+    }
+
+    /**
+     * 把 {@link #blendPose} 里被写过的通道组**覆盖**到当前姿态上。
+     *
+     * <p>模型自带的控制器在 YSM 里是 {@code HybridAnimationController}，一旦
+     * {@code definitions.apply(name)} 命中就切到 {@code BedrockAnimationController}，
+     * 而它的 {@code blendRotation()} 是 {@code IAnimationController} 的默认实现 {@code false} ——
+     * 于是 {@code AnimationProcessor:121-128} 走 {@code AnimationVec3#applyRotation} 的
+     * {@code dst.set(this)}，整体取代。位移与缩放同理（{@code AnimationVec3#apply}）。
+     *
+     * <p>这一点对丛雨是决定性的：它的 {@code parallel_6/手持剑} 把
+     * {@code RightArm/RightForeArm/RightHand2} 写成 {@code [0,0,0]}，语义是「这三根骨回到静止姿态」。
+     * 按相加处理等于什么都没做，待机动画的手臂角度会一直留在身上。
+     *
+     * <p>内置的 {@code parallelN} 默认片段不走这里：它们是
+     * {@code PlayerControllerCollection:73} 那个带 {@code blendRotation=true} 的控制器，
+     * 走 {@link #sampleLayers} 的 {@code override=false}（相加）。
+     */
+    private void applyBlend() {
+        for (int i = 0; i < bones.size(); i++) {
+            byte channels = blendChannels[i];
+            if (channels == 0) {
+                continue;
+            }
+            int offset = i * 9;
+            if ((channels & ROTATION) != 0) {
+                poses[offset] = blendPose[offset];
+                poses[offset + 1] = blendPose[offset + 1];
+                poses[offset + 2] = blendPose[offset + 2];
+            }
+            if ((channels & POSITION) != 0) {
+                poses[offset + 3] = blendPose[offset + 3];
+                poses[offset + 4] = blendPose[offset + 4];
+                poses[offset + 5] = blendPose[offset + 5];
+            }
+            if ((channels & SCALE) != 0) {
+                poses[offset + 6] = blendPose[offset + 6];
+                poses[offset + 7] = blendPose[offset + 7];
+                poses[offset + 8] = blendPose[offset + 8];
+            }
+            markDriven(i);
+        }
+    }
+
+    /**
+     * 片段的 {@code blend_weight}：缺省 1.0，数字直接用，字符串按 Molang 求值（SPM
+     * {@code AnimationControllerInstance:284/307/329} 三处都是 {@code evalAsFloat}）。
+     *
+     * <p>结果按 {@code BoneAnimationQueue#setBlendWeight} 夹到 {@code >= 0}：负权重在 SPM 里被吞成 0。
+     */
+    private float blendWeightOf(RawYsmModel.RawAnimation clip, float time, float ageSeconds) {
+        Object raw = clip.blendWeight;
+        if (raw == null) {
+            return 1.0F;
+        }
+        if (clip == weightClip && time == weightTime) {
+            return weightValue;
+        }
+        float value;
+        if (raw instanceof Number number) {
+            value = number.floatValue();
+        } else {
+            value = MolangExpression.channel(String.valueOf(raw), time, ageSeconds);
+        }
+        value = Float.isFinite(value) ? Math.max(0.0F, value) : 1.0F;
+        weightClip = clip;
+        weightTime = time;
+        weightValue = value;
+        return value;
     }
 
     /**
@@ -953,12 +1436,13 @@ public final class ModelRuntime {
      * 剩下的补完再把游标归零。模型的二阶弹簧正是靠这个次序「回写(commit) → 再积分」各跑一次 ——
      * 顺序颠倒会把积分结果当场覆盖掉，看上去就是「物理不动」。
      */
-    private void runTimeline(RawYsmModel.RawAnimation clip, float time, float lifeTime) {
+    private void runTimeline(RawYsmModel.RawAnimation clip, float time, float lifeTime, String layer) {
         List<RawYsmModel.RawTimelineEvent> events = clip.timelineEvents;
         if (events == null || events.isEmpty()) {
             return;
         }
-        TimelineCursor cursor = timelines.computeIfAbsent(clipName(clip), key -> new TimelineCursor());
+        TimelineCursor cursor = timelines.computeIfAbsent(new CursorKey(layer, clipName(clip)),
+                key -> new TimelineCursor());
         if (Float.isNaN(cursor.time)) {
             // 首帧没有上一轮可补，直接从片段开头算
             cursor.next = 0;
@@ -973,6 +1457,19 @@ public final class ModelRuntime {
             cursor.next++;
         }
         cursor.time = time;
+    }
+
+    /**
+     * 把音效游标推进到与同一次 {@link #runTimeline} 相同的片段内时间。
+     *
+     * <p>两者必须同源：音效关键帧的时间戳和 timeline 语句一样是片段内秒数，用别的时间推进会让
+     * 音效与动作错位；循环回卷（{@code time} 变小）由 {@link ModelSoundCursorTable} 自己识别。
+     * 模型没有自带音频时 {@code soundCursors} 为 {@code null}，整条路径跳过。
+     */
+    private void advanceSound(String layer, RawYsmModel.RawAnimation clip, float time) {
+        if (soundCursors != null) {
+            soundCursors.advance(layer, clip, time);
+        }
     }
 
     private static void runStatements(RawYsmModel.RawTimelineEvent event, float time, float lifeTime) {
@@ -991,6 +1488,9 @@ public final class ModelRuntime {
         private int next;
         private float time = Float.NaN;
     }
+
+    /** 时间轴游标的键：层标识 + 片段名。 */
+    private record CursorKey(String layer, String clip) {}
 
     /**
      * 覆盖层：写到的通道**赋值**而不是相加，没写到的骨骼完全不动。
@@ -1027,6 +1527,7 @@ public final class ModelRuntime {
                 poses[offset + 7] = finite(scale[1], 1.0F);
                 poses[offset + 8] = finite(scale[2], 1.0F);
             }
+            markDriven(boneIndex);
             return;
         }
     }
@@ -1070,8 +1571,10 @@ public final class ModelRuntime {
     /**
      * 持有层：换物品时从头播一次，其余时间保持。
      *
-     * <p>它排在主动画**之前**（与 {@code pre_parallel} 同级），所以走路、待机这类主体态会覆盖它 ——
-     * 模型作者的持有动画往往把全身都摆一遍，压在主动画之上会让呼吸、迈腿全都停住。
+     * <p>它排在主动画**之后**、{@code pre_swing} 之前，与 YSM 的控制器注册顺序一致
+     * （{@code PlayerControllerCollection:44-52}：main → pre_hold → hold_offhand → hold_mainhand →
+     * post_hold → pre_swing）。持有姿势必须压过待机/走路的手臂通道，否则作者写的持物动作会被
+     * 主体态的呼吸摆动盖掉；反过来挥动/使用要压过持有，所以它们排在更后面。
      */
     private void sampleHoldLayers(LocalPlayer player, float ageSeconds) {
         if (player == null) {
@@ -1095,8 +1598,11 @@ public final class ModelRuntime {
     /**
      * 动作层：挥动与使用。这两层排在主动画与轮盘层**之后**，因为它们是一次性的动作，
      * 本来就该盖住待机/走路的手臂姿态。
+     *
+     * <p>拆成两次采样是为了让 {@code pre_swing} / {@code post_swing} / {@code pre_use} / {@code post_use}
+     * 这四个控制器槽能夹在对应动作的前后（{@code PlayerControllerCollection:54-60} 的注册顺序）。
      */
-    private void sampleActionLayers(AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
+    private void sampleSwingLayer(AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
         if (player == null) {
             return;
         }
@@ -1123,7 +1629,13 @@ public final class ModelRuntime {
             lastSwingTick = -1.0F;
         }
         swingClip = playLatched(swingClip, swingStart, ageSeconds);
+    }
 
+    /** 使用层：排在挥动之后，同样是一次性动作，盖住待机/走路的手臂姿态。 */
+    private void sampleUseLayer(AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
+        if (player == null) {
+            return;
+        }
         boolean usingNow = avatar != null && avatar.isUsingItem;
         if (usingNow) {
             InteractionHand hand = avatar.useItemHand;
@@ -1148,7 +1660,8 @@ public final class ModelRuntime {
             float length = lengthOf(useClip);
             float elapsed = Float.isFinite(useStart) ? Math.max(0.0F, ageSeconds - useStart) : 0.0F;
             float time = length <= 0.0F ? 0.0F : elapsed % length;
-            runTimeline(useClip, time, ageSeconds);
+            runTimeline(useClip, time, ageSeconds, "use");
+            advanceSound("use", useClip, time);
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverride(useClip, i, time, ageSeconds);
             }
@@ -1159,6 +1672,11 @@ public final class ModelRuntime {
      * 播一个「锁存」的手部片段：从 {@code start} 起单次播放，播完返回 {@code null} 表示可以释放。
      *
      * <p>时间用 {@code min(elapsed, length)} 而不是取模 —— 取模是循环，收尾帧永远播不到。
+     *
+     * <p>播完不是立刻撒手：SPM 的 {@code AnimationControllerInstance:147-152} 在 PLAY_ONCE 播完时
+     * 先进 {@code ENDING_TRANSITION}，把收尾帧的姿态按 {@code defaultTransitionTick}（3 tick）淡回中性
+     * （{@code :254-280} 存快照、{@code :328-342} 用 {@code ConstantPoint} 逐帧降权）。直接返回
+     * {@code null} 会让下一帧的 {@code resetPose} 把手臂硬拽回待机，重锤这类长尾动作看起来就是「蹦一下」。
      */
     private RawYsmModel.RawAnimation playLatched(RawYsmModel.RawAnimation clip, float start, float ageSeconds) {
         if (clip == null) {
@@ -1167,14 +1685,78 @@ public final class ModelRuntime {
         float length = lengthOf(clip);
         float elapsed = Float.isFinite(start) ? Math.max(0.0F, ageSeconds - start) : 0.0F;
         if (length > 0.0F && elapsed >= length) {
-            return null;
+            // 收尾帧的姿态在「刚播完」那一帧存下来，之后按 ENDING_SECONDS 线性降权
+            if (swingEndClip != clip) {
+                swingEndClip = clip;
+                swingEndStart = ageSeconds;
+            }
+            float fade = (ageSeconds - swingEndStart) / ENDING_SECONDS;
+            if (fade >= 1.0F) {
+                swingEndClip = null;
+                swingEndStart = Float.NaN;
+                return null;
+            }
+            float weight = 1.0F - Math.max(0.0F, fade);
+            float endTime = length <= 0.0F ? 0.0F : length;
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverrideWeighted(clip, i, endTime, ageSeconds, weight);
+            }
+            return clip;
         }
+        swingEndClip = null;
+        swingEndStart = Float.NaN;
         float time = length <= 0.0F ? 0.0F : elapsed;
-        runTimeline(clip, time, ageSeconds);
+        runTimeline(clip, time, ageSeconds, "swing");
+        advanceSound("swing", clip, time);
         for (int i = 0; i < bones.size(); i++) {
             sampleOverride(clip, i, time, ageSeconds);
         }
         return clip;
+    }
+
+    /**
+     * 覆盖层按权重写入：{@code weight=1} 等价于 {@link #sampleOverride}，{@code weight=0} 完全不写。
+     *
+     * <p>退场过渡期间不能整条丢掉（那正是硬蹦的来源），也不能按 1.0 写（那就永远停在收尾帧）。
+     * 与 SPM 的 {@code ConstantPoint} 一样，权重作用在「相对中性值」的偏移量上。
+     */
+    private void sampleOverrideWeighted(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime,
+            float weight) {
+        if (weight <= 0.0F) {
+            // 权重归零等于没写：不能标成「被驱动」，否则这根骨骼永远等不到逐骨衰减
+            return;
+        }
+        String boneName = bones.get(boneIndex).name;
+        if (boneName == null) {
+            return;
+        }
+        for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
+            if (!boneName.equals(animation.boneName)) {
+                continue;
+            }
+            int offset = boneIndex * 9;
+            float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
+            if (rotation != null) {
+                poses[offset] += weight * (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                poses[offset + 1] += weight * (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                poses[offset + 2] += weight * (float) Math.toRadians(finite(rotation[2], 0.0F));
+            }
+            float[] position = sampleChannel(animation.position, time, lifeTime);
+            if (position != null) {
+                poses[offset + 3] += weight * finite(position[0], 0.0F);
+                poses[offset + 4] += weight * finite(position[1], 0.0F);
+                poses[offset + 5] += weight * finite(position[2], 0.0F);
+            }
+            float[] scale = sampleChannel(animation.scale, time, lifeTime);
+            if (scale != null) {
+                // 缩放的中性值是 1：按权重从 1 往采样值靠，weight=0 时保持 1
+                poses[offset + 6] = 1.0F + weight * (finite(scale[0], 1.0F) - 1.0F);
+                poses[offset + 7] = 1.0F + weight * (finite(scale[1], 1.0F) - 1.0F);
+                poses[offset + 8] = 1.0F + weight * (finite(scale[2], 1.0F) - 1.0F);
+            }
+            markDriven(boneIndex);
+            return;
+        }
     }
 
     /**
@@ -1190,13 +1772,22 @@ public final class ModelRuntime {
         float length = lengthOf(clip);
         float elapsed = Float.isFinite(start) ? Math.max(0.0F, ageSeconds - start) : 0.0F;
         float time = length <= 0.0F ? 0.0F : Math.min(elapsed, length);
-        runTimeline(clip, time, ageSeconds);
+        runTimeline(clip, time, ageSeconds, prefix);
+        advanceSound(prefix, clip, time);
         for (int i = 0; i < bones.size(); i++) {
             sampleOverride(clip, i, time, ageSeconds);
         }
     }
 
-    /** 按「前缀 + 分类后缀」找一个手部片段；找不到返回 {@code null}（保持主动画姿态）。 */
+    /**
+     * 按「前缀 + 分类后缀」找一个手部片段；找不到返回 {@code null}（保持主动画姿态）。
+     *
+     * <p>命中判据是「模型里有这个名字」，**空片段也算命中**：YSM 的 {@code AnimationStore#resolve}
+     * 先查本地表（{@code containsLocal}），本地有就返回本地那条，哪怕它一根骨都没写；
+     * SPM 合并默认动作预设用的是 {@code computeIfAbsent}，同理。作者留一条 0 骨的同名片段
+     * 就是在说「这个分类我不要额外姿势」，此时不该拿默认模型的姿势去补 —— 那套姿势是按默认
+     * 骨架的静止角写的，套到别的骨架上会扭。
+     */
     private RawYsmModel.RawAnimation resolveHandClip(LocalPlayer player, InteractionHand hand, String prefix,
             String fallback) {
         for (String suffix : ItemClassifier.candidates(player, hand)) {
@@ -1246,6 +1837,7 @@ public final class ModelRuntime {
                 poses[offset + 7] = finite(scale[1], 1.0F);
                 poses[offset + 8] = finite(scale[2], 1.0F);
             }
+            markDriven(boneIndex);
             return;
         }
     }
@@ -1342,6 +1934,8 @@ public final class ModelRuntime {
      *
      * <p>与 YSM 的 {@code RenderUtils.prepMatrixForLocator} + {@code applyAuthoredDefaultHandTransform}
      * 同形；调用方把这个矩阵乘进实体姿态即可让物品跟手走。
+     *
+     * <p>挂点骨骼在构建期由候选链解析（见 {@link #RIGHT_HAND_CHAIN}），未命中时返回 {@code null}。
      */
     public Matrix4f handItemMatrix(boolean rightHand) {
         int index = rightHand ? rightHandBone : leftHandBone;
@@ -1356,9 +1950,155 @@ public final class ModelRuntime {
         return matrix;
     }
 
+    /** 骨骼名 → 下标；找不到返回 -1。 */
+    private int boneIndexOf(String name) {
+        if (name == null || name.isEmpty()) {
+            return -1;
+        }
+        Integer index = boneIndex.get(name);
+        return index == null ? -1 : index;
+    }
+
+    /**
+     * {@code ysm.bone_rot}：骨骼上一帧姿态的欧拉角，**度**，X/Y 取负、Z 取正（SPM {@code BoneRotation:22-34}）。
+     *
+     * <p>加上骨骼自己的 rest 旋转：SPM 的 {@code getRotationX} 读的是「动画偏移 + 初始旋转」的合成值
+     * （{@code BoneTopLevelSnapshot#reset} 把 {@code rotation + initialRotation} 写回骨骼）。
+     * 骨骼不存在返回 0。
+     */
+    public float boneRotation(int axis, String name) {
+        int index = boneIndexOf(name);
+        if (index < 0 || axis < 0 || axis > 2) {
+            return 0.0F;
+        }
+        float radians = lastFramePoses[index * 9 + axis] + bones.get(index).rotation[axis];
+        return axis == 2 ? (float) Math.toDegrees(radians) : (float) -Math.toDegrees(radians);
+    }
+
+    /** {@code ysm.bone_scale}：骨骼上一帧的缩放（SPM {@code BoneScale:21-34}）。骨骼不存在返回 0。 */
+    public float boneScale(int axis, String name) {
+        int index = boneIndexOf(name);
+        if (index < 0 || axis < 0 || axis > 2) {
+            return 0.0F;
+        }
+        return lastFramePoses[index * 9 + 6 + axis];
+    }
+
+    /**
+     * {@code ysm.bone_pivot_abs}：骨骼 pivot 的绝对位置（模型像素），X 取负（SPM {@code GpuRenderPath:906-910}）。
+     *
+     * <p>只累乘到父骨骼为止：目标骨骼自己的 {@code -pivot} 回移不算进绝对 pivot，SPM 在
+     * {@code computeOnePivotAbs} 里也是写完 {@code stateBuffer} 就返回、不再回移。
+     * 骨骼不存在返回 0。
+     */
+    public float bonePivotAbs(int axis, String name) {
+        int index = boneIndexOf(name);
+        if (index < 0 || axis < 0 || axis > 2) {
+            return 0.0F;
+        }
+        Matrix4f matrix = pivotAbsScratch.identity();
+        accumulateAncestor(index, matrix);
+        int offset = index * 9;
+        float[] pivot = bones.get(index).pivot;
+        matrix.translate((pivot[0] - lastFramePoses[offset + 3]) / 16.0F,
+                (pivot[1] + lastFramePoses[offset + 4]) / 16.0F,
+                (pivot[2] + lastFramePoses[offset + 5]) / 16.0F);
+        return switch (axis) {
+            case 0 -> -matrix.m30() * 16.0F;
+            case 1 -> matrix.m31() * 16.0F;
+            default -> matrix.m32() * 16.0F;
+        };
+    }
+
+    /** 从根往下累乘到 {@code index} 的父骨骼为止；目标骨骼自己的 -pivot 回移不算进绝对 pivot。 */
+    private void accumulateAncestor(int index, Matrix4f matrix) {
+        int parent = parents[index];
+        if (parent < 0) {
+            return;
+        }
+        accumulateAncestor(parent, matrix);
+        matrix.mul(localOf(bones.get(parent), lastFramePoses, parent * 9));
+    }
+
     public void render(PoseStack.Pose pose, VertexConsumer buffer, int light) {
         frameValid = false;
         emit(pose, buffer, light, restMatrices, restNormals);
+    }
+
+    /**
+     * 这张贴图有没有半透明像素。cutout 会把 alpha 直接切掉，软边头发/纱/翅膀会被硬切；
+     * 有半透明像素时主趟要换成 {@code entityTranslucent} 才能按 alpha 混合。
+     *
+     * <p>判据取「存在 0 < alpha < 255 的像素」，与 SPM 的 {@code TextureAlphaAnalyzer} 同口径
+     * （它按面 UV 区间扫，这里按整张贴图扫：RenderType 是整趟的，逐面区分不了）。
+     * 贴图读不到（占位图/已释放）时返回 {@code false}，退回 cutout。
+     */
+    public boolean hasTranslucentPixels() {
+        Boolean cached = translucentPixels;
+        if (cached != null) {
+            return cached;
+        }
+        boolean result = scanTranslucent(texture);
+        translucentPixels = result;
+        return result;
+    }
+
+    private static boolean scanTranslucent(Identifier texture) {
+        if (texture == null) {
+            return false;
+        }
+        try {
+            if (!(Minecraft.getInstance().getTextureManager().getTexture(texture) instanceof DynamicTexture dynamic)) {
+                return false;
+            }
+            NativeImage image = dynamic.getPixels();
+            if (image == null || image.isClosed()) {
+                return false;
+            }
+            int width = image.getWidth();
+            int height = image.getHeight();
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int alpha = image.getPixel(x, y) >>> 24;
+                    if (alpha != 0 && alpha != 255) {
+                        return true;
+                    }
+                }
+            }
+        } catch (RuntimeException failure) {
+            Debug.info("[SFH+] 贴图 alpha 扫描失败，按不透明处理: " + texture + " " + failure);
+        }
+        return false;
+    }
+
+    /** 这个模型有没有发光骨（骨名前缀 {@code ysmGlow}）；没有就不必提交第二趟。 */
+    public boolean hasGlowBones() {
+        if (glowMask == null) {
+            return false;
+        }
+        for (boolean glow : glowMask) {
+            if (glow) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 发光骨的第二趟出图：只出 {@code ysmGlow} 骨，用 emissive 渲染类型提交。
+     *
+     * <p>必须紧跟在主趟 {@link #render} 之后调用同一帧：姿态矩阵是那一趟算出来的，
+     * 单独再算一遍会让发光骨与身体错开一帧。主趟没有跑过（{@code frameValid} 为假）时退回静止姿态。
+     */
+    public void renderGlow(PoseStack.Pose pose, VertexConsumer buffer, int light) {
+        if (glowMask == null) {
+            return;
+        }
+        if (frameValid) {
+            emit(pose, buffer, light, frameMatrices, frameNormals, glowMask);
+        } else {
+            emit(pose, buffer, light, restMatrices, restNormals, glowMask);
+        }
     }
 
     public void render(PoseStack.Pose pose, VertexConsumer buffer, int light,
@@ -1369,6 +2109,7 @@ public final class ModelRuntime {
             return;
         }
         MolangVariables.bind(player, avatar, variables);
+        MolangVariables.bindRuntime(this);
         // 控制器条件里写的 ctrl.idle / ctrl.run 就是这套主体态判定
         MolangVariables.bindControl(selectControlName(avatar, player));
         MolangVariables.clearControllerState();
@@ -1393,6 +2134,9 @@ public final class ModelRuntime {
             time = 0.0F;
         }
         java.util.Arrays.fill(frameState, (byte) 0);
+        weightClip = null;
+        weightTime = Float.NaN;
+        lastFrameAge = ageSeconds;
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
         }
@@ -1400,16 +2144,21 @@ public final class ModelRuntime {
         // 把骨骼缩放成 0；物理（弹簧）写在这几个片段的 timeline 语句里，每帧推进一次。
         // 缩放在层间是整体替换而不是相乘：作者在 boat/sleep 这类主动画里用 scale=1 把 pre_parallel 藏起来的
         // 道具重新显示出来，相乘会把这个 1 乘成 0、道具永远出不来。
-        sampleLayers(preParallelBase, ageSeconds);
-        // 持有层在主动画之前：主体态（idle/walk）要能盖住它，否则模型全身被摆成持物姿势后呼吸和迈腿全停。
-        sampleHoldLayers(player, ageSeconds);
-        runTimeline(clip, time, ageSeconds);
+        // pre_parallel 是非 additive 控制器：同通道以最后一个写它的片段为准，不能相加。
+        sampleLayers(preParallelBase, ageSeconds, true);
+        // 控制器按 YSM 的注册顺序分桶插到对应层位置，而不是整桶压在主层之上 ——
+        // 否则 pre_parallel 会盖掉主动画的 scale=1（道具不露），parallel 又会被 swing/use 盖住。
+        sampleControllerLayers("pre_parallel", ageSeconds);
+        sampleControllerLayers("pre_main", ageSeconds);
+        runTimeline(clip, time, ageSeconds, "main");
+        advanceSound("main", clip, time);
         for (int i = 0; i < bones.size(); i++) {
             samplePoseOver(clip, i, time, ageSeconds);
         }
         // 服装变体是静态预设（只有缩放/位移），动作是循环播放；两层叠加，动作最后生效
         if (activeVariant != null) {
-            runTimeline(activeVariant, 0.0F, ageSeconds);
+            runTimeline(activeVariant, 0.0F, ageSeconds, "variant");
+            advanceSound("variant", activeVariant, 0.0F);
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverlay(activeVariant, i, 0.0F, ageSeconds);
             }
@@ -1419,42 +2168,37 @@ public final class ModelRuntime {
                 activeExtraStart = ageSeconds;
             }
             float extraTime = overlayTime(activeExtra, ageSeconds);
-            runTimeline(activeExtra, extraTime, ageSeconds);
+            runTimeline(activeExtra, extraTime, ageSeconds, "extra");
+            advanceSound("extra", activeExtra, extraTime);
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverlay(activeExtra, i, extraTime, ageSeconds);
             }
         }
         // 控制器槽（parallel*/pre_parallel*/模型自定义槽）：道具显隐、换装、连击链都写在这些片段里，
-        // 由状态机按 Molang 条件选出来当覆盖层，叠在基础姿态之上。
-        for (ModelController controller : controllers) {
-            List<String> overlayNames = controller.tick(ageSeconds, this::lengthOfClip);
-            if (!overlayNames.isEmpty()) {
-                // 同一状态里的动画共用一个起点；各自按自己的循环模式取时间 —— 单次动作播完停在最后一帧，
-                // 取模会让收尾帧永远播不到（连击链就是靠「播完 → all_animations_finished」往下走的）。
-                float elapsed = Math.max(0.0F, ageSeconds - controller.stateStart());
-                for (String overlayName : overlayNames) {
-                    RawYsmModel.RawAnimation overlayClip = clip(overlayName);
-                    if (overlayClip == null || overlayClip.boneAnimations == null) {
-                        continue;
-                    }
-                    float overlayLength = lengthOf(overlayClip);
-                    float overlayTime = overlayLength <= 0.0F ? 0.0F
-                            : overlayClip.loopMode == 1 ? elapsed % overlayLength : Math.min(elapsed, overlayLength);
-                    runTimeline(overlayClip, overlayTime, ageSeconds);
-                    for (int i = 0; i < bones.size(); i++) {
-                        sampleOverlay(overlayClip, i, overlayTime, ageSeconds);
-                    }
-                }
-            }
-            controller.finishFrame();
-        }
+        // 由状态机按 Molang 条件选出来当覆盖层。
+        sampleControllerLayers("post_main", ageSeconds);
+        // 持有层排在主动画之后（YSM 的注册顺序：main → post_main → pre_hold → hold_* → post_hold）：
+        // 它是**覆盖**语义，只改自己写到的骨骼，所以持物姿势能盖住 idle 的手臂，而没写到的身体骨
+        // 仍保持主动画的呼吸与迈腿。放在主动画之前会被 idle 的手臂通道盖掉，表现成「拿着剑但手臂还是待机」。
+        sampleControllerLayers("pre_hold", ageSeconds);
+        sampleHoldLayers(player, ageSeconds);
+        sampleControllerLayers("post_hold", ageSeconds);
+        // 槽名不在 YSM 注册表里的控制器（模型自定义槽）保持原来的位置：主动画之后、手部动作之前。
+        sampleControllerLayers("", ageSeconds);
         // 手部条件动画：YSM 的控制器顺序是 pre_hold → hold_offhand → hold_mainhand → pre_swing → swing
         // → pre_use → use，全部排在主动画之后、parallel 之前，且是**覆盖**（绝对姿态）而不是相加。
         // 主副手各一层、互不覆盖（不同手臂），万一同骨骼则 mainhand 赢（顺序在后）。
         blendBasePose(ageSeconds);
-        sampleActionLayers(avatar, player, ageSeconds);
-        // parallel 槽在 YSM 里排在 main 之后，所以它既能把通道加到主姿态上，也能在缩放上盖掉前面几层
-        sampleLayers(parallelBase, ageSeconds);
+        sampleControllerLayers("pre_swing", ageSeconds);
+        sampleSwingLayer(avatar, player, ageSeconds);
+        sampleControllerLayers("post_swing", ageSeconds);
+        sampleControllerLayers("pre_use", ageSeconds);
+        sampleUseLayer(avatar, player, ageSeconds);
+        sampleControllerLayers("post_use", ageSeconds);
+        // parallel 槽在 YSM 里排在 main 之后，所以它既能把通道加到主姿态上，也能在缩放上盖掉前面几层。
+        // 它是 YSM 里唯一带 blendRotation 的控制器，合成方式就是相加。
+        sampleLayers(parallelBase, ageSeconds, false);
+        sampleControllerLayers("parallel", ageSeconds);
         // 头部朝向：YSM 在动画求值之后把视线角度加到 Head 组骨骼上（CustomHumanoidEntity#codeAnimation），
         // 加的是「头相对身体」的分量 —— 身体朝向由实体变换那一层（applyEntityTransform）负责，这里只管头怎么偏。
         // YSM / SPM 在同一个（X/Y 已取负的）骨骼空间里加 headPitch = -xRot、netHeadYaw = -clamp(±85)，
@@ -1472,13 +2216,20 @@ public final class ModelRuntime {
                 int offset = i * 9;
                 poses[offset] += headX;
                 poses[offset + 1] += headY;
+                // 头部朝向每帧都写，算「被驱动」：否则它会被逐骨衰减当成没人管的骨骼拽回中性
+                markDriven(i);
             }
         }
+        // 所有层都跑完之后再收尾：本帧没被任何层写到的骨骼从最后一次被驱动的姿态衰减回中性
+        // （SPM AnimationProcessor:169-226 也是在控制器全部跑完之后做这一步）
+        settleDecay(ageSeconds);
         for (int i = 0; i < bones.size(); i++) {
             computeFrame(i);
             frameNormals[i] = normalOf(frameMatrices[i]);
         }
         frameValid = true;
+        // 每帧只拷一次：表达式在采样过程中求值，读的是上一帧的完整姿态（见 lastFramePoses）
+        System.arraycopy(poses, 0, lastFramePoses, 0, poses.length);
         int emitted = emit(pose, buffer, light, frameMatrices, frameNormals);
         if (!logged) {
             logged = true;
@@ -1511,23 +2262,30 @@ public final class ModelRuntime {
             lastClipStart = ageSeconds;
         }
         MolangVariables.bind(Minecraft.getInstance().player, null, variables);
+        MolangVariables.bindRuntime(this);
         // 第一人称没有渲染状态，所有 ctrl.* 一律按未绑定（条件为假）
         MolangVariables.bindControl("");
         MolangVariables.clearControllerState();
         ModelPhysics.bind(physics);
         physics.advance(ageSeconds);
         float time = clipTime(clip, ageSeconds);
-        runTimeline(clip, time, ageSeconds);
+        runTimeline(clip, time, ageSeconds, "fp_arm");
+        advanceSound("fp_arm", clip, time);
         java.util.Arrays.fill(frameState, (byte) 0);
+        weightClip = null;
+        weightTime = Float.NaN;
+        lastFrameAge = ageSeconds;
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
             samplePoseOver(clip, i, time, ageSeconds);
         }
+        settleDecay(ageSeconds);
         for (int i = 0; i < bones.size(); i++) {
             computeFrame(i);
             frameNormals[i] = normalOf(frameMatrices[i]);
         }
         frameValid = true;
+        System.arraycopy(poses, 0, lastFramePoses, 0, poses.length);
         emit(pose, buffer, light, frameMatrices, frameNormals);
     }
 
@@ -1548,9 +2306,15 @@ public final class ModelRuntime {
     }
 
     /** 采样三个通道，写入该骨骼的 9 个 float（弧度/像素/倍率）；字符串值按 Molang 求值。 */
-    /** 把一根骨骼的姿态复位成静止值；分层叠加靠它划清每帧的起点。 */
+    /**
+     * 把一根骨骼的姿态复位成静止值；分层叠加靠它划清每帧的起点。
+     *
+     * <p>复位本身仍是硬清零：本帧有没有层写它要等所有层跑完才知道，所以「不再被驱动」的收尾
+     * 放在 {@link #settleDecay} 里做（SPM 也是在控制器全部跑完之后才按 {@code resetSpeed} 衰减）。
+     */
     private void resetPose(int boneIndex) {
         int offset = boneIndex * 9;
+        poseDriven[boneIndex] = false;
         poses[offset] = 0.0F;
         poses[offset + 1] = 0.0F;
         poses[offset + 2] = 0.0F;
@@ -1560,6 +2324,53 @@ public final class ModelRuntime {
         poses[offset + 6] = 1.0F;
         poses[offset + 7] = 1.0F;
         poses[offset + 8] = 1.0F;
+    }
+
+    /**
+     * 记下这根骨骼本帧被驱动过：它当前没有在衰减，姿态由本帧的层决定。
+     *
+     * <p>「被驱动」的判据是「本帧有层真的写了它的通道」—— 见各采样方法里的调用点。
+     * 只被复位、没被任何层写到的骨骼不算，否则衰减永远从复位值出发，等于没有衰减。
+     */
+    private void markDriven(int boneIndex) {
+        poseDriven[boneIndex] = true;
+        // 记下「最后一次被驱动时的姿态与时刻」：下一帧若不再被驱动，衰减就从这里出发
+        System.arraycopy(poses, boneIndex * 9, decayPoses, boneIndex * 9, 9);
+        decayStart[boneIndex] = lastFrameAge;
+    }
+
+    /**
+     * 帧末收尾：本帧没有任何层写到的骨骼，从它最后一次被驱动时的姿态按 {@link #DECAY_SECONDS} 衰减回中性。
+     *
+     * <p>「不再被驱动」的判据是 {@link #poseDriven}：本帧所有采样方法（默认层、控制器层、主动画、
+     * 服装变体、轮盘额外动作、手部 hold/swing/use、头部朝向）都没写这根骨骼的通道。只被
+     * {@link #resetPose} 复位过不算驱动 —— 否则衰减永远从复位值出发，等于没有衰减。
+     *
+     * <p>与 SPM {@code AnimationProcessor:169-226} 同形：那里也是在所有控制器跑完之后，对
+     * {@code isCurrentlyRunning*Animation == false} 的骨骼按 {@code (seekTime - mostRecentResetTick) / resetSpeed}
+     * 做 lerp。{@link #decayStart} 记的是「最后一次被驱动的 tick」，起点姿态在那一帧由
+     * {@link #markDriven} 抓一次 —— 每帧重抓会把进度重置回 0，衰减永远走不完。
+     */
+    private void settleDecay(float ageSeconds) {
+        for (int i = 0; i < bones.size(); i++) {
+            if (poseDriven[i] || !Float.isFinite(decayStart[i])) {
+                continue;
+            }
+            // 起点是「最后一次被驱动的 tick」：SPM 的 mostRecentResetTick 也是驱动那一帧的 seekTime，
+            // 所以骨骼停驱动的第一帧就已经走掉 1/3 的进度，而不是从 0 开始
+            float progress = (ageSeconds - decayStart[i]) / DECAY_SECONDS;
+            if (progress >= 1.0F) {
+                decayStart[i] = Float.NaN;
+                continue;
+            }
+            float t = Math.max(0.0F, progress);
+            int offset = i * 9;
+            for (int channel = 0; channel < 9; channel++) {
+                float neutral = channel >= 6 ? 1.0F : 0.0F;
+                poses[offset + channel] = decayPoses[offset + channel]
+                        + (neutral - decayPoses[offset + channel]) * t;
+            }
+        }
     }
 
     /**
@@ -1597,6 +2408,7 @@ public final class ModelRuntime {
                 poses[offset + 7] = finite(scale[1], 1.0F);
                 poses[offset + 8] = finite(scale[2], 1.0F);
             }
+            markDriven(boneIndex);
             return;
         }
     }
@@ -2016,6 +2828,15 @@ public final class ModelRuntime {
 
     private int emit(PoseStack.Pose pose, VertexConsumer buffer, int light,
             Matrix4f[] matrices, Matrix3f[] normals) {
+        return emit(pose, buffer, light, matrices, normals, null);
+    }
+
+    /**
+     * 出图，{@code onlyGlow} 非空时只出掩膜为真的骨骼（发光骨第二趟），
+     * 为 {@code null} 时出全部（主趟）。
+     */
+    private int emit(PoseStack.Pose pose, VertexConsumer buffer, int light,
+            Matrix4f[] matrices, Matrix3f[] normals, boolean[] onlyGlow) {
         int emitted = 0;
         Vector3f position = new Vector3f();
         Vector3f normal = new Vector3f();
@@ -2028,6 +2849,9 @@ public final class ModelRuntime {
                 continue;
             }
             if (renderMask != null && !renderMask[i]) {
+                continue;
+            }
+            if (onlyGlow != null && !onlyGlow[i]) {
                 continue;
             }
             Matrix3f normalMatrix = normals[i];

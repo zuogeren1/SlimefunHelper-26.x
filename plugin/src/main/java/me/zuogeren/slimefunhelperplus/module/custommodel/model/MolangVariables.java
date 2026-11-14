@@ -45,8 +45,21 @@ public final class MolangVariables {
     private static long lastYawTick = Long.MIN_VALUE;
     private static float lastYaw;
     private static float lastYawSpeed;
-    /** 时间轴语句写入的 {@code v.*} 变量表；每个模型实例一份，渲染前绑定。 */
+    /**
+     * 时间轴语句写入的 {@code v.*} 变量表；每个模型实例一份，渲染前绑定。
+     *
+     * <p>{@code t.*} / {@code temp.*} 也存在这张表里（键带 {@code t.} 前缀，与 {@code v.*} 的键不重叠）：
+     * SPM 的 temp 表挂在模型实例的 VariableStorage 上（{@code TempVariableRegistry}），与 {@code v.*}
+     * 同生命周期 —— 换模型实例即清空、同一实例内跨帧保留，共用一张表正好是这个语义。
+     */
     private static volatile Map<String, Float> variables;
+    /**
+     * 当前正在出图的模型实例：{@code ysm.bone_rot} 这类骨骼查询量要问它要姿态。
+     *
+     * <p>与 {@link #variables} 同时绑定、同生命周期 —— 骨骼姿态属于模型实例，不属于实体。
+     * {@code null} 表示不在渲染上下文里，骨骼查询一律按「找不到骨骼」返回 0。
+     */
+    private static volatile ModelRuntime runtime;
     /**
      * 主体态名字（YSM {@code ControlReadBuiltins#selectedControl} 的那串判定），给 {@code ctrl.idle}
      * 这类谓词用。空串表示当前不在渲染上下文里，所有 {@code ctrl.*} 按 NaN（条件为假）。
@@ -68,11 +81,21 @@ public final class MolangVariables {
         bind(localPlayer, state, null);
     }
 
-    /** {@code table} 是该模型实例的 {@code v.*} 变量表；没有表时局部变量一律读 0。 */
+    /** {@code table} 是该模型实例的 {@code v.*} / {@code t.*} 变量表；没有表时局部变量一律读 0。 */
     public static void bind(LocalPlayer localPlayer, AvatarRenderState state, Map<String, Float> table) {
         variables = table;
         avatar = state;
         player = localPlayer;
+    }
+
+    /**
+     * 绑定本帧出图的模型实例，供 {@code ysm.bone_rot} / {@code bone_pivot_abs} / {@code bone_scale} 查姿态。
+     *
+     * <p>与 {@link #bind} 分开：骨骼查询只在模型出图时有意义，而 {@code bind} 也被不涉及骨骼的
+     * 上下文（第一人称手臂、纸娃娃）调用。不绑定即按「找不到骨骼」返回 0。
+     */
+    public static void bindRuntime(ModelRuntime model) {
+        runtime = model;
     }
 
     /** 本帧的主体态；{@code null} 或空串表示按未绑定处理。 */
@@ -206,15 +229,19 @@ public final class MolangVariables {
     }
 
     /**
-     * 时间轴语句的写入侧。只认 {@code v.*}，非有限值不落表 —— 一次 NaN 会永久污染弹簧状态，
-     * 而模型里 {@code v.skirt_vertical_P0dot = (input - P0)/v.time} 这类算式一旦拿到 NaN 就再也回不来。
+     * 时间轴语句的写入侧。只认 {@code v.*} / {@code t.*} / {@code temp.*}，非有限值不落表 —— 一次 NaN
+     * 会永久污染弹簧状态，而模型里 {@code v.skirt_vertical_P0dot = (input - P0)/v.time} 这类算式一旦
+     * 拿到 NaN 就再也回不来。
      */
     public static void set(String name, float value) {
         Map<String, Float> table = variables;
-        if (table == null || !isLocalVariable(name) || !Float.isFinite(value)) {
+        if (table == null || !Float.isFinite(value)) {
             return;
         }
-        table.put(name.toLowerCase(java.util.Locale.ROOT), value);
+        String key = variableKey(name);
+        if (key != null) {
+            table.put(key, value);
+        }
     }
 
     /**
@@ -240,10 +267,27 @@ public final class MolangVariables {
         return delta == null ? Float.NaN : delta[component];
     }
 
+    /**
+     * 查询量的**文本值**，给 {@code ==} / {@code !=} 的字符串字面量比较用（SPM 的 EQ/NEQ 按值类型分流）。
+     *
+     * <p>只有 SPM 里绑成字符串的查询才有文本值。返回 {@code null} 表示「这个量没有文本值」，调用方按
+     * SPM 的 null 分支处理（EQ 假、NEQ 真）。数值量一律返回 null —— 它们该走数值比较。
+     */
+    public static String text(String name) {
+        String query = name.startsWith("q.") ? "query." + name.substring(2) : name;
+        return switch (query) {
+            // compat 查询：SPM 在对应 mod 未安装时注册成空串（ParcoolCompatImpl:39、SlashBladeCompatImpl:34），
+            // 语料里 {@code ctrl.parcool_state==''} 就是「没在跑酷」，按空串答才对得上
+            case "ctrl.parcool_state", "ctrl.slashblade_animation" -> "";
+            default -> null;
+        };
+    }
+
     public static float get(String name) {
-        if (isLocalVariable(name)) {
+        String key = variableKey(name);
+        if (key != null) {
             Map<String, Float> table = variables;
-            Float value = table == null ? null : table.get(name.toLowerCase(java.util.Locale.ROOT));
+            Float value = table == null ? null : table.get(key);
             return value == null ? 0.0F : value;
         }
         LocalPlayer p = player;
@@ -312,9 +356,12 @@ public final class MolangVariables {
                 // 少了这层负号俯视会一路顶上去而不被夹住。净头偏角同样夹在 ±85°。
                 // AvatarRenderState 的 xRot/yRot 正是这两条公式的输入（xRot = 俯视为正的俯仰角，
                 // yRot = wrapDegrees(头朝向 - 身体朝向)），与 {@link ModelRuntime} 的头部跟随层同一个量。
-                case "ysm.head_yaw" -> avatar == null ? Float.NaN
+                // query.head_x_rotation / head_y_rotation 是同一对量的别名（SPM QueryBinding:59-60 与
+                // YSMBinding:97-98 读的都是 netHeadYaw / headPitch）：x 轴旋转是偏航、y 轴旋转是俯仰，
+                // 别按字面把 x 当俯仰。
+                case "ysm.head_yaw", "query.head_x_rotation" -> avatar == null ? Float.NaN
                         : -Mth.clamp(Mth.wrapDegrees(avatar.yRot), -85.0F, 85.0F);
-                case "ysm.head_pitch" -> avatar == null ? Float.NaN : -avatar.xRot;
+                case "ysm.head_pitch", "query.head_y_rotation" -> avatar == null ? Float.NaN : -avatar.xRot;
                 case "ysm.block_light" -> light(p, LightLayer.BLOCK);
                 case "ysm.sky_light" -> light(p, LightLayer.SKY);
                 case "ysm.is_open_air" -> p.level().canSeeSky(p.blockPosition()) ? 1.0F : 0.0F;
@@ -416,6 +463,33 @@ public final class MolangVariables {
         } catch (RuntimeException error) {
             return Float.NaN;
         }
+    }
+
+    /**
+     * {@code ysm.bone_rot(name)}：骨骼姿态的欧拉角，**度**，X/Y 取负、Z 取正。
+     *
+     * <p>符号与 SPM 的 {@code BoneRotation:22-34} 一致 —— 骨骼空间本身是 X/Y 取负的（见
+     * {@code ModelRuntime#localOf} 的采样），这里再翻一次正好回到作者写动画时用的角度。
+     *
+     * <p>取的是**上一帧**的完整姿态：表达式在采样过程中求值，本帧 {@code poses} 只填了一部分，
+     * 读到哪根骨骼取决于层序；上一帧快照才是确定的，也与 SPM 的 PhysicsManager 一致。
+     * 骨骼不存在（或不在渲染上下文里）返回 0，照 SPM {@code BoneParamFunction:24-26} 的 null 分支。
+     */
+    public static float boneRotation(int axis, String name) {
+        ModelRuntime model = runtime;
+        return model == null ? 0.0F : model.boneRotation(axis, name);
+    }
+
+    /** {@code ysm.bone_pivot_abs(name)}：骨骼 pivot 的绝对位置（模型像素），X 取负（SPM GpuRenderPath:906-910）。 */
+    public static float bonePivotAbs(int axis, String name) {
+        ModelRuntime model = runtime;
+        return model == null ? 0.0F : model.bonePivotAbs(axis, name);
+    }
+
+    /** {@code ysm.bone_scale(name)}：骨骼当前缩放（SPM {@code BoneScale:21-34}）。 */
+    public static float boneScale(int axis, String name) {
+        ModelRuntime model = runtime;
+        return model == null ? 0.0F : model.boneScale(axis, name);
     }
 
     /** 0=空手 1=三叉戟 2=矛/骑枪 3=重锤；编码由本仓库自定，YSM 原版语义未公开。 */
@@ -573,15 +647,35 @@ public final class MolangVariables {
     }
 
     /**
+     * 语句能写、表达式能读的变量名归一成表键；不是变量返回 {@code null}。
+     *
+     * <p>{@code v.*} 与 {@code t.*} / {@code temp.*} 在 SPM 里绑到同一个模型实例存储
+     * （{@code PrimaryBinding:40-45}：{@code v}/{@code variable} 是 ScopedVariableBinding，
+     * {@code t}/{@code temp} 是 TempVariableRegistry），生命周期一致，所以共用一张表、只按前缀区分名字。
+     * {@code t.} 与 {@code temp.} 是同一个 registry 的两个拼写，归一到 {@code t.} 才不会各存一份。
+     */
+    private static String variableKey(String name) {
+        // 先按前缀分流再小写：查询量（q.* / ysm.*）每帧要读上千次，不该为它们各造一个字符串
+        if (isLocalVariable(name) || name.startsWith("t.")) {
+            return name.toLowerCase(java.util.Locale.ROOT);
+        }
+        if (name.startsWith("temp.")) {
+            return "t." + name.substring(5).toLowerCase(java.util.Locale.ROOT);
+        }
+        return null;
+    }
+
+    /**
      * {@code v.*} 是否已经被写过。Molang 的 {@code ??}（空值合并）靠它区分「未赋值」与「值为 0」：
      * 模型里 {@code v.player_size??1} 这类写法要求未赋值时取默认值，而直接读默认给 0 就永远拿不到 1。
      */
     public static boolean isDefined(String name) {
-        if (!isLocalVariable(name)) {
+        String key = variableKey(name);
+        if (key == null) {
             return true;
         }
         Map<String, Float> table = variables;
-        return table != null && table.containsKey(name.toLowerCase(java.util.Locale.ROOT));
+        return table != null && table.containsKey(key);
     }
 
     /**

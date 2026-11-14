@@ -1,13 +1,16 @@
 package me.zuogeren.slimefunhelperplus.module.custommodel.ui;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.utils.ClientUtils;
 import me.matl114.utils.Debug;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
@@ -23,8 +26,9 @@ import net.minecraft.network.chat.Component;
  * 扇区几何来自 {@link RouletteGeometry}，逐行光栅化与命中判定共用同一块多边形。
  *
  * <p>数据走 {@link ModelRuntime#extras()}：服装预设与额外动作各占一层，点一下切换、再点取消；
- * 结果交给 {@link CustomModelManager#selectExtra(String)}。界面不暂停游戏、不糊背景，
- * 所以选动作时能直接看见角色的变化。
+ * 结果交给 {@link CustomModelManager#selectExtra(String)}。带分类的模型是两级轮盘：
+ * 主轮盘上每个分类只占一格，点进去才是该组的动作，子轮盘末尾一格是返回。
+ * 界面不暂停游戏、不糊背景，所以选动作时能直接看见角色的变化。
  */
 public class ModelRouletteScreen extends GenericScreen {
 
@@ -34,14 +38,47 @@ public class ModelRouletteScreen extends GenericScreen {
     private static final int FOOTER_H = 18;
     private static final int PAD = 10;
 
+    /** 分类入口的标签后缀：一眼看出这一格是「进去」而不是「切换」。用 ASCII，自定义字体缺字也不会变方块。 */
+    private static final String SUBMENU_MARK = " >";
+
     /** 关掉再打开还停在上次的页；数据变了由 {@link #pageCount()} 夹回来。 */
     private static int rememberedPage;
 
+    /**
+     * 轮盘一格，三种：动作（{@code key} 交给 {@link CustomModelManager#selectExtra(String)}）、
+     * 分类入口（{@code category} 非空，点进去）、返回（子轮盘末尾那一格）。
+     *
+     * <p>三种用字段区分而不是靠 key 里的魔法前缀：动作键来自模型文件，作者写什么都有可能。
+     */
+    private record Slot(String key, String label, boolean variant, String category, boolean back) {
+        static Slot ofAction(String key, String label, boolean variant) {
+            return new Slot(key, label, variant, "", false);
+        }
+
+        static Slot ofSubmenu(String category) {
+            return new Slot("", category + SUBMENU_MARK, false, category, false);
+        }
+
+        static Slot ofBack() {
+            return new Slot("", "返回", false, "", true);
+        }
+    }
+
     private final List<ModelRuntime.ExtraOption> options = new ArrayList<>();
+    /** 主轮盘：服装预设、没有分类的动作、每个分类一个入口。 */
+    private List<Slot> rootSlots = List.of();
+    /** 分类名 → 该组动作（末尾带返回格）。 */
+    private Map<String, List<Slot>> categorySlots = Map.of();
     /** 每个槽位的扇区多边形（屏幕坐标），命中判定用。 */
     private final double[][][] sectors = new double[RouletteTheme.SLOTS][][];
 
+    /** 当前层级：0 = 主轮盘，1 = 某个分类的子轮盘。 */
+    private int level;
+    /** 子轮盘对应的分类名；主轮盘为空串。 */
+    private String openCategory = "";
     private int page;
+    /** 主轮盘的页码：进子轮盘时先存下来，退回来还停在原来那一页。 */
+    private int rootPage;
     private float scale = 1.0F;
     private int centerX;
     private int centerY;
@@ -59,6 +96,41 @@ public class ModelRouletteScreen extends GenericScreen {
         if (runtime != null) {
             this.options.addAll(runtime.extras());
         }
+        buildSlots();
+    }
+
+    /**
+     * 把平铺的动作列表折成两级：分类动作收进各自的子轮盘，主轮盘只留一个分类入口。
+     *
+     * <p>顺序照作者菜单：分类入口落在它第一个成员原来的位置上（解析阶段分类动作已经排到
+     * {@code #分类} 标记后面），所以主轮盘读起来还是作者写的顺序。没有分类的模型整列都是空串，
+     * 主轮盘就是原来的平铺列表。
+     *
+     * <p>只在打开界面时算一次，轮盘每帧只读 {@link #rootSlots} / {@link #categorySlots}。
+     */
+    private void buildSlots() {
+        Map<String, String> categories = CustomModelManager.extraCategories();
+        List<Slot> root = new ArrayList<>();
+        Map<String, List<Slot>> groups = new LinkedHashMap<>();
+        for (ModelRuntime.ExtraOption option : options) {
+            String group = option.variant() ? "" : categories.getOrDefault(option.key(), "");
+            if (option.variant() || group.isEmpty()) {
+                root.add(Slot.ofAction(option.key(), option.label(), option.variant()));
+                continue;
+            }
+            List<Slot> members = groups.get(group);
+            if (members == null) {
+                members = new ArrayList<>();
+                groups.put(group, members);
+                root.add(Slot.ofSubmenu(group));
+            }
+            members.add(Slot.ofAction(option.key(), option.label(), false));
+        }
+        for (List<Slot> members : groups.values()) {
+            members.add(Slot.ofBack());
+        }
+        this.rootSlots = root;
+        this.categorySlots = groups;
     }
 
     public static void open() {
@@ -89,7 +161,9 @@ public class ModelRouletteScreen extends GenericScreen {
         float byWidth = (this.width - PAD * 2.0F) / RouletteTheme.DESIGN_WIDTH;
         float byHeight = (this.height - HEADER_H - FOOTER_H) / (float) RouletteTheme.DESIGN_HEIGHT;
         this.scale = Math.max(RouletteTheme.MIN_SCALE, Math.min(1.0F, Math.min(byWidth, byHeight)));
-        this.page = Math.max(0, Math.min(rememberedPage, pageCount() - 1));
+        // 改窗口大小会重跑 init0：主轮盘回到记住的那一页，子轮盘只把页码夹回本层范围
+        int wanted = level == 0 ? rememberedPage : this.page;
+        this.page = Math.max(0, Math.min(wanted, pageCount() - 1));
         buildSectors();
         buildSlices();
     }
@@ -110,8 +184,13 @@ public class ModelRouletteScreen extends GenericScreen {
                 .addTo(this);
     }
 
+    /** 当前层级的格子。 */
+    private List<Slot> entries() {
+        return level == 0 ? rootSlots : categorySlots.getOrDefault(openCategory, List.of());
+    }
+
     private int pageCount() {
-        return Math.max(1, (options.size() + RouletteTheme.SLOTS - 1) / RouletteTheme.SLOTS);
+        return Math.max(1, (entries().size() + RouletteTheme.SLOTS - 1) / RouletteTheme.SLOTS);
     }
 
     // ------------------------------------------------------------------ 几何
@@ -143,6 +222,12 @@ public class ModelRouletteScreen extends GenericScreen {
         this.lips = lip;
     }
 
+    /** 扇区里能放下的文字宽度（弦宽）。 */
+    private int labelWidth() {
+        return Math.max(28, Math.round(2.0F * RouletteTheme.LABEL_R * scale
+                * (float) Math.sin(RouletteTheme.SLOT_ANGLE / 2.0D)));
+    }
+
     private void rasterize(List<int[]> out, int slot, double[][] polygon) {
         int top = Integer.MAX_VALUE;
         int bottom = Integer.MIN_VALUE;
@@ -169,23 +254,25 @@ public class ModelRouletteScreen extends GenericScreen {
         ModelRuntime runtime = CustomModelManager.runtime();
         paintSlices(ctx, runtime);
         paintLabels(ctx, runtime);
+        paintCenter(ctx);
         paintArrows(ctx);
         paintPageText(ctx);
         paintHeader(ctx, runtime);
         paintFooter(ctx);
-        if (options.isEmpty()) {
+        if (entries().isEmpty()) {
             paintEmpty(ctx);
         }
     }
 
     private void paintSlices(VDrawContext ctx, ModelRuntime runtime) {
+        List<Slot> slots = entries();
         int base = page * RouletteTheme.SLOTS;
         for (int[] slice : slices) {
             int index = base + slice[0];
-            if (index >= options.size()) {
+            if (index >= slots.size()) {
                 continue;
             }
-            boolean active = isActive(runtime, index);
+            boolean active = isActive(runtime, slots.get(index));
             boolean hot = slice[0] == hoveredSlot;
             int color = RouletteTheme.SLICE;
             if (active) {
@@ -197,7 +284,7 @@ public class ModelRouletteScreen extends GenericScreen {
             return;
         }
         // 悬停是擦在格底上的一层：格底已经画过，这里只叠颜色，凸出来的一圈直接盖在世界上面
-        if (!isActive(runtime, base + hoveredSlot)) {
+        if (!isActive(runtime, slots.get(base + hoveredSlot))) {
             for (int[] slice : slices) {
                 if (slice[0] == hoveredSlot) {
                     ctx.fill(slice[2], slice[1], slice[3], slice[1] + 1, RouletteTheme.SLICE_HOVER);
@@ -212,26 +299,40 @@ public class ModelRouletteScreen extends GenericScreen {
     }
 
     private void paintLabels(VDrawContext ctx, ModelRuntime runtime) {
+        List<Slot> slots = entries();
         int rowH = Ef.lineH();
-        int maxWidth = Math.max(28, Math.round(2.0F * RouletteTheme.LABEL_R * scale
-                * (float) Math.sin(RouletteTheme.SLOT_ANGLE / 2.0D)));
+        int maxWidth = labelWidth();
         int base = page * RouletteTheme.SLOTS;
         for (int slot = 0; slot < RouletteTheme.SLOTS; slot++) {
             int index = base + slot;
-            if (index >= options.size()) {
+            if (index >= slots.size()) {
                 continue;
             }
+            Slot entry = slots.get(index);
             double angle = RouletteTheme.FIRST_ANGLE + slot * RouletteTheme.SLOT_ANGLE;
             int labelX = centerX + (int) Math.round(RouletteTheme.LABEL_R * scale * Math.cos(angle));
             int labelY = centerY + (int) Math.round(RouletteTheme.LABEL_R * scale * Math.sin(angle));
-            int ink = RouletteTheme.labelInk(isActive(runtime, index));
-            List<String> lines = wrapLabel(options.get(index).label(), maxWidth);
+            int ink = RouletteTheme.labelInk(isActive(runtime, entry));
+            List<String> lines = wrapLabel(entry.label(), maxWidth);
             int top = labelY - lines.size() * rowH / 2;
             for (String line : lines) {
                 Ef.text(ctx, line, labelX - Ef.textWidth(line) / 2, top, ink);
                 top += rowH;
             }
         }
+    }
+
+    /**
+     * 子轮盘在圆心写分类名：轮盘中间本来就是空的，正好当面包屑，也提示这里能点回上一级。
+     * 主轮盘不写 —— 那里要留给角色。
+     */
+    private void paintCenter(VDrawContext ctx) {
+        if (level == 0) {
+            return;
+        }
+        int maxWidth = Math.max(20, Math.round(RouletteTheme.WHEEL_INNER_R * 2.0F * scale) - 8);
+        String text = Ef.ellipsis(openCategory, maxWidth);
+        Ef.text(ctx, text, centerX - Ef.textWidth(text) / 2, centerY - Ef.lineH() / 2, RouletteTheme.TEXT_DIM);
     }
 
     /** 两行以内按扇区宽度折行，超出就省略：长名字不会爬到隔壁扇区上去。 */
@@ -289,7 +390,9 @@ public class ModelRouletteScreen extends GenericScreen {
 
     private void paintHeader(VDrawContext ctx, ModelRuntime runtime) {
         Ef.tracked(ctx, "// ANIMATIONS", PAD, 8, RouletteTheme.TEXT_DIM, 1);
-        String model = CustomModelManager.loadedFile();
+        String file = CustomModelManager.loadedFile();
+        // 标题用模型自己写的名字（metadata.name），没写才退回文件名
+        String model = file.isEmpty() ? "" : ModelCatalog.displayName(file);
         int columnWidth = Math.max(60, this.width - PAD * 2);
         Ef.text(ctx, Ef.ellipsis(model.isEmpty() ? "未加载模型" : model, columnWidth), PAD, 20, RouletteTheme.TEXT);
 
@@ -299,7 +402,10 @@ public class ModelRouletteScreen extends GenericScreen {
     }
 
     private void paintFooter(VDrawContext ctx) {
-        String hint = Ef.ellipsis("滚轮翻页 · 左键切换 · 再点取消 · 右键关闭", this.width - PAD * 2);
+        String hint = level > 0
+                ? "滚轮翻页 · 左键切换 · 再点取消 · 中心或 Esc 返回 · 右键关闭"
+                : "滚轮翻页 · 左键切换 · 再点取消 · 右键关闭";
+        hint = Ef.ellipsis(hint, this.width - PAD * 2);
         Ef.text(ctx, hint, (this.width - Ef.textWidth(hint)) / 2, this.height - 14, RouletteTheme.TEXT_DIM);
     }
 
@@ -311,14 +417,25 @@ public class ModelRouletteScreen extends GenericScreen {
 
     // ------------------------------------------------------------------ 状态
 
-    private boolean isActive(ModelRuntime runtime, int index) {
+    private boolean isActive(ModelRuntime runtime, Slot slot) {
         if (runtime == null) {
             return false;
         }
-        ModelRuntime.ExtraOption option = options.get(index);
-        return option.variant()
-                ? option.key().equals(runtime.activeVariantKey())
-                : option.key().equals(runtime.activeExtraKey());
+        if (!slot.category().isEmpty()) {
+            // 分类入口：组里有动作在播就点亮，玩家一眼看出当前动作在哪一组
+            for (Slot member : categorySlots.getOrDefault(slot.category(), List.of())) {
+                if (isActive(runtime, member)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (slot.back()) {
+            return false;
+        }
+        return slot.variant()
+                ? slot.key().equals(runtime.activeVariantKey())
+                : slot.key().equals(runtime.activeExtraKey());
     }
 
     private String currentLabel(ModelRuntime runtime) {
@@ -359,10 +476,19 @@ public class ModelRouletteScreen extends GenericScreen {
                 && mouseY >= centerY - half && mouseY <= centerY + half;
     }
 
+    /** 轮盘中间的空心圆：子轮盘里点它退回主轮盘。 */
+    private boolean insideCenter(double mouseX, double mouseY) {
+        double dx = mouseX - centerX;
+        double dy = mouseY - centerY;
+        double radius = RouletteTheme.WHEEL_INNER_R * scale;
+        return dx * dx + dy * dy <= radius * radius;
+    }
+
     private void updateHover(double mouseX, double mouseY) {
         this.hoveredSlot = -1;
+        List<Slot> slots = entries();
         int base = page * RouletteTheme.SLOTS;
-        for (int slot = 0; slot < RouletteTheme.SLOTS && base + slot < options.size(); slot++) {
+        for (int slot = 0; slot < RouletteTheme.SLOTS && base + slot < slots.size(); slot++) {
             if (RouletteGeometry.contains(sectors[slot], mouseX, mouseY)) {
                 this.hoveredSlot = slot;
                 break;
@@ -374,7 +500,8 @@ public class ModelRouletteScreen extends GenericScreen {
 
     private boolean click(EfWidget self, double mouseX, double mouseY, int button) {
         if (button == 1) {
-            onClose();
+            // 右键是「关掉整个轮盘」，子轮盘里也一样，所以不走会先退一级的 onClose
+            super.onClose();
             return true;
         }
         if (button != 0) {
@@ -389,8 +516,19 @@ public class ModelRouletteScreen extends GenericScreen {
             turnPage(1);
             return true;
         }
+        if (level > 0 && insideCenter(mouseX, mouseY)) {
+            back();
+            return true;
+        }
         if (hoveredSlot >= 0) {
-            CustomModelManager.selectExtra(options.get(page * RouletteTheme.SLOTS + hoveredSlot).key());
+            Slot entry = entries().get(page * RouletteTheme.SLOTS + hoveredSlot);
+            if (!entry.category().isEmpty()) {
+                enter(entry.category());
+            } else if (entry.back()) {
+                back();
+            } else {
+                CustomModelManager.selectExtra(entry.key());
+            }
             return true;
         }
         return false;
@@ -406,6 +544,38 @@ public class ModelRouletteScreen extends GenericScreen {
 
     private void turnPage(int step) {
         this.page = Math.max(0, Math.min(pageCount() - 1, this.page + step));
-        rememberedPage = this.page;
+        if (level == 0) {
+            rememberedPage = this.page;
+        }
+    }
+
+    /** 进子轮盘：主轮盘的页码先存下来，退回来时还停在那儿。 */
+    private void enter(String category) {
+        this.rootPage = page;
+        this.level = 1;
+        this.openCategory = category;
+        this.page = 0;
+        this.hoveredSlot = -1;
+    }
+
+    private void back() {
+        this.level = 0;
+        this.openCategory = "";
+        this.page = Math.max(0, Math.min(rootPage, pageCount() - 1));
+        this.hoveredSlot = -1;
+    }
+
+    /**
+     * Esc 在子轮盘里退回主轮盘，主轮盘才真的关屏。
+     *
+     * <p>宿主在把 Esc 派给子控件之前就调这里，所以「返回上一级」只能在这一层拦。
+     */
+    @Override
+    public void onClose() {
+        if (level > 0) {
+            back();
+            return;
+        }
+        super.onClose();
     }
 }

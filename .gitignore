@@ -56,3 +56,6 @@ remapped.accesswidener
 
 # AI agent 规则（本地文件，不进版本库）
 AGENTS.md
+
+# 子代理临时探测目录（不进版本库）
+_scratch/

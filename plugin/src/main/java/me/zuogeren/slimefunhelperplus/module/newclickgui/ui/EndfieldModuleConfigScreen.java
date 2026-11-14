@@ -415,7 +415,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             String current = custom.model.get();
             return List.of(
                     new Action(
-                            "模型：" + (current.isBlank() ? "未选择" : current),
+                            "模型：" + (current.isBlank() ? "未选择" : ModelCatalog.displayName(current)),
                             "点击切换到下一个",
                             "▸",
                             "在 config/slimefunhelper-plus/models 里循环切换；也可以直接在「模型」一行里填文件名。",

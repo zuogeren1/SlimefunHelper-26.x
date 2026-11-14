@@ -31,6 +31,24 @@ public final class MolangExpression {
         }
     }
 
+    /**
+     * 结构体值（YSM 的 {@code Vec3fStruct}）：只有成员访问 {@code .x/.y/.z} 会用到它。
+     *
+     * <p>按分量取值而不是返回一个向量对象：成员访问是每帧每通道都要走的热路径，为一次取值构造一个
+     * record 会把整条求值链变成分配器。标量上下文里按 SPM 的 {@code ValueConversions#asFloat} 取 1
+     * （非 Number/Boolean 一律 1），与 {@code ysm.bone_rot('Head')} 直接参与算术时的行为一致。
+     */
+    public interface VecExpr extends Expr {
+
+        /** {@code axis}：0=x、1=y、2=z。 */
+        float component(int axis, float animTime, float lifeTime);
+
+        @Override
+        default float eval(float animTime, float lifeTime) {
+            return 1.0F;
+        }
+    }
+
     /** 时间轴上的语句：求值只为副作用（写 {@code v.*}），返回值丢弃。 */
     public interface Statement {
         void run(float animTime, float lifeTime);
@@ -163,6 +181,25 @@ public final class MolangExpression {
         return !Float.isNaN(value) && value != 0.0F;
     }
 
+    /**
+     * 三个分量各是一条表达式：{@code ysm.bone_rot(name)} 这类查询量按分量惰性取值。
+     * 解析期构造一次，求值期只走 {@link VecExpr#component}，不产生每帧分配。
+     */
+    public static VecExpr vec(Expr x, Expr y, Expr z) {
+        return new Vec(x, y, z);
+    }
+
+    private record Vec(Expr x, Expr y, Expr z) implements VecExpr {
+        @Override
+        public float component(int axis, float animTime, float lifeTime) {
+            return switch (axis) {
+                case 0 -> x.eval(animTime, lifeTime);
+                case 1 -> y.eval(animTime, lifeTime);
+                default -> z.eval(animTime, lifeTime);
+            };
+        }
+    }
+
     private static final class Parser {
 
         private final String text;
@@ -183,6 +220,30 @@ public final class MolangExpression {
         }
 
         Expr expression() {
+            return assignment();
+        }
+
+        /**
+         * 赋值是普通表达式（SPM 的 {@code BinaryExpression.Op.ASSIGN}）：优先级最低、右结合，
+         * 求值为被赋的值，所以 {@code (v.a=1)+2}、{@code cond?(v.x=1):(v.x=2)} 都能参与运算。
+         * 写入仍走 {@link MolangVariables#set}，非 {@code v.*} 的名字与非有限值由它挡掉。
+         */
+        private Expr assignment() {
+            int start = this.index;
+            String target = identifierName();
+            if (target != null) {
+                skipSpace();
+                if (peek('=') && !peek("==")) {
+                    this.index++;
+                    Expr value = expression();
+                    return (animTime, lifeTime) -> {
+                        float assigned = value.eval(animTime, lifeTime);
+                        MolangVariables.set(target, assigned);
+                        return assigned;
+                    };
+                }
+            }
+            this.index = start;
             return ternary();
         }
 
@@ -237,19 +298,8 @@ public final class MolangExpression {
             return peek('=') && !peek("==");
         }
 
-        /** {@code v.x = expr} 是赋值，其余按纯表达式求值后丢弃。 */
+        /** 一条语句按表达式求值、返回值丢弃：{@code v.*} 的写入是求值过程中的副作用。 */
         private Statement statement() {
-            int start = this.index;
-            String target = identifierName();
-            if (target != null) {
-                skipSpace();
-                if (peek('=') && !peek("==")) {
-                    this.index++;
-                    Expr value = expression();
-                    return (animTime, lifeTime) -> MolangVariables.set(target, value.eval(animTime, lifeTime));
-                }
-            }
-            this.index = start;
             Expr discarded = expression();
             return (animTime, lifeTime) -> discarded.eval(animTime, lifeTime);
         }
@@ -358,12 +408,12 @@ public final class MolangExpression {
                     this.index += 2;
                     Expr right = relational();
                     Expr first = left;
-                    left = (animTime, lifeTime) -> compare(first, right, animTime, lifeTime, '=', false);
+                    left = (animTime, lifeTime) -> equal(first, right, animTime, lifeTime, false);
                 } else if (peek("!=")) {
                     this.index += 2;
                     Expr right = relational();
                     Expr first = left;
-                    left = (animTime, lifeTime) -> compare(first, right, animTime, lifeTime, '=', true);
+                    left = (animTime, lifeTime) -> equal(first, right, animTime, lifeTime, true);
                 } else {
                     return left;
                 }
@@ -433,12 +483,21 @@ public final class MolangExpression {
                     this.index++;
                     Expr right = unary();
                     Expr first = left;
-                    left = (animTime, lifeTime) -> first.eval(animTime, lifeTime) / right.eval(animTime, lifeTime);
+                    // Molang 除零给 0（SPM ExpressionEvaluatorImpl:72-78）：IEEE 的 Infinity/NaN 会顺着
+                    // 骨骼矩阵扩散，静止时 0/0 的算式（如 /math.abs()）会把整条通道算废
+                    left = (animTime, lifeTime) -> {
+                        float divisor = right.eval(animTime, lifeTime);
+                        return divisor == 0.0F ? 0.0F : first.eval(animTime, lifeTime) / divisor;
+                    };
                 } else if (peek('%')) {
                     this.index++;
                     Expr right = unary();
                     Expr first = left;
-                    left = (animTime, lifeTime) -> first.eval(animTime, lifeTime) % right.eval(animTime, lifeTime);
+                    // 取模同样按除零给 0：Java 的 x%0 是 NaN，与除法一样会毒掉整条表达式
+                    left = (animTime, lifeTime) -> {
+                        float divisor = right.eval(animTime, lifeTime);
+                        return divisor == 0.0F ? 0.0F : first.eval(animTime, lifeTime) % divisor;
+                    };
                 } else {
                     return left;
                 }
@@ -464,7 +523,40 @@ public final class MolangExpression {
             return primary();
         }
 
+        /**
+         * 原子表达式后面可以跟成员访问（{@code ysm.bone_rot('Head').x}）：SPM 把 DOT 当后缀运算符
+         * （{@code MolangParserImpl:261-269}），优先级高于所有二元运算。
+         *
+         * <p>只有「原子已经闭合」的位置才可能剩下点：调用、括号、字面量。标识符里的点由
+         * {@link #identifier} 一并吃掉 —— {@code v.roaming.*} 这类名字本身就是带点的扁平变量
+         * （语料 179 处写入 / 3286 处读取），拆成成员访问会把它们读成未定义。
+         */
         private Expr primary() {
+            Expr base = atom();
+            while (true) {
+                skipSpace();
+                if (!peek('.')) {
+                    return base;
+                }
+                this.index++;
+                skipSpace();
+                int start = this.index;
+                while (this.index < this.text.length()) {
+                    char letter = this.text.charAt(this.index);
+                    if (Character.isLetterOrDigit(letter) || letter == '_') {
+                        this.index++;
+                    } else {
+                        break;
+                    }
+                }
+                if (start == this.index) {
+                    throw new IllegalArgumentException("missing member name");
+                }
+                base = member(base, this.text.substring(start, this.index).toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+
+        private Expr atom() {
             skipSpace();
             if (peek('(')) {
                 this.index++;
@@ -490,6 +582,33 @@ public final class MolangExpression {
                 return identifier();
             }
             throw new IllegalArgumentException("unexpected '" + first + "'");
+        }
+
+        /**
+         * 成员访问 {@code .x/.y/.z}：只有结构体值（{@link VecExpr}）有分量可取。
+         *
+         * <p>非结构体按 SPM 的 {@code ExpressionEvaluatorImpl#visitStruct} 处理：取不到属性返回 null，
+         * 参与算术时 {@code ValueConversions#asFloat} 给 0。但「没有值」（NaN，未实现的查询量）要原样
+         * 传染下去，否则 {@code ysm.bone_pivot_abs(...).x} 会从「无效」变成「0」，把弹簧输入钉死。
+         */
+        private static Expr member(Expr base, String name) {
+            int axis = switch (name) {
+                case "x" -> 0;
+                case "y" -> 1;
+                case "z" -> 2;
+                // 结构体只有 x/y/z 三个分量（SPM Vec3fStruct:14-26），别的名字取不到属性
+                default -> -1;
+            };
+            if (axis < 0) {
+                return (animTime, lifeTime) -> 0.0F;
+            }
+            if (base instanceof VecExpr vec) {
+                return (animTime, lifeTime) -> vec.component(axis, animTime, lifeTime);
+            }
+            return (animTime, lifeTime) -> {
+                float value = base.eval(animTime, lifeTime);
+                return Float.isNaN(value) ? value : 0.0F;
+            };
         }
 
         private Expr number() {
@@ -596,6 +715,39 @@ public final class MolangExpression {
         }
 
         /**
+         * {@code ==} / {@code !=}：含字符串字面量时按文本比较，其余仍走数值比较。
+         *
+         * <p>SPM 的 EQ/NEQ（{@code ExpressionEvaluatorImpl:129-158}）按两侧的值类型分流：一侧是字符串就按
+         * {@code equals} 比，一侧是 Number 就按 {@code asFloat} 比，一侧是 null 则 EQ 假、NEQ 真。这里只有
+         * float 一种值，文本只可能来自字面量或 {@link MolangVariables#text}，所以「查询量没有值（NaN）」
+         * 对应 SPM 的 null 分支 —— 于是 {@code ysm.shoot_item_id!='minecraft:crossbow'} 判真，
+         * 而改动前 NaN 让 {@code !=} 恒假。
+         *
+         * <p>只对含字面量的 EQ/NEQ 生效：其余比较仍按「未知量为假」，那套语义要单独评估。
+         * 字面量对数值表达式按 {@code asFloat} 折算（字面量是 1，见 {@code ValueConversions:22-38}）。
+         */
+        private static float equal(Expr left, Expr right, float animTime, float lifeTime, boolean negated) {
+            if (left instanceof Literal leftText && right instanceof Literal rightText) {
+                return leftText.text().equals(rightText.text()) != negated ? 1.0F : 0.0F;
+            }
+            if (left instanceof Literal || right instanceof Literal) {
+                Literal literal = left instanceof Literal ? (Literal) left : (Literal) right;
+                Expr other = left instanceof Literal ? right : left;
+                String text = other instanceof Variable variable ? MolangVariables.text(variable.name()) : null;
+                if (text != null) {
+                    return text.equals(literal.text()) != negated ? 1.0F : 0.0F;
+                }
+                float value = other.eval(animTime, lifeTime);
+                if (Float.isNaN(value)) {
+                    return negated ? 1.0F : 0.0F;
+                }
+                // 字面量在数值域取 1（SPM 的 asFloat 对非 Number/Boolean 一律给 1），不是 0
+                return (value == 1.0F) != negated ? 1.0F : 0.0F;
+            }
+            return compare(left, right, animTime, lifeTime, '=', negated);
+        }
+
+        /**
          * 任一操作数无效（NaN）时比较按 false 处理，避免未知查询把条件判成真。
          *
          * <p>{@code '<'}/{@code '>'} 的 {@code inclusive} 表示闭区间，{@code '='} 的表示「不等」。
@@ -656,11 +808,19 @@ public final class MolangExpression {
                 case "math.round" -> {
                     return (animTime, lifeTime) -> (float) Math.round(a.eval(animTime, lifeTime));
                 }
+                // 负数开方在 Molang 里给 0（SPM Sqrt:9-13）：NaN 会顺着骨骼矩阵扩散成乱飘/消失
                 case "math.sqrt" -> {
-                    return (animTime, lifeTime) -> (float) Math.sqrt(a.eval(animTime, lifeTime));
+                    return (animTime, lifeTime) -> {
+                        float value = a.eval(animTime, lifeTime);
+                        return value < 0.0F ? 0.0F : (float) Math.sqrt(value);
+                    };
                 }
+                // 无效幂（负底数配非整数指数等）给 0（SPM Pow:9-13）：NaN/Infinity 会顺着骨骼矩阵扩散
                 case "math.pow" -> {
-                    return (animTime, lifeTime) -> (float) Math.pow(a.eval(animTime, lifeTime), b.eval(animTime, lifeTime));
+                    return (animTime, lifeTime) -> {
+                        double result = Math.pow(a.eval(animTime, lifeTime), b.eval(animTime, lifeTime));
+                        return Double.isFinite(result) ? (float) result : 0.0F;
+                    };
                 }
                 case "math.exp" -> {
                     return (animTime, lifeTime) -> (float) Math.exp(a.eval(animTime, lifeTime));
@@ -724,22 +884,11 @@ public final class MolangExpression {
                 case "query.equipped_item_any_tag" -> {
                     return equippedTagCall(arguments);
                 }
-                // YSM 的 math.random_integer 是 [min, max) 的整数；YSM 的 nextInt 在区间为空时会抛，
-                // 这里退化成返回下界，作者的随机抖动不该让整帧算不出来。
+                // math.random_integer 是闭区间 [min, max]（SPM RandomInteger#nextInclusive），
+                // 与 math.random 的闭区间一致；上界要能取到，否则随机动作永远差一档。
                 case "math.random_integer" -> {
-                    return (animTime, lifeTime) -> {
-                        int low = (int) a.eval(animTime, lifeTime);
-                        int high = (int) b.eval(animTime, lifeTime);
-                        if (low > high) {
-                            int swap = low;
-                            low = high;
-                            high = swap;
-                        }
-                        if (high <= low) {
-                            return (float) low;
-                        }
-                        return low + java.util.concurrent.ThreadLocalRandom.current().nextInt(high - low);
-                    };
+                    return (animTime, lifeTime) -> randomInteger(
+                            a.eval(animTime, lifeTime), b.eval(animTime, lifeTime));
                 }
                 case "query.position_delta" -> {
                     return (animTime, lifeTime) -> MolangVariables.positionDelta(a.eval(animTime, lifeTime));
@@ -762,10 +911,40 @@ public final class MolangExpression {
                             frequency.eval(animTime, lifeTime), coefficient.eval(animTime, lifeTime),
                             response.eval(animTime, lifeTime));
                 }
+                // 骨骼查询量：唯一实参是骨骼名（字符串字面量），返回结构体，靠 .x/.y/.z 取分量。
+                // 名字按精确匹配 —— SPM 的 BoneParamFunction 用 StringPool 的 id 查表，不做大小写折叠。
+                case "ysm.bone_rot" -> {
+                    return boneParamCall(arguments, MolangVariables::boneRotation);
+                }
+                case "ysm.bone_pivot_abs" -> {
+                    return boneParamCall(arguments, MolangVariables::bonePivotAbs);
+                }
+                case "ysm.bone_scale" -> {
+                    return boneParamCall(arguments, MolangVariables::boneScale);
+                }
                 default -> {
                     return (animTime, lifeTime) -> UNKNOWN;
                 }
             }
+        }
+
+        /** 骨骼查询量的分量取值：{@code axis} 0=x、1=y、2=z。 */
+        private interface BoneParam {
+            float component(int axis, String name);
+        }
+
+        /**
+         * {@code ysm.bone_rot(name)} 这类「一个骨骼名 → 结构体」的查询量。
+         *
+         * <p>名字在解析期取定（{@link #literal}），求值期只按分量问一次，不产生每帧分配。
+         * 缺实参时按空名处理，宿主侧查不到骨骼即返回 0。
+         */
+        private static Expr boneParamCall(List<Expr> arguments, BoneParam param) {
+            String name = literal(arguments, 0);
+            return MolangExpression.vec(
+                    (animTime, lifeTime) -> param.component(0, name),
+                    (animTime, lifeTime) -> param.component(1, name),
+                    (animTime, lifeTime) -> param.component(2, name));
         }
 
         /** {@code ctrl.hold(slot, filter)}：两个字符串字面量，缺一个就恒假。 */
@@ -792,6 +971,38 @@ public final class MolangExpression {
                 return (animTime, lifeTime) -> 0.0F;
             }
             return (animTime, lifeTime) -> MolangVariables.equippedItemAnyTag(slot, tags);
+        }
+
+        /**
+         * 闭区间 [min, max] 的整数随机（SPM {@code RandomInteger#nextInclusive}）。
+         *
+         * <p>区间宽度按 long 算：{@code max - min + 1} 在 int 上会溢出（{@code [Integer.MIN_VALUE, Integer.MAX_VALUE]}
+         * 的宽度是 2^32），溢出后 {@code nextInt} 会抛 IllegalArgumentException。宽度超过 int 时改用
+         * 无符号 63 位取模 + 拒绝采样，保证均匀且不越界。
+         */
+        private static float randomInteger(float first, float second) {
+            int low = (int) first;
+            int high = (int) second;
+            if (low > high) {
+                int swap = low;
+                low = high;
+                high = swap;
+            }
+            if (low == high) {
+                return (float) low;
+            }
+            java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
+            long range = (long) high - (long) low + 1L;
+            if (range <= Integer.MAX_VALUE) {
+                return (float) (low + random.nextInt((int) range));
+            }
+            long bits;
+            long value;
+            do {
+                bits = random.nextLong() >>> 1;
+                value = bits % range;
+            } while (bits - value + (range - 1L) < 0L);
+            return (float) (low + value);
         }
 
         private static Expr argument(List<Expr> arguments, int index) {

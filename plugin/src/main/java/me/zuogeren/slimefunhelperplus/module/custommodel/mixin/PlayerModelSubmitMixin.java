@@ -16,6 +16,7 @@ import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
 import net.minecraft.client.renderer.item.ItemModelResolver;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
@@ -55,10 +56,20 @@ public abstract class PlayerModelSubmitMixin {
     protected abstract boolean isShaking(LivingEntityRenderState state);
 
     @Shadow
+    protected abstract float getWhiteOverlayProgress(LivingEntityRenderState state);
+
+    @Shadow
     protected abstract float getFlipDegrees();
 
     private static final float HALF_WIDTH = 0.3F;
     private static final float HEIGHT = 1.8F;
+
+    /** 隐形到看不见身体时原版给的整体 ARGB（{@code LivingEntityRenderer#submit} 里的 654311423）。 */
+    private static final int INVISIBLE_TINT = 654311423;
+    /** 不透明：{@code ARGB.multiply} 的乘法单位元，原版 {@code getModelTint} 缺省也是它。 */
+    private static final int OPAQUE_TINT = -1;
+    /** 轮廓趟用的满亮度（原版 {@code submitModel} 给 outline 的那一档）。 */
+    private static final int FULL_BRIGHT = 15728880;
 
     private static final AtomicBoolean LOGGED = new AtomicBoolean();
 
@@ -84,14 +95,45 @@ public abstract class PlayerModelSubmitMixin {
             return;
         }
         int light = avatar.lightCoords;
+        // 原版 submitModel 逐顶点写进去的两个通道：受击红闪走 overlay 坐标，隐形走整体 alpha。
+        // 自定义几何由 ModelRuntime 出图、它只认 light，所以在这一层把两个通道补回去。
+        // 判据照 LivingEntityRenderer#submit 的字节码：bodyVisible = !isInvisible；
+        // translucent = !bodyVisible && !isInvisibleToPlayer（只有这一档才给 654311423 的整体 alpha）。
+        boolean bodyVisible = !avatar.isInvisible;
+        boolean translucent = !bodyVisible && !avatar.isInvisibleToPlayer;
+        boolean glowing = avatar.appearsGlowing();
+        int overlay = LivingEntityRenderer.getOverlayCoords(avatar, this.getWhiteOverlayProgress(avatar));
+        int tint = translucent ? INVISIBLE_TINT : OPAQUE_TINT;
         ModelRuntime runtime = CustomModelManager.runtime();
         if (runtime != null) {
             poseStack.pushPose();
             applyEntityTransform(avatar, poseStack, runtime);
             float ageSeconds = avatar.ageInTicks / 20.0F;
-            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(runtime.texture()),
-                    (pose, buffer) -> runtime.render(pose, buffer, light, avatar, localPlayer, ageSeconds));
-            renderHeldItems(runtime, localPlayer, poseStack, collector, light);
+            RenderType mainType = mainRenderType(runtime, bodyVisible, translucent, glowing);
+            if (mainType != null) {
+                collector.submitCustomGeometry(poseStack, mainType,
+                        (pose, buffer) -> runtime.render(pose, tinted(buffer, tint, overlay), light, avatar,
+                                localPlayer, ageSeconds));
+            }
+            // 发光轮廓是原版 submitModel 的第二趟：outlineColor 非 0 时再交一遍几何，
+            // 亮度满档、overlay 不参与、颜色取队伍色。HEAD 取消把这一趟一起砍掉了，这里补回来。
+            // 主趟本身就是 outline 类型时（隐形 + 发光）原版只交一趟，不能重复提交。
+            if (glowing && mainType != null && !mainType.isOutline()) {
+                collector.submitCustomGeometry(poseStack, RenderTypes.outline(runtime.texture()),
+                        (pose, buffer) -> runtime.render(
+                                pose, tinted(buffer, avatar.outlineColor, OverlayTexture.NO_OVERLAY),
+                                FULL_BRIGHT, avatar, localPlayer, ageSeconds));
+            }
+            // 发光骨第二趟：只出 ysmGlow 骨，emissive 渲染类型 + 满亮度，排在主趟之后
+            // （与 SPM 的 IGeoRenderer:48-111 同序）。没有发光骨的模型不提交，省一趟空绘制。
+            if (mainType != null && runtime.hasGlowBones()) {
+                collector.submitCustomGeometry(poseStack,
+                        RenderTypes.entityTranslucentEmissive(runtime.texture()),
+                        (pose, buffer) -> runtime.renderGlow(pose, tinted(buffer, tint, overlay), FULL_BRIGHT));
+            }
+            if (mainType != null) {
+                renderHeldItems(runtime, localPlayer, poseStack, collector, light);
+            }
             poseStack.popPose();
             if (LOGGED.compareAndSet(false, true)) {
                 Debug.info("[SFH+] custom model rendered: " + CustomModelManager.loadedFile()
@@ -102,13 +144,46 @@ public abstract class PlayerModelSubmitMixin {
             if (texture == null) {
                 return;
             }
-            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(texture),
-                    (pose, buffer) -> emitBox(pose, buffer, light));
+            if (bodyVisible || translucent) {
+                collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(texture),
+                        (pose, buffer) -> emitBox(pose, tinted(buffer, tint, overlay), light));
+            }
             if (LOGGED.compareAndSet(false, true)) {
                 Debug.info("[SFH+] custom model debug box rendered, texture=" + texture);
             }
         }
         callbackInfo.cancel();
+    }
+
+    /**
+     * 主趟的渲染类型，逐分支对齐 {@code LivingEntityRenderer#getRenderType}：
+     * 半透明档（隐形但队友可见）走 translucent，正常档走 cutout，只有轮廓时走 outline，
+     * 其余（隐形且看不见）返回 {@code null} 表示不提交。
+     *
+     * <p>原版正常档用的是 {@code model.renderType(texture)}，玩家模型就是 {@code entityCutout}；
+     * 半透明档原版用 {@code entityTranslucentCullItemTarget}，那是给物品实体目标缓冲用的，
+     * 自定义几何走主目标，所以这里用 {@code entityTranslucent}。
+     *
+     * <p>cutout 把 alpha 直接切掉，软边头发/纱/翅膀会被硬切。SPM 按贴图整体判
+     * （{@code GeoReplacedEntityRenderer:159} 的 {@code isTranslucentTexture}），
+     * 这里同样按整张贴图判（{@link ModelRuntime#hasTranslucentPixels}），因为 RenderType 是整趟的。
+     */
+    private static RenderType mainRenderType(ModelRuntime runtime, boolean bodyVisible, boolean translucent,
+            boolean glowing) {
+        if (translucent) {
+            return RenderTypes.entityTranslucent(runtime.texture());
+        }
+        if (bodyVisible) {
+            return runtime.hasTranslucentPixels()
+                    ? RenderTypes.entityTranslucent(runtime.texture())
+                    : RenderTypes.entityCutout(runtime.texture());
+        }
+        return glowing ? RenderTypes.outline(runtime.texture()) : null;
+    }
+
+    /** 把颜色与 overlay 两个通道钉成给定值的转发器，见 {@link TintedVertexConsumer}。 */
+    private static VertexConsumer tinted(VertexConsumer buffer, int color, int overlay) {
+        return new TintedVertexConsumer(buffer, color, overlay);
     }
 
     /**
@@ -290,5 +365,94 @@ public abstract class PlayerModelSubmitMixin {
                 .setOverlay(OverlayTexture.NO_OVERLAY)
                 .setLight(light)
                 .setNormal(pose, nx, ny, nz);
+    }
+
+    /**
+     * 只改颜色与 overlay 两个通道的转发器。
+     *
+     * <p>几何由 {@link ModelRuntime#render} 出图，它逐顶点写死 {@code setColor(255,255,255,255)} 与
+     * {@code setOverlay(NO_OVERLAY)}；而受击红闪、隐形 alpha、发光轮廓的颜色都只有渲染状态
+     * （{@code AvatarRenderState}）知道。在提交这一层套一层转发器，就不用把渲染状态塞进
+     * {@code ModelRuntime} 的出图签名，也不用改它的顶点代码。
+     */
+    private static final class TintedVertexConsumer implements VertexConsumer {
+        private final VertexConsumer delegate;
+        private final int color;
+        private final int overlay;
+
+        TintedVertexConsumer(VertexConsumer delegate, int color, int overlay) {
+            this.delegate = delegate;
+            this.color = color;
+            this.overlay = overlay;
+        }
+
+        @Override
+        public VertexConsumer addVertex(float x, float y, float z) {
+            this.delegate.addVertex(x, y, z);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+            this.delegate.setColor(this.color);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setColor(int argb) {
+            this.delegate.setColor(this.color);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv(float u, float v) {
+            this.delegate.setUv(u, v);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv1(int u, int v) {
+            this.delegate.setUv1(u, v);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv2(int u, int v) {
+            this.delegate.setUv2(u, v);
+            return this;
+        }
+
+//#if MC >= 260300
+//$$         /** 26.3 的第三组 uv 是贴片/闪光用的 decal uv，与颜色/overlay 无关，原样转发。 */
+//$$         @Override
+//$$         public VertexConsumer setUv3(float u, float v) {
+//$$             this.delegate.setUv3(u, v);
+//$$             return this;
+//$$         }
+//#endif
+
+        @Override
+        public VertexConsumer setNormal(float x, float y, float z) {
+            this.delegate.setNormal(x, y, z);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setLineWidth(float width) {
+            this.delegate.setLineWidth(width);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setOverlay(int packedOverlay) {
+            this.delegate.setOverlay(this.overlay);
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setLight(int packedLight) {
+            this.delegate.setLight(packedLight);
+            return this;
+        }
     }
 }

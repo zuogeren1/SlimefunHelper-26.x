@@ -29,8 +29,56 @@ public final class ModelController {
     /** 一条「目标状态 → 条件」。 */
     public record Transition(String target, MolangExpression.Expr condition) {}
 
+    /**
+     * 进入一个状态时的过渡混合数据，对应 YSM 的 {@code blend_transition} 与 {@code blend_via_shortest_path}。
+     *
+     * <p>SPM 把这两项挂在**目标状态**上：{@code AnimationControllerRuntime#transitionToEntry} 用
+     * {@code nextState.getBlendTransition()} 设插值器、用 {@code nextState.isBlendViaShortestPath()}
+     * 选旋转混合模式，所以这里也按目标状态存，与「从哪个状态来」无关。
+     *
+     * <p>{@code seconds} 是总时长（秒）：YSM 的 {@code blend_transition} 数值就是秒，SPM 的
+     * {@code TicksInterpolator} 内部乘 20 换成 tick。{@code times}/{@code progress} 是分段线性的
+     * 权重曲线，只有 {@code blend_transition} 写成对象时才有，空数组表示按 {@code seconds} 线性。
+     * {@code progress} 是「新姿态占多少」：0 = 旧姿态、1 = 新姿态（SPM 的
+     * {@code LinearKeyframeInterpolator} 存的是 1 - 该值）。
+     *
+     * <p>{@code declared} 表示模型确实给了过渡数据（曲线，或非 0 的标量）。标量 0 与「没写」在
+     * 二进制里同形（{@code RawControllerState} 没保留「标量还是曲线」那个标志位），都算未声明，
+     * 由调用方决定兜底时长。
+     */
+    public record Blend(float seconds, boolean shortestPath, float[] times, float[] progress,
+            boolean declared) {
+
+        static final float[] EMPTY = new float[0];
+
+        /** 未声明过渡：硬切。 */
+        public static final Blend NONE = new Blend(0.0F, false, EMPTY, EMPTY, false);
+
+        /** 过渡进度 0..1；时长 0 时恒为 1（SPM 的 {@code TicksInterpolator(0)} 同样直接返回 1）。 */
+        public float weight(float elapsedSeconds) {
+            if (this.times.length == 0) {
+                if (this.seconds <= 0.0F) {
+                    return 1.0F;
+                }
+                return Math.min(1.0F, Math.max(0.0F, elapsedSeconds / this.seconds));
+            }
+            if (elapsedSeconds <= this.times[0]) {
+                return this.progress[0];
+            }
+            for (int i = 1; i < this.times.length; i++) {
+                if (elapsedSeconds <= this.times[i]) {
+                    float span = this.times[i] - this.times[i - 1];
+                    float ratio = span <= 0.0F ? 1.0F : (elapsedSeconds - this.times[i - 1]) / span;
+                    return this.progress[i - 1] + (this.progress[i] - this.progress[i - 1]) * ratio;
+                }
+            }
+            return this.progress[this.progress.length - 1];
+        }
+    }
+
     public record State(String name, List<Choice> animations, List<Transition> transitions,
-            List<MolangExpression.Statement> onEntry, List<MolangExpression.Statement> onExit) {}
+            List<MolangExpression.Statement> onEntry, List<MolangExpression.Statement> onExit,
+            Blend blend) {}
 
     /** 片段时间查询：判断「本状态里的动画播完没有」，实现方拿的是模型自己的片段表。 */
     public interface Lengths {
@@ -63,6 +111,9 @@ public final class ModelController {
     private String current;
     /** 进入当前状态的时刻（秒）：状态里所有动画共用一个起点。 */
     private float stateStart = Float.NaN;
+    /** 最近一次进入的状态与它的来源（首帧进入时来源为 {@code null}）。 */
+    private String lastFrom;
+    private String lastTo;
 
     private ModelController(String slot, List<State> states, String current) {
         this.slot = slot;
@@ -106,7 +157,7 @@ public final class ModelController {
                 }
             }
             parsed.add(new State(state.name, animations, transitions,
-                    program(state.onEntry), program(state.onExit)));
+                    program(state.onEntry), program(state.onExit), blend(state)));
         }
         if (parsed.isEmpty()) {
             return null;
@@ -152,6 +203,42 @@ public final class ModelController {
         return compiled;
     }
 
+    /**
+     * 解析一个状态的 {@code blend_transition} / {@code blend_via_shortest_path}。
+     *
+     * <p>数值单位是**秒**：SPM 的 {@code TicksInterpolator} 构造时乘 20 换成 tick，求值时再除回去，
+     * 所以对外按秒给、由调用方自己换算成 tick 或帧。
+     *
+     * <p>写成对象时是「时间(秒) → 权重」的分段线性曲线；SPM 的 {@code LinearKeyframeInterpolator}
+     * 存的是 {@code 1 - 权重}（0 表示旧姿态），这里换成「新姿态占比」，语义与 {@link Blend#weight} 一致。
+     *
+     * <p>{@code declared} 只能靠「标量非 0」判断：二进制里本来有一个「标量还是曲线」的标志位，
+     * 但 {@link RawYsmModel.RawControllerState} 没保留它，显式写 0 与不写在这里无法区分。
+     *
+     * <p>控制器级的 {@code transitionLengthTicks} 不在这里：它是「控制器没声明过渡时用多久」的
+     * 兜底，由调用方（{@code ModelRuntime}）持有，见 {@link #transitionSeconds}。
+     */
+    private static Blend blend(RawYsmModel.RawControllerState state) {
+        boolean shortest = state.blendViaShortestPath;
+        Map<Float, Float> points = state.blendTransitions;
+        if (points != null && !points.isEmpty()) {
+            // 键序不可信：二进制按写入顺序、JSON 按对象顺序，都不保证升序
+            List<Float> keys = new ArrayList<>(points.keySet());
+            keys.sort(Float::compare);
+            int size = keys.size();
+            float[] times = new float[size];
+            float[] progress = new float[size];
+            for (int i = 0; i < size; i++) {
+                float key = keys.get(i);
+                times[i] = key;
+                progress[i] = 1.0F - points.get(key);
+            }
+            return new Blend(times[size - 1], shortest, times, progress, true);
+        }
+        float seconds = state.blendTransitionValue;
+        return new Blend(seconds, shortest, Blend.EMPTY, Blend.EMPTY, seconds != 0.0F);
+    }
+
     private static boolean holds(MolangExpression.Expr condition, float animTime, float lifeTime) {
         return condition == null || condition.eval(animTime, lifeTime) > 0.5F;
     }
@@ -172,6 +259,77 @@ public final class ModelController {
     /** 进入当前状态后过了多久（秒）。 */
     public float stateStart() {
         return stateStart;
+    }
+
+    /** 当前状态名；还没 tick 过时是初始状态。 */
+    public String currentState() {
+        return current;
+    }
+
+    /**
+     * 进入 {@code state} 时的过渡混合数据；状态不存在时返回 {@link Blend#NONE}。
+     *
+     * <p>过渡挂在**目标状态**上（SPM {@code AnimationControllerRuntime:337,367} 取的是
+     * {@code nextState} 的 blendTransition / blendViaShortestPath），所以 {@code fromState}
+     * 只用于「从哪来」的日志与将来的按来源分叉，不参与取值。
+     */
+    public Blend blendInto(String fromState, String state) {
+        State target = stateOf(state);
+        return target == null ? Blend.NONE : target.blend();
+    }
+
+    /**
+     * 从 {@code fromState} 切到 {@code toState} 的过渡时长（秒）。
+     *
+     * <p>模型没声明 {@code blend_transition} 时用 {@code fallbackSeconds}，由调用方决定传什么：
+     * 控制器级的 {@code transitionLengthTicks / 20}（SPM 的 {@code AnimationControllerInstance}
+     * 构造参数，玩家槽位是 0.0f 或 0.1f，见 {@code PlayerAnimationController:44-67}），
+     * 或者 0.0F 表示硬切。
+     *
+     * <p>注意 SPM 的模型状态路径其实**不**回落到控制器级时长：{@code transitionToEntry} 一律用
+     * {@code nextState.getBlendTransition()} 覆盖槽位插值器，没声明就是 {@code TicksInterpolator(0)}
+     * （硬切）；{@code transitionLengthTicks} 只用于槽位初始插值器和代码侧控制器。要与 SPM 逐帧
+     * 一致就传 0.0F。
+     */
+    public float transitionSeconds(String fromState, String toState, float fallbackSeconds) {
+        Blend blend = blendInto(fromState, toState);
+        return blend.declared() ? blend.seconds() : fallbackSeconds;
+    }
+
+    /**
+     * 同 {@link #transitionSeconds(String, String, float)}，未声明时取 0（硬切）。
+     *
+     * <p>模型控制器只跑在非代码驱动的槽上，其中 SPM 注册过的 {@code parallel*} / {@code pre_parallel*}
+     * 的 {@code transitionLengthTicks} 都是 0.0f（{@code PlayerAnimationController:40,66}）；
+     * {@code new} 这类 YSM 独有槽在 SPM 里没有对应注册，同样按 0 处理。
+     */
+    public float transitionSeconds(String fromState, String toState) {
+        return transitionSeconds(fromState, toState, 0.0F);
+    }
+
+    /** 从 {@code fromState} 切到 {@code toState} 是否走最短欧拉路径（{@code blend_via_shortest_path}）。 */
+    public boolean shortestPath(String fromState, String toState) {
+        return blendInto(fromState, toState).shortestPath();
+    }
+
+    /**
+     * 最近一次跳转的来源状态；首帧进入（或还没 tick 过）为 {@code null}。
+     *
+     * <p>{@link #tick} 内部完成跳转，调用方拿不到 from/to，所以这里把「刚发生的那次跳转」记下来：
+     * 每帧 tick 之后用 {@link #lastFrom()} / {@link #lastTo()} 取 {@link #blendInto} 即可。
+     */
+    public String lastFrom() {
+        return lastFrom;
+    }
+
+    /** 最近一次跳转的目标状态（= 当前状态）；还没 tick 过时为 {@code null}。 */
+    public String lastTo() {
+        return lastTo;
+    }
+
+    /** 最近一次跳转的过渡数据；首帧进入返回 {@link Blend#NONE}。 */
+    public Blend lastBlend() {
+        return lastFrom == null ? Blend.NONE : blendInto(lastFrom, lastTo);
     }
 
     /**
@@ -242,6 +400,9 @@ public final class ModelController {
     }
 
     private void enter(State state, float ageSeconds) {
+        // 首帧进入不算跳转：没有「从哪来」，也不该被当成一次混合
+        lastFrom = Float.isFinite(stateStart) ? current : null;
+        lastTo = state.name();
         current = state.name();
         stateStart = ageSeconds;
         playing.clear();
