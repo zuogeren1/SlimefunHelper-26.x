@@ -332,7 +332,8 @@ public final class MolangExpression {
                     return (animTime, lifeTime) -> (float) Math.PI;
                 }
                 default -> {
-                    return (animTime, lifeTime) -> UNKNOWN;
+                    // ysm.* / query.* 的实体查询量：按每帧绑定的上下文取值；未实现的仍落 NaN
+                    return (animTime, lifeTime) -> MolangVariables.get(name);
                 }
             }
         }

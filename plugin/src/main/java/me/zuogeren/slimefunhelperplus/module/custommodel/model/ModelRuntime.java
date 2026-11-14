@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import me.matl114.utils.Debug;
+import net.minecraft.client.Minecraft;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
@@ -117,6 +118,7 @@ public final class ModelRuntime {
     private int[] armRootOf;
     private float[] armRootX;
     private boolean[] renderMask;
+    private List<ModelController> controllers = List.of();
 
     /** 轮盘里的一条：{@code key} 是动画名，{@code variant} 标记「服装预设」而不是额外动作。 */
     public record ExtraOption(String key, String label, boolean variant) {}
@@ -341,8 +343,30 @@ public final class ModelRuntime {
         Debug.info("[SFH+] geo bones=" + count + " roots=" + roots + " unresolvedParents=" + unresolved
                 + " clips=" + clips.size() + " hidden=" + hiddenCount + " extras=" + extraOptions.size()
                 + " hands=" + rightHand + "/" + leftHand);
-        return new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot, children,
-                extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand);
+        ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
+                children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand);
+        runtime.controllers = parseControllers(model);
+        return runtime;
+    }
+
+    /** 模型自带的控制器（{@code animationControllerFiles}）解析成状态机列表；没有就是空表。 */
+    private static List<ModelController> parseControllers(RawYsmModel model) {
+        if (model.mainEntity == null || model.mainEntity.animationControllerFiles == null) {
+            return List.of();
+        }
+        List<ModelController> parsed = new ArrayList<>();
+        for (RawYsmModel.RawAnimationControllerFile file : model.mainEntity.animationControllerFiles) {
+            if (file == null || file.controllers == null) {
+                continue;
+            }
+            for (RawYsmModel.RawAnimationController controller : file.controllers.values()) {
+                ModelController machine = ModelController.parse(controller);
+                if (machine != null && !machine.slot().isEmpty()) {
+                    parsed.add(machine);
+                }
+            }
+        }
+        return parsed;
     }
 
     /**
@@ -869,6 +893,7 @@ public final class ModelRuntime {
             render(pose, buffer, light);
             return;
         }
+        MolangVariables.bind(player, avatar);
         int hurtTime = player == null ? 0 : player.hurtTime;
         boolean restart = clip != lastClip;
         if (ONE_SHOT.contains(clipName(clip)) && hurtTime > lastHurtTime) {
@@ -897,6 +922,23 @@ public final class ModelRuntime {
             float extraTime = overlayTime(activeExtra, ageSeconds);
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverlay(activeExtra, i, extraTime, ageSeconds);
+            }
+        }
+        // 控制器槽（parallel*/pre_parallel*）：模型自带的道具显隐、换装都写在这些片段里，
+        // 由状态机按 Molang 条件选一个当覆盖层，叠在基础姿态之上。
+        for (ModelController controller : controllers) {
+            String overlayName = controller.tick(time, ageSeconds);
+            if (overlayName == null) {
+                continue;
+            }
+            RawYsmModel.RawAnimation overlayClip = clips.get(overlayName);
+            if (overlayClip == null || overlayClip.boneAnimations == null) {
+                continue;
+            }
+            float overlayLength = lengthOf(overlayClip);
+            float overlayTime = overlayLength <= 0.0F ? 0.0F : ageSeconds % overlayLength;
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverlay(overlayClip, i, overlayTime, ageSeconds);
             }
         }
         for (int i = 0; i < bones.size(); i++) {
@@ -935,6 +977,7 @@ public final class ModelRuntime {
             lastClip = clip;
             lastClipStart = ageSeconds;
         }
+        MolangVariables.bind(Minecraft.getInstance().player, null);
         float time = clipTime(clip, ageSeconds);
         java.util.Arrays.fill(frameState, (byte) 0);
         for (int i = 0; i < bones.size(); i++) {
