@@ -3,7 +3,10 @@ package me.zuogeren.slimefunhelperplus.module.custommodel.model;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -89,15 +92,29 @@ public final class ModelRuntime {
     private final Matrix3f[] frameNormals;
     private final byte[] frameState;
     private final float[] poses;
-    private final boolean[] hidden;
+    private final boolean[] hiddenDefault;
+    private final boolean[] hiddenCurrent;
+    private final int[] propRoot;
+    private final Map<Integer, List<Integer>> children;
+    private final Map<String, RawYsmModel.RawAnimation> extraClips;
+    private final List<ExtraOption> extraOptions;
+    private final String defaultExtraKey;
     private final Identifier texture;
     private final int rightHandBone;
     private final int leftHandBone;
     private RawYsmModel.RawAnimation lastClip;
     private float lastClipStart;
     private float lastHurtTime;
+    private RawYsmModel.RawAnimation activeVariant;
+    private String activeVariantKey = "";
+    private RawYsmModel.RawAnimation activeExtra;
+    private String activeExtraKey = "";
+    private float activeExtraStart = Float.NaN;
     private boolean frameValid;
     private boolean logged;
+
+    /** 轮盘里的一条：{@code key} 是动画名，{@code variant} 标记「服装预设」而不是额外动作。 */
+    public record ExtraOption(String key, String label, boolean variant) {}
 
     private static String clipName(RawYsmModel.RawAnimation clip) {
         return clip == null || clip.name == null ? "none" : clip.name;
@@ -105,7 +122,9 @@ public final class ModelRuntime {
 
     private ModelRuntime(List<RawYsmModel.RawBone> bones, Map<String, Integer> boneIndex,
             Map<String, RawYsmModel.RawAnimation> clips, int[] parents, Matrix4f[] restMatrices,
-            Matrix3f[] restNormals, boolean[] hidden, Identifier texture, int rightHandBone, int leftHandBone) {
+            Matrix3f[] restNormals, boolean[] hidden, int[] propRoot, Map<Integer, List<Integer>> children,
+            Map<String, RawYsmModel.RawAnimation> extraClips, List<ExtraOption> extraOptions, String defaultExtraKey,
+            Identifier texture, int rightHandBone, int leftHandBone) {
         this.bones = bones;
         this.boneIndex = boneIndex;
         this.clips = clips;
@@ -116,7 +135,13 @@ public final class ModelRuntime {
         this.frameNormals = new Matrix3f[bones.size()];
         this.frameState = new byte[bones.size()];
         this.poses = new float[bones.size() * 9];
-        this.hidden = hidden;
+        this.hiddenDefault = hidden.clone();
+        this.hiddenCurrent = hidden.clone();
+        this.propRoot = propRoot;
+        this.children = children;
+        this.extraClips = extraClips;
+        this.extraOptions = extraOptions;
+        this.defaultExtraKey = defaultExtraKey;
         this.texture = texture;
         this.rightHandBone = rightHandBone;
         this.leftHandBone = leftHandBone;
@@ -281,6 +306,20 @@ public final class ModelRuntime {
             java.util.Arrays.fill(hidden, false);
             hiddenCount = 0;
         }
+        // 每根骨骼「最近一个被隐藏的祖先」：轮盘选中额外动画时，把它引用的道具整棵放出来。
+        int[] propRoot = new int[count];
+        for (int i = 0; i < count; i++) {
+            int root = -1;
+            int cursor = i;
+            while (cursor >= 0 && hidden[cursor]) {
+                root = cursor;
+                cursor = parents[cursor];
+            }
+            propRoot[i] = root;
+        }
+        Map<String, RawYsmModel.RawAnimation> extraClips = new LinkedHashMap<>();
+        List<ExtraOption> extraOptions = new ArrayList<>();
+        String defaultExtraKey = collectExtras(model, extraClips, extraOptions);
         int roots = 0;
         int unresolved = 0;
         for (int i = 0; i < count; i++) {
@@ -295,9 +334,10 @@ public final class ModelRuntime {
         int rightHand = findHand(bones, "righthandlocator", "rightitem", "righthand");
         int leftHand = findHand(bones, "lefthandlocator", "leftitem", "lefthand");
         Debug.info("[SFH+] geo bones=" + count + " roots=" + roots + " unresolvedParents=" + unresolved
-                + " clips=" + clips.size() + " hidden=" + hiddenCount
+                + " clips=" + clips.size() + " hidden=" + hiddenCount + " extras=" + extraOptions.size()
                 + " hands=" + rightHand + "/" + leftHand);
-        return new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, texture, rightHand, leftHand);
+        return new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot, children,
+                extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand);
     }
 
     private static boolean hasZeroScale(RawYsmModel.RawBoneAnimation boneAnimation) {
@@ -417,6 +457,257 @@ public final class ModelRuntime {
         return -1;
     }
 
+    /**
+     * 轮盘可选项：服装预设（主文件里的 {@code skirtN_original}，只含 scale/position，用来隐藏其它变体）
+     * 在前，模型自带的额外动画（{@code animation-extra}，animType=3）在后。
+     *
+     * <p>没有骨骼通道的动画（只有音效/锁定播放的占位）不列出来。返回默认服装预设的 key，没有则为空串。
+     */
+    private static String collectExtras(RawYsmModel model, Map<String, RawYsmModel.RawAnimation> clips,
+            List<ExtraOption> options) {
+        Map<String, String> labels = model.properties == null || model.properties.extraAnimations == null
+                ? Map.of()
+                : model.properties.extraAnimations;
+        if (model.mainEntity == null || model.mainEntity.animationFiles == null) {
+            return "";
+        }
+        List<Map.Entry<String, RawYsmModel.RawAnimation>> variants = new ArrayList<>();
+        List<ExtraOption> extras = new ArrayList<>();
+        for (RawYsmModel.RawAnimationFile file : model.mainEntity.animationFiles.values()) {
+            if (file == null || file.animations == null) {
+                continue;
+            }
+            for (Map.Entry<String, RawYsmModel.RawAnimation> entry : file.animations.entrySet()) {
+                RawYsmModel.RawAnimation animation = entry.getValue();
+                if (animation == null || animation.boneAnimations == null || animation.boneAnimations.isEmpty()) {
+                    continue;
+                }
+                String name = entry.getKey();
+                if (isVariantName(name)) {
+                    variants.add(entry);
+                } else if (file.animType == 3) {
+                    // 作者用 extraAnimations 给出菜单；没有出现在菜单里的（如 extra0 配置动画）不列
+                    if (!labels.isEmpty() && !labels.containsKey(name)) {
+                        continue;
+                    }
+                    String label = labels.getOrDefault(name, name);
+                    // 以 # 开头的是作者的配置/子菜单标记（如 #extra_config），不进轮盘
+                    if (label.startsWith("#")) {
+                        continue;
+                    }
+                    extras.add(new ExtraOption(name, label, false));
+                }
+            }
+        }
+        variants.sort(Comparator.comparingInt(entry -> variantIndex(entry.getKey())));
+        if (!labels.isEmpty()) {
+            Map<String, Integer> order = new HashMap<>();
+            int position = 0;
+            for (String key : labels.keySet()) {
+                order.put(key, position++);
+            }
+            extras.sort(Comparator.comparingInt(option -> order.getOrDefault(option.key(), Integer.MAX_VALUE)));
+        }
+        for (Map.Entry<String, RawYsmModel.RawAnimation> entry : variants) {
+            RawYsmModel.RawAnimation animation = entry.getValue();
+            animation.name = entry.getKey();
+            clips.putIfAbsent(entry.getKey(), animation);
+            options.add(new ExtraOption(entry.getKey(), "服装 " + variantIndex(entry.getKey()), true));
+        }
+        for (ExtraOption option : extras) {
+            RawYsmModel.RawAnimation animation = findAnimation(model, option.key());
+            if (animation == null) {
+                continue;
+            }
+            animation.name = option.key();
+            clips.putIfAbsent(option.key(), animation);
+            options.add(option);
+        }
+        return variants.isEmpty() ? "" : variants.get(0).getKey();
+    }
+
+    private static RawYsmModel.RawAnimation findAnimation(RawYsmModel model, String name) {
+        for (RawYsmModel.RawAnimationFile file : model.mainEntity.animationFiles.values()) {
+            if (file != null && file.animations != null && file.animations.containsKey(name)) {
+                return file.animations.get(name);
+            }
+        }
+        return null;
+    }
+
+    private static boolean isVariantName(String name) {
+        return name != null && name.startsWith("skirt") && name.endsWith("_original");
+    }
+
+    private static int variantIndex(String name) {
+        try {
+            return Integer.parseInt(name.substring("skirt".length(), name.length() - "_original".length()));
+        } catch (RuntimeException ignored) {
+            return 99;
+        }
+    }
+
+    /** 轮盘列表（含服装预设）；每次选中都走 {@link #setExtra(String)}。 */
+    public List<ExtraOption> extras() {
+        return java.util.Collections.unmodifiableList(extraOptions);
+    }
+
+    public String activeExtraKey() {
+        return activeExtraKey;
+    }
+
+    public String activeVariantKey() {
+        return activeVariantKey;
+    }
+
+    /** 没有服装预设时为空串；有的话是索引最小的那个。 */
+    public String defaultVariantKey() {
+        return defaultExtraKey;
+    }
+
+    /** 服装预设：静态覆盖层，和额外动作互不挤占。 */
+    public void setVariant(String key) {
+        String wanted = key == null ? "" : key;
+        RawYsmModel.RawAnimation clip = wanted.isEmpty() ? null : extraClips.get(wanted);
+        activeVariant = clip;
+        activeVariantKey = clip == null ? "" : wanted;
+        recomputeHidden();
+    }
+
+    /**
+     * 额外动作：循环叠加层；空串表示不播。
+     *
+     * <p>叠加语义——只有动画写到的通道才覆盖，没写到的保持走路/待机；
+     * 同时把它引用到的、默认藏起来的道具整棵放出来（弹琴要看得见钢琴）。
+     */
+    public void setExtra(String key) {
+        String wanted = key == null ? "" : key;
+        RawYsmModel.RawAnimation clip = wanted.isEmpty() ? null : extraClips.get(wanted);
+        if (clip == null && !wanted.isEmpty()) {
+            return;
+        }
+        if (clip != activeExtra) {
+            activeExtraStart = Float.NaN;
+        }
+        activeExtra = clip;
+        activeExtraKey = clip == null ? "" : wanted;
+        recomputeHidden();
+    }
+
+    /** 轮盘点击：同一条再点一次就取消；变体与动作各占一个槽，互不覆盖。 */
+    public void toggle(String key) {
+        ExtraOption option = findOption(key);
+        if (option == null) {
+            return;
+        }
+        if (option.variant()) {
+            setVariant(option.key().equals(activeVariantKey) ? "" : option.key());
+        } else {
+            setExtra(option.key().equals(activeExtraKey) ? "" : option.key());
+        }
+    }
+
+    public void clearAll() {
+        activeVariant = null;
+        activeVariantKey = "";
+        activeExtra = null;
+        activeExtraKey = "";
+        activeExtraStart = Float.NaN;
+        recomputeHidden();
+    }
+
+    private ExtraOption findOption(String key) {
+        for (ExtraOption option : extraOptions) {
+            if (option.key().equals(key)) {
+                return option;
+            }
+        }
+        return null;
+    }
+
+    private void recomputeHidden() {
+        System.arraycopy(hiddenDefault, 0, hiddenCurrent, 0, hiddenCurrent.length);
+        Set<Integer> roots = new HashSet<>();
+        collectPropRoots(activeVariant, roots);
+        collectPropRoots(activeExtra, roots);
+        for (int root : roots) {
+            unhideSubtree(root);
+        }
+    }
+
+    private void collectPropRoots(RawYsmModel.RawAnimation clip, Set<Integer> roots) {
+        if (clip == null) {
+            return;
+        }
+        for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
+            if (animation.boneName == null) {
+                continue;
+            }
+            Integer index = boneIndex.get(animation.boneName);
+            if (index == null) {
+                continue;
+            }
+            int root = propRoot[index];
+            if (root >= 0) {
+                roots.add(root);
+            }
+        }
+    }
+
+    private void unhideSubtree(int root) {
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            int current = queue.poll();
+            hiddenCurrent[current] = false;
+            for (int child : children.getOrDefault(current, List.of())) {
+                queue.add(child);
+            }
+        }
+    }
+
+    private float overlayTime(RawYsmModel.RawAnimation clip, float ageSeconds) {
+        float length = lengthOf(clip);
+        if (length <= 0.0F) {
+            return 0.0F;
+        }
+        float elapsed = Math.max(0.0F, ageSeconds - activeExtraStart);
+        return elapsed % length;
+    }
+
+    /** 额外动画只覆盖它写到的通道；没写的保持基础姿态。 */
+    private void sampleOverlay(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
+        String boneName = bones.get(boneIndex).name;
+        if (boneName == null) {
+            return;
+        }
+        for (RawYsmModel.RawBoneAnimation animation : clip.boneAnimations) {
+            if (!boneName.equals(animation.boneName)) {
+                continue;
+            }
+            int offset = boneIndex * 9;
+            float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
+            if (rotation != null) {
+                poses[offset] = (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                poses[offset + 1] = (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                poses[offset + 2] = (float) Math.toRadians(finite(rotation[2], 0.0F));
+            }
+            float[] position = sampleChannel(animation.position, time, lifeTime);
+            if (position != null) {
+                poses[offset + 3] = finite(position[0], 0.0F);
+                poses[offset + 4] = finite(position[1], 0.0F);
+                poses[offset + 5] = finite(position[2], 0.0F);
+            }
+            float[] scale = sampleChannel(animation.scale, time, lifeTime);
+            if (scale != null) {
+                poses[offset + 6] = finite(scale[0], 1.0F);
+                poses[offset + 7] = finite(scale[1], 1.0F);
+                poses[offset + 8] = finite(scale[2], 1.0F);
+            }
+            return;
+        }
+    }
+
     private static Matrix4f computeRest(int index, List<RawYsmModel.RawBone> bones, int[] parents,
             Matrix4f[] matrices, byte[] state) {
         if (state[index] == 2) {
@@ -522,6 +813,21 @@ public final class ModelRuntime {
         java.util.Arrays.fill(frameState, (byte) 0);
         for (int i = 0; i < bones.size(); i++) {
             samplePose(clip, i, time, ageSeconds);
+        }
+        // 服装变体是静态预设（只有缩放/位移），动作是循环播放；两层叠加，动作最后生效
+        if (activeVariant != null) {
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverlay(activeVariant, i, 0.0F, ageSeconds);
+            }
+        }
+        if (activeExtra != null) {
+            if (!Float.isFinite(activeExtraStart)) {
+                activeExtraStart = ageSeconds;
+            }
+            float extraTime = overlayTime(activeExtra, ageSeconds);
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverlay(activeExtra, i, extraTime, ageSeconds);
+            }
         }
         for (int i = 0; i < bones.size(); i++) {
             computeFrame(i);
@@ -803,7 +1109,7 @@ public final class ModelRuntime {
             if (matrix == null) {
                 continue;
             }
-            if (hidden[i]) {
+            if (hiddenCurrent[i]) {
                 continue;
             }
             Matrix3f normalMatrix = normals[i];

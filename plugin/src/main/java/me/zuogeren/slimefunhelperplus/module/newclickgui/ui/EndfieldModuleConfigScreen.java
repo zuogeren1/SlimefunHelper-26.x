@@ -46,6 +46,7 @@ import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
+import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
 import net.minecraft.client.gui.screens.Screen;
@@ -430,9 +431,38 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                             current.isBlank() ? "还没有选择模型" : current,
                             "⟳",
                             "重新解密、解析并注册当前模型。",
-                            () -> CustomModelManager.reloadAsync(custom.model.get())));
+                            () -> CustomModelManager.reloadAsync(custom.model.get())),
+                    new Action(
+                            "动画轮盘",
+                            currentExtraLabel(),
+                            "◎",
+                            "打开轮盘切换服装预设与额外动作；热键在「动画轮盘热键」一行绑定。",
+                            custom::openRoulette));
         }
         return List.of();
+    }
+
+    /** 动作行副标题：服装预设 + 额外动作，各自可能为空。 */
+    private static String currentExtraLabel() {
+        ModelRuntime runtime = CustomModelManager.runtime();
+        if (runtime == null) {
+            return "模型未加载";
+        }
+        String variant = labelOf(runtime, runtime.activeVariantKey());
+        String extra = labelOf(runtime, runtime.activeExtraKey());
+        return (variant.isEmpty() ? "默认服装" : variant) + (extra.isEmpty() ? "" : " · " + extra);
+    }
+
+    private static String labelOf(ModelRuntime runtime, String key) {
+        if (key == null || key.isEmpty()) {
+            return "";
+        }
+        for (ModelRuntime.ExtraOption option : runtime.extras()) {
+            if (option.key().equals(key)) {
+                return option.label();
+            }
+        }
+        return key;
     }
 
     protected boolean light() {

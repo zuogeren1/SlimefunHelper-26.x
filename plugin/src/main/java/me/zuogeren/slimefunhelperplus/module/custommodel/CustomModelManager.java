@@ -25,6 +25,11 @@ public final class CustomModelManager {
 
     private static volatile ModelRuntime runtime;
     private static volatile String loadedFile = "";
+    /** 轮盘选择：服装预设与额外动作各记一份；空串 = 没选（新模型自动用默认服装）。 */
+    private static volatile String selectedVariant = "";
+    private static volatile String selectedExtra = "";
+
+    private static final String NO_EXTRA = "__none__";
 
     private CustomModelManager() {}
 
@@ -34,6 +39,27 @@ public final class CustomModelManager {
 
     public static String loadedFile() {
         return loadedFile;
+    }
+
+    public static String selectedExtra() {
+        return selectedExtra;
+    }
+
+    /** 轮盘点一条：同一项再点一次取消；服装与动作各自独立。 */
+    public static void selectExtra(String key) {
+        ModelRuntime current = runtime;
+        if (current == null) {
+            return;
+        }
+        if (key == null || key.isEmpty() || NO_EXTRA.equals(key)) {
+            current.clearAll();
+        } else {
+            current.toggle(key);
+        }
+        selectedVariant = current.activeVariantKey();
+        selectedExtra = current.activeExtraKey();
+        Debug.info("[SFH+] 轮盘选择: 服装=" + (selectedVariant.isEmpty() ? "默认" : selectedVariant)
+                + " 动作=" + (selectedExtra.isEmpty() ? "无" : selectedExtra));
     }
 
     public static void reloadAsync(String fileName) {
@@ -96,7 +122,28 @@ public final class CustomModelManager {
         if (loaded == null) {
             Debug.info("[SFH+] 模型加载失败（无可用贴图或几何）: " + fileName);
         } else {
-            Debug.info("[SFH+] 模型已加载 " + fileName + " bones=" + loaded.boneCount() + " texture=" + textureId);
+            applyExtraSelection(loaded);
+            Debug.info("[SFH+] 模型已加载 " + fileName + " bones=" + loaded.boneCount()
+                    + " variant=" + (loaded.activeVariantKey().isEmpty() ? "-" : loaded.activeVariantKey())
+                    + " extra=" + (loaded.activeExtraKey().isEmpty() ? "-" : loaded.activeExtraKey())
+                    + " texture=" + textureId);
+        }
+    }
+
+    /** 模型换了以后把选择接上：服装预设不存在就退回默认服装；动作不存在就丢掉。 */
+    private static void applyExtraSelection(ModelRuntime target) {
+        if (!selectedVariant.isEmpty()) {
+            target.setVariant(selectedVariant);
+        }
+        if (selectedVariant.isEmpty() || !selectedVariant.equals(target.activeVariantKey())) {
+            target.setVariant(target.defaultVariantKey());
+        }
+        selectedVariant = target.activeVariantKey();
+        if (!selectedExtra.isEmpty()) {
+            target.setExtra(selectedExtra);
+            if (!selectedExtra.equals(target.activeExtraKey())) {
+                selectedExtra = "";
+            }
         }
     }
 
