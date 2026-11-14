@@ -27,7 +27,7 @@ import net.minecraft.world.item.ThrowablePotionItem;
  *   <li>{@code :empty} —— 空手，{@code ConditionalHold:73-75}，命中后不再往下走；</li>
  *   <li>{@code $<物品 id>} —— {@code ConditionalHold:76-84} 分派到 {@code :87-100}；</li>
  *   <li>{@code #<标签 id>} —— {@code ConditionalHold:102-113}；</li>
- *   <li>{@code :<内部分类>} —— {@code ConditionalHold:115-128} 先试 {@code InnerClassify}；</li>
+ *   <li>{@code :<内部分类>} —— {@code ConditionalHold:115-128} 先试 {@code InnerClassify}（铲子另有历史别名 {@code spade}，排在正名之后）；</li>
  *   <li>{@code :<使用动画名>} —— 同一段代码在内部分类之后才试 {@code ItemStack#getUseAnimation}。</li>
  * </ol>
  * 挥动与使用走的是同一套分派（{@code ConditionalSwing:69-82} / {@code ConditionalUse:69-82}），
@@ -83,6 +83,10 @@ public final class ItemClassifier {
         String inner = classify(stack);
         if (!inner.isEmpty()) {
             out.add(":" + inner);
+            String legacy = legacyAlias(inner);
+            if (!legacy.isEmpty()) {
+                out.add(":" + legacy);
+            }
         }
         ItemUseAnimation anim = stack.getUseAnimation();
         // 弓与十字弓的 use-anim 名和内部分类同名（bow / crossbow），不去重就会给出两个一样的后缀。
@@ -140,6 +144,15 @@ public final class ItemClassifier {
             return "throwable_potion";
         }
         return "";
+    }
+
+    /**
+     * 内部分类的历史别名：老模型把铲子写成 {@code spade}，片段名还留在
+     * {@code hold_mainhand:spade} 这类位置上（SPM {@code InnerClassify#getLegacyAlias} 同样保留）。
+     * 别名排在正名之后 —— 正名是现行写法，别名只用来兜住老模型。
+     */
+    private static String legacyAlias(String inner) {
+        return "shovel".equals(inner) ? "spade" : "";
     }
 
     /**
