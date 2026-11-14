@@ -706,6 +706,9 @@ public final class MolangExpression {
                 case "math.pi" -> {
                     return (animTime, lifeTime) -> (float) Math.PI;
                 }
+                case "math.e" -> {
+                    return (animTime, lifeTime) -> (float) Math.E;
+                }
                 default -> {
                     // ysm.* / query.* 的实体查询量按每帧绑定的上下文取值；未实现的仍落 NaN。
                     // v.* 用 Variable 包一层：算术上当 0，但 ?? 能问出「有没有被赋过值」。
@@ -811,6 +814,10 @@ public final class MolangExpression {
                 case "math.round" -> {
                     return (animTime, lifeTime) -> (float) Math.round(a.eval(animTime, lifeTime));
                 }
+                // 向零取整（SPM Trunc:11-19）：负数取 ceil、正数取 floor，负半轴上与 floor 分道
+                case "math.trunc" -> {
+                    return (animTime, lifeTime) -> truncate(a.eval(animTime, lifeTime));
+                }
                 // 负数开方在 Molang 里给 0（SPM Sqrt:9-13）：NaN 会顺着骨骼矩阵扩散成乱飘/消失
                 case "math.sqrt" -> {
                     return (animTime, lifeTime) -> {
@@ -841,6 +848,16 @@ public final class MolangExpression {
                         float to = b.eval(animTime, lifeTime);
                         return from + (to - from) * c.eval(animTime, lifeTime);
                     };
+                }
+                // 最短弧插值（SPM LerpRotate:11 → Interpolations#lerpYaw）：两端先折进 ±180，
+                // 再把终点挪到起点 ±180 以内，否则 350°→10° 会绕一整圈
+                case "math.lerprotate" -> {
+                    return (animTime, lifeTime) -> lerpRotate(a.eval(animTime, lifeTime),
+                            b.eval(animTime, lifeTime), c.eval(animTime, lifeTime));
+                }
+                // 折进 [-180, 180)（SPM MinAngle:10-17）：角度差直接相减会在 ±180 处跳变
+                case "math.min_angle" -> {
+                    return (animTime, lifeTime) -> wrapDegrees(a.eval(animTime, lifeTime));
                 }
                 case "math.min" -> {
                     return (animTime, lifeTime) -> Math.min(a.eval(animTime, lifeTime), b.eval(animTime, lifeTime));
@@ -914,6 +931,21 @@ public final class MolangExpression {
                 // math.random_integer 是闭区间 [min, max]（SPM RandomInteger#nextInclusive），
                 // 与 math.random 的闭区间一致；上界要能取到，否则随机动作永远差一档。
                 case "math.random_integer" -> {
+                    return (animTime, lifeTime) -> randomInteger(
+                            a.eval(animTime, lifeTime), b.eval(animTime, lifeTime));
+                }
+                // 掷骰：count 次 [min, max) 均匀取值的和（SPM DieRoll:17-33），count 按 int 截断
+                case "math.die_roll" -> {
+                    return (animTime, lifeTime) -> dieRoll(a.eval(animTime, lifeTime),
+                            b.eval(animTime, lifeTime), c.eval(animTime, lifeTime));
+                }
+                // 整数掷骰（SPM DieRollInteger:17-33）：count 四舍五入，每次取 [min, max) 的整数
+                case "math.die_roll_integer" -> {
+                    return (animTime, lifeTime) -> dieRollInteger(a.eval(animTime, lifeTime),
+                            b.eval(animTime, lifeTime), c.eval(animTime, lifeTime));
+                }
+                // 原版 geckolib 的非标准别名，与 math.random_integer 同一个实现（SPM MathBinding:55）
+                case "math.randomi" -> {
                     return (animTime, lifeTime) -> randomInteger(
                             a.eval(animTime, lifeTime), b.eval(animTime, lifeTime));
                 }
@@ -1066,6 +1098,87 @@ public final class MolangExpression {
                 value = bits % range;
             } while (bits - value + (range - 1L) < 0L);
             return (float) (low + value);
+        }
+
+        /** 向零取整（SPM {@code Trunc}）：负数取 ceil、正数取 floor。 */
+        private static float truncate(float value) {
+            return value < 0.0F ? (float) Math.ceil(value) : (float) Math.floor(value);
+        }
+
+        /** 折进 [-180, 180)（SPM {@code MathHelper#wrapDegrees}）：插值前两端要先落到同一圈上。 */
+        private static float wrapDegrees(float angle) {
+            float wrapped = angle % 360.0F;
+            if (wrapped >= 180.0F) {
+                wrapped -= 360.0F;
+            }
+            if (wrapped < -180.0F) {
+                wrapped += 360.0F;
+            }
+            return wrapped;
+        }
+
+        /**
+         * 最短弧插值（SPM {@code Interpolations#lerpYaw}）：终点先挪到起点 ±180 以内再线性插值，
+         * 否则 350°→10° 会绕一整圈。
+         */
+        private static float lerpRotate(float from, float to, float position) {
+            float start = wrapDegrees(from);
+            float end = wrapDegrees(to);
+            float diff = start - end;
+            if (diff > 180.0F || diff < -180.0F) {
+                end = start + Math.copySign(360.0F - Math.abs(diff), diff);
+            }
+            return start + (end - start) * position;
+        }
+
+        /**
+         * {@code math.die_roll(count, min, max)}：count 次 [min, max) 均匀取值的和（SPM {@code DieRoll:17-33}）。
+         *
+         * <p>count 按 int 截断（SPM 的 {@code getAsInt} 走 {@code Number#intValue}），NaN 截成 0 即不掷。
+         */
+        private static float dieRoll(float count, float low, float high) {
+            int rolls = (int) count;
+            float min = low;
+            float range = high;
+            if (min > range) {
+                float swap = min;
+                min = range;
+                range = swap - range;
+            } else {
+                range -= min;
+            }
+            java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
+            float total = 0.0F;
+            while (rolls-- > 0) {
+                total += min + random.nextFloat() * range;
+            }
+            return total;
+        }
+
+        /**
+         * {@code math.die_roll_integer(count, min, max)}：count 次 [min, max) 整数取值的和
+         * （SPM {@code DieRollInteger:17-33}，上界不含 —— 与 SPM 的 {@code nextInt(range)} 一致）。
+         *
+         * <p>区间宽度为 0 时 SPM 的 {@code nextInt(0)} 会抛 {@code IllegalArgumentException}，
+         * 这里按「每次必取 min」处理：渲染线程不能因为一条表达式崩掉。
+         */
+        private static float dieRollInteger(float count, float low, float high) {
+            int rolls = Math.round(count);
+            int min = (int) low;
+            int range = (int) high;
+            if (min > range) {
+                int swap = min;
+                min = range;
+                range = swap - range;
+            } else {
+                range -= min;
+            }
+            java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
+            int total = 0;
+            while (rolls-- > 0) {
+                total += range <= 0 ? min : min + random.nextInt(range);
+            }
+            return (float) total;
         }
 
         private static Expr argument(List<Expr> arguments, int index) {
