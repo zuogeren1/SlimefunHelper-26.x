@@ -1,9 +1,12 @@
 package me.zuogeren.slimefunhelperplus.module.custommodel.model;
 
+import java.util.Map;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -23,28 +26,91 @@ import net.minecraft.world.level.LightLayer;
  * <p>名字与语义对齐 SPM 的 YSMBinding / QueryBinding（MIT，同版本目标）；那两张表本身是 YSM 官方行为的
  * 忠实移植，比从 wiki 反推可靠。取值靠每帧绑定的上下文（{@link #bind}）。
  *
- * <p>没有实现的量返回 NaN，与旧行为一致：未知量按 NaN 走比较为假、通道落中性值，
- * 不会把条件误判成真。武器的动作子状态来自 SPM 的 WeaponActionBridge 子系统，尚未移植，保持 NaN。
+ * <p>没有实现的量返回 NaN：未知量按 NaN 走比较为假、通道落中性值，不会把条件误判成真。
+ * {@code v.*} 局部变量是例外 —— 官方资源把它当加数到处用（{@code +v.hv}），NaN 会毒掉整条表达式，
+ * 所以按 Molang 语义把未赋值的读成 0；写入侧是 {@link MolangExpression#statements} 的时间轴语句，
+ * 变量表按模型实例绑定（{@link #bind}）。武器的动作子状态来自 SPM 的 WeaponActionBridge 子系统，
+ * 尚未移植，保持 NaN。
  */
 public final class MolangVariables {
 
     private static volatile LocalPlayer player;
     private static volatile AvatarRenderState avatar;
+    /** 上一次算 yaw 速度时的 tick 与 yaw：YSM 的速度是逐 tick 差分，同一 tick 里重复出图不能重复分摊。 */
+    private static long lastYawTick = Long.MIN_VALUE;
+    private static float lastYaw;
+    private static float lastYawSpeed;
+    /** 时间轴语句写入的 {@code v.*} 变量表；每个模型实例一份，渲染前绑定。 */
+    private static volatile Map<String, Float> variables;
+    /** 上一帧的插值位置与它所属的帧键：{@code query.position_delta} 同一帧只算一次，见 {@link #framePositionDelta()}。 */
+    private static long lastPositionKey = Long.MIN_VALUE;
+    private static double lastPositionX;
+    private static double lastPositionY;
+    private static double lastPositionZ;
+    private static final float[] lastPositionDelta = new float[3];
 
     private MolangVariables() {}
 
     public static void bind(LocalPlayer localPlayer, AvatarRenderState state) {
-        player = localPlayer;
+        bind(localPlayer, state, null);
+    }
+
+    /** {@code table} 是该模型实例的 {@code v.*} 变量表；没有表时局部变量一律读 0。 */
+    public static void bind(LocalPlayer localPlayer, AvatarRenderState state, Map<String, Float> table) {
+        variables = table;
         avatar = state;
+        player = localPlayer;
+    }
+
+    /**
+     * 时间轴语句的写入侧。只认 {@code v.*}，非有限值不落表 —— 一次 NaN 会永久污染弹簧状态，
+     * 而模型里 {@code v.skirt_vertical_P0dot = (input - P0)/v.time} 这类算式一旦拿到 NaN 就再也回不来。
+     */
+    public static void set(String name, float value) {
+        Map<String, Float> table = variables;
+        if (table == null || !isLocalVariable(name) || !Float.isFinite(value)) {
+            return;
+        }
+        table.put(name.toLowerCase(java.util.Locale.ROOT), value);
+    }
+
+    /**
+     * 竖直速度（格/秒）。站在地上时 {@code getDeltaMovement().y} 并不为 0（实测约 -0.078），
+     * 直接乘 20 会得到一个恒定的负速度，把依赖它的弹簧（发丝、裙摆）永久推偏。
+     * 所以照 SPM 的 {@code MovementQuery#getVerticalSpeed} 加一道 0.1 的门槛，低于它按 0 处理。
+     */
+    private static float verticalSpeed(LocalPlayer p) {
+        double dy = p.getDeltaMovement().y;
+        if (Math.abs(dy) > 0.1) {
+            return (float) (dy * 20.0);
+        }
+        return (float) ((p.getY() - p.yo) * 20.0);
+    }
+
+    /** {@code query.position_delta(axis)}：相邻两帧之间的位移（格），轴越界按 Molang 未定义返回 NaN。 */
+    public static float positionDelta(float axis) {
+        int component = Math.round(axis);
+        if (component < 0 || component > 2) {
+            return Float.NaN;
+        }
+        float[] delta = framePositionDelta();
+        return delta == null ? Float.NaN : delta[component];
     }
 
     public static float get(String name) {
+        if (isLocalVariable(name)) {
+            Map<String, Float> table = variables;
+            Float value = table == null ? null : table.get(name.toLowerCase(java.util.Locale.ROOT));
+            return value == null ? 0.0F : value;
+        }
         LocalPlayer p = player;
         if (p == null) {
             return Float.NaN;
         }
+        // 官方资源大量写短名（q.vertical_speed / q.yaw_speed / q.ground_speed），与 query.* 同一个量
+        String query = name.startsWith("q.") ? "query." + name.substring(2) : name;
         try {
-            return switch (name) {
+            return switch (query) {
                 case "ysm.has_helmet" -> has(p, EquipmentSlot.HEAD);
                 case "ysm.has_chest_plate" -> has(p, EquipmentSlot.CHEST);
                 case "ysm.has_leggings" -> has(p, EquipmentSlot.LEGS);
@@ -82,8 +148,15 @@ public final class MolangVariables {
                 case "ysm.mainhand_charged_crossbow" -> p.getMainHandItem().is(Items.CROSSBOW) ? 1.0F : 0.0F;
                 case "ysm.offhand_charged_crossbow" -> p.getOffhandItem().is(Items.CROSSBOW) ? 1.0F : 0.0F;
                 case "ysm.swinging_arm" -> p.getUsedItemHand() == InteractionHand.MAIN_HAND ? 0.0F : 1.0F;
-                case "ysm.head_yaw" -> avatar == null ? Float.NaN : avatar.yRot;
-                case "ysm.head_pitch" -> avatar == null ? Float.NaN : avatar.xRot;
+                // 视线角度进表达式前先取负（YSM/SPM/OSM 的 AnimatableEntity 都是
+                // headPitch = -rawHeadPitch、netHeadYaw = -clamp(wrapDegrees(...), ±85)）：
+                // 模型按「负 = 俯视」写单侧夹取（math.max(ysm.head_pitch,-45) 之类），
+                // 少了这层负号俯视会一路顶上去而不被夹住。净头偏角同样夹在 ±85°。
+                // AvatarRenderState 的 xRot/yRot 正是这两条公式的输入（xRot = 俯视为正的俯仰角，
+                // yRot = wrapDegrees(头朝向 - 身体朝向)），与 {@link ModelRuntime} 的头部跟随层同一个量。
+                case "ysm.head_yaw" -> avatar == null ? Float.NaN
+                        : -Mth.clamp(Mth.wrapDegrees(avatar.yRot), -85.0F, 85.0F);
+                case "ysm.head_pitch" -> avatar == null ? Float.NaN : -avatar.xRot;
                 case "ysm.block_light" -> light(p, LightLayer.BLOCK);
                 case "ysm.sky_light" -> light(p, LightLayer.SKY);
                 case "ysm.is_open_air" -> p.level().canSeeSky(p.blockPosition()) ? 1.0F : 0.0F;
@@ -91,7 +164,8 @@ public final class MolangVariables {
                 case "ysm.person_view" -> Minecraft.getInstance().options.getCameraType().isFirstPerson() ? 0.0F : 1.0F;
 
                 case "query.ground_speed" -> horizontalSpeed(p);
-                case "query.vertical_speed" -> (float) (p.getDeltaMovement().y * 20.0);
+                case "query.vertical_speed" -> verticalSpeed(p);
+                case "query.yaw_speed" -> yawSpeed(p);
                 case "query.health" -> p.getHealth();
                 case "query.max_health" -> p.getMaxHealth();
                 case "query.player_level" -> p.experienceLevel;
@@ -324,6 +398,70 @@ public final class MolangVariables {
     private static float light(LocalPlayer entity, LightLayer layer) {
         BlockPos pos = entity.blockPosition();
         return entity.level().getBrightness(layer, pos);
+    }
+
+    private static boolean isLocalVariable(String name) {
+        return name.startsWith("v.");
+    }
+
+    /**
+     * 转向角速度（度/秒）：**身体**朝向的逐 tick 差分 ×20。
+     *
+     * <p>量的是 body yaw（YSM {@code PlayerStateTracker:151-153}、SPM {@code PlayerEntityFrameState:91-97}
+     * 都是 {@code getYRot()}），不是渲染状态里的净头偏角 —— 后者是「头相对身体」的角度，站着不动只转视角
+     * 也会剧烈变化，喂进 {@code v.L3}/{@code v.L4} 这两条高增益链（乘完再乘 0.1）会让发丝和尾巴一直甩。
+     */
+    private static float yawSpeed(LocalPlayer entity) {
+        long tick = entity.level().getGameTime();
+        if (tick == lastYawTick) {
+            return lastYawSpeed;
+        }
+        float yaw = entity.getYRot();
+        if (lastYawTick != Long.MIN_VALUE) {
+            long elapsed = tick - lastYawTick;
+            lastYawSpeed = elapsed > 0L
+                    ? 20.0F * Mth.wrapDegrees(yaw - lastYaw) / elapsed
+                    : 0.0F;
+        }
+        lastYaw = yaw;
+        lastYawTick = tick;
+        return lastYawSpeed;
+    }
+
+    /**
+     * 帧间位移：SPM 的 {@code EntityFrameStateTracker#updatePosition} 取「当前帧插值位置 − 上一帧插值位置」，
+     * 所以这里按 {@code (tick, partialTick)} 记帧键，同一帧里的多次取值复用同一份结果 —— 否则第二次起
+     * 会算成 0，弹簧输入直接掉没。
+     */
+    private static float[] framePositionDelta() {
+        LocalPlayer p = player;
+        if (p == null) {
+            return null;
+        }
+        double partial = boatPartialTick();
+        long tick = p.level().getGameTime();
+        long key = tick * 4096L + Math.round(partial * 4096.0F);
+        if (key == lastPositionKey) {
+            return lastPositionDelta;
+        }
+        double x = Mth.lerp(partial, p.xOld, p.getX());
+        double y = Mth.lerp(partial, p.yOld, p.getY());
+        double z = Mth.lerp(partial, p.zOld, p.getZ());
+        if (lastPositionKey == Long.MIN_VALUE) {
+            // 首帧没有上一帧可减，给 0：给整段位移会把弹簧一次性顶飞
+            lastPositionDelta[0] = 0.0F;
+            lastPositionDelta[1] = 0.0F;
+            lastPositionDelta[2] = 0.0F;
+        } else {
+            lastPositionDelta[0] = (float) (x - lastPositionX);
+            lastPositionDelta[1] = (float) (y - lastPositionY);
+            lastPositionDelta[2] = (float) (z - lastPositionZ);
+        }
+        lastPositionX = x;
+        lastPositionY = y;
+        lastPositionZ = z;
+        lastPositionKey = key;
+        return lastPositionDelta;
     }
 
     private static float horizontalSpeed(LocalPlayer entity) {

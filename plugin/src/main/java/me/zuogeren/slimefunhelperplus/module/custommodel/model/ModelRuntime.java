@@ -128,6 +128,22 @@ public final class ModelRuntime {
     private float heightScale = 1.0F;
     /** 无条件循环的默认层：模型里存在的 pre_parallel0..7。道具的自动隐藏写在这些片段里。 */
     private List<String> preParallelBase = List.of();
+    /**
+     * 无条件循环的第二层：模型里存在的 parallel0..7。YSM 的 {@code ParallelPredicate} 对
+     * {@code pre_parallel*} 与 {@code parallel*} 一视同仁（都无条件循环），差别只在叠加顺序上。
+     * 弹簧物理就写在这几个片段的时间轴语句里。
+     */
+    private List<String> parallelBase = List.of();
+    /** 时间轴语句写入的 {@code v.*} 变量表：物理跨帧的状态全存在这里，按模型实例一份。 */
+    private final Map<String, Float> variables = new HashMap<>();
+    /** 片段名 → 时间轴执行游标。 */
+    private final Map<String, TimelineCursor> timelines = new HashMap<>();
+
+    /**
+     * 本实例的物理状态表：{@code ysm.second_order} / {@code ysm.first_order} 的模拟器都挂在这里。
+     * 主模型与第一人称手臂各一份 —— 弹簧状态属于渲染上下文，共用一个会让两处互相拖动。
+     */
+    private final ModelPhysics physics = new ModelPhysics();
 
     /** 轮盘里的一条：{@code key} 是动画名，{@code variant} 标记「服装预设」而不是额外动作。 */
     public record ExtraOption(String key, String label, boolean variant) {}
@@ -368,13 +384,19 @@ public final class ModelRuntime {
             }
         }
         List<String> base = new ArrayList<>();
+        List<String> parallel = new ArrayList<>();
         for (int index = 0; index < 8; index++) {
             String baseName = "pre_parallel" + index;
             if (clips.containsKey(baseName)) {
                 base.add(baseName);
             }
+            String parallelName = "parallel" + index;
+            if (clips.containsKey(parallelName)) {
+                parallel.add(parallelName);
+            }
         }
         runtime.preParallelBase = base;
+        runtime.parallelBase = parallel;
         if (model.properties != null) {
             runtime.widthScale = model.properties.widthScale > 0.0F ? model.properties.widthScale : 1.0F;
             runtime.heightScale = model.properties.heightScale > 0.0F ? model.properties.heightScale : 1.0F;
@@ -407,8 +429,24 @@ public final class ModelRuntime {
         Debug.info("[SFH+] size wScale=" + runtime.widthScale + " hScale=" + runtime.heightScale
                 + " geoHeight=" + (hi - lo) + " vanillaModelHeight=2.0"
                 + " -> ours=" + ((hi - lo) * runtime.heightScale) + " vanilla=" + (2.0F * 0.9375F));
+        int timelineCount = 0;
+        for (RawYsmModel.RawAnimation clip : clips.values()) {
+            if (clip != null && clip.timelineEvents != null) {
+                timelineCount += clip.timelineEvents.size();
+            }
+        }
+        Debug.info("[SFH+] parallelBase=" + runtime.preParallelBaseN() + " parallelOnly="
+                + runtime.parallelOnlyN() + " timelineEvents=" + timelineCount);
         Debug.info("[SFH+] controllers=" + runtime.controllers.size() + "[" + slots.toString().trim()
                 + "] parallelClips=" + parallelCount + "[" + parallelClips.toString().trim() + "]");
+        int timelineClips = 0;
+        for (RawYsmModel.RawAnimation animation : clips.values()) {
+            if (animation.timelineEvents != null && !animation.timelineEvents.isEmpty()) {
+                timelineClips++;
+            }
+        }
+        Debug.info("[SFH+] layers pre=" + base.size() + " parallel=" + parallel.size()
+                + " timelineClips=" + timelineClips);
         return runtime;
     }
 
@@ -746,7 +784,7 @@ public final class ModelRuntime {
     /**
      * 额外动作：循环叠加层；空串表示不播。
      *
-     * <p>叠加语义——只有动画写到的通道才覆盖，没写到的保持走路/待机；
+     * <p>叠加语义——只有动画写到的通道才参与叠加，没写到的保持走路/待机；
      * 同时把它引用到的、默认藏起来的道具整棵放出来（弹琴要看得见钢琴）。
      */
     public void setExtra(String key) {
@@ -844,7 +882,75 @@ public final class ModelRuntime {
         return elapsed % length;
     }
 
-    /** 额外动画只覆盖它写到的通道；没写的保持基础姿态。 */
+    /**
+     * 一层「自动循环」片段：先推进它自己的 timeline 语句（弹簧积分写 {@code v.*}），再把骨骼通道叠上去。
+     *
+     * <p>顺序不能反过来 —— 同一片段里先写变量、后读变量，与 YSM 的
+     * {@code AnimationControllerInstance#process}（先 {@code executeTimelineEvents} 再
+     * {@code processRunningAnimation}）一致。
+     */
+    private void sampleLayers(List<String> names, float ageSeconds) {
+        for (String name : names) {
+            RawYsmModel.RawAnimation layer = clips.get(name);
+            if (layer == null) {
+                continue;
+            }
+            float length = lengthOf(layer);
+            float time = length <= 0.0F ? 0.0F : ageSeconds % length;
+            runTimeline(layer, time, ageSeconds);
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverlay(layer, i, time, ageSeconds);
+            }
+        }
+    }
+
+    /**
+     * 执行片段里「片段内时间已经越过」的 timeline 语句（YSM 的 {@code InstructionKeyFrameExecutor}）。
+     *
+     * <p>语句是逐帧增量执行的：只跑游标之后、时间戳 {@code <= time} 的那几条；片段循环回卷时先把上一轮
+     * 剩下的补完再把游标归零。模型的二阶弹簧正是靠这个次序「回写(commit) → 再积分」各跑一次 ——
+     * 顺序颠倒会把积分结果当场覆盖掉，看上去就是「物理不动」。
+     */
+    private void runTimeline(RawYsmModel.RawAnimation clip, float time, float lifeTime) {
+        List<RawYsmModel.RawTimelineEvent> events = clip.timelineEvents;
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        TimelineCursor cursor = timelines.computeIfAbsent(clipName(clip), key -> new TimelineCursor());
+        if (Float.isNaN(cursor.time)) {
+            // 首帧没有上一轮可补，直接从片段开头算
+            cursor.next = 0;
+        } else if (time < cursor.time) {
+            for (int i = cursor.next; i < events.size(); i++) {
+                runStatements(events.get(i), time, lifeTime);
+            }
+            cursor.next = 0;
+        }
+        while (cursor.next < events.size() && events.get(cursor.next).timestamp <= time) {
+            runStatements(events.get(cursor.next), time, lifeTime);
+            cursor.next++;
+        }
+        cursor.time = time;
+    }
+
+    private static void runStatements(RawYsmModel.RawTimelineEvent event, float time, float lifeTime) {
+        if (event == null || event.events == null) {
+            return;
+        }
+        for (String statement : event.events) {
+            for (MolangExpression.Statement compiled : MolangExpression.statements(statement)) {
+                compiled.run(time, lifeTime);
+            }
+        }
+    }
+
+    /** 一条片段的 timeline 执行进度：下一个待执行事件、上一帧的片段内时间（用来认出循环回卷）。 */
+    private static final class TimelineCursor {
+        private int next;
+        private float time = Float.NaN;
+    }
+
+    /** 叠加层只动它写到的通道：旋转/位移相加，缩放整体替换；没写到的通道保持基础姿态。 */
     private void sampleOverlay(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
         String boneName = bones.get(boneIndex).name;
         if (boneName == null) {
@@ -857,15 +963,15 @@ public final class ModelRuntime {
             int offset = boneIndex * 9;
             float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
             if (rotation != null) {
-                poses[offset] = (float) -Math.toRadians(finite(rotation[0], 0.0F));
-                poses[offset + 1] = (float) -Math.toRadians(finite(rotation[1], 0.0F));
-                poses[offset + 2] = (float) Math.toRadians(finite(rotation[2], 0.0F));
+                poses[offset] += (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                poses[offset + 1] += (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                poses[offset + 2] += (float) Math.toRadians(finite(rotation[2], 0.0F));
             }
             float[] position = sampleChannel(animation.position, time, lifeTime);
             if (position != null) {
-                poses[offset + 3] = finite(position[0], 0.0F);
-                poses[offset + 4] = finite(position[1], 0.0F);
-                poses[offset + 5] = finite(position[2], 0.0F);
+                poses[offset + 3] += finite(position[0], 0.0F);
+                poses[offset + 4] += finite(position[1], 0.0F);
+                poses[offset + 5] += finite(position[2], 0.0F);
             }
             float[] scale = sampleChannel(animation.scale, time, lifeTime);
             if (scale != null) {
@@ -944,6 +1050,14 @@ public final class ModelRuntime {
         return true;
     }
 
+    int preParallelBaseN() {
+        return preParallelBase == null ? -1 : preParallelBase.size();
+    }
+
+    int parallelOnlyN() {
+        return parallelBase == null ? -1 : parallelBase.size();
+    }
+
     public float widthScale() {
         return widthScale;
     }
@@ -987,7 +1101,9 @@ public final class ModelRuntime {
             render(pose, buffer, light);
             return;
         }
-        MolangVariables.bind(player, avatar);
+        MolangVariables.bind(player, avatar, variables);
+        ModelPhysics.bind(physics);
+        physics.advance(ageSeconds);
         int hurtTime = player == null ? 0 : player.hurtTime;
         boolean restart = clip != lastClip;
         if (ONE_SHOT.contains(clipName(clip)) && hurtTime > lastHurtTime) {
@@ -997,30 +1113,27 @@ public final class ModelRuntime {
         if (restart) {
             lastClip = clip;
             lastClipStart = ageSeconds;
+            // 片段切换时打一行：排查「该播的片段没播」时，这行是唯一能直接看到当前状态的东西
+            Debug.info("[SFH+] clip -> " + clipName(clip) + " (dead=" + (player != null && player.isDeadOrDying())
+                    + " fly=" + avatar.isFallFlying + " passenger=" + avatar.isPassenger + ")");
         }
         float time = clipTime(clip, ageSeconds);
         java.util.Arrays.fill(frameState, (byte) 0);
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
         }
-        // 默认层 pre_parallel0..7：由代码侧控制器无条件循环播放，道具「默认不显示」就是靠它们把骨骼缩放成 0。
-        // 优先级低于主动画（YSM 里 pre_parallel 先注册、main 后注册），所以先叠它、再让主动画覆盖。
-        for (String baseName : preParallelBase) {
-            RawYsmModel.RawAnimation base = clips.get(baseName);
-            if (base == null) {
-                continue;
-            }
-            float baseLength = lengthOf(base);
-            float baseTime = baseLength <= 0.0F ? 0.0F : ageSeconds % baseLength;
-            for (int i = 0; i < bones.size(); i++) {
-                sampleOverlay(base, i, baseTime, ageSeconds);
-            }
-        }
+        // 默认层 pre_parallel0..7 / parallel0..7：由代码侧控制器无条件循环播放，道具「默认不显示」就是靠它们
+        // 把骨骼缩放成 0；物理（弹簧）写在这几个片段的 timeline 语句里，每帧推进一次。
+        // 缩放在层间是整体替换而不是相乘：作者在 boat/sleep 这类主动画里用 scale=1 把 pre_parallel 藏起来的
+        // 道具重新显示出来，相乘会把这个 1 乘成 0、道具永远出不来。
+        sampleLayers(preParallelBase, ageSeconds);
+        runTimeline(clip, time, ageSeconds);
         for (int i = 0; i < bones.size(); i++) {
             samplePoseOver(clip, i, time, ageSeconds);
         }
         // 服装变体是静态预设（只有缩放/位移），动作是循环播放；两层叠加，动作最后生效
         if (activeVariant != null) {
+            runTimeline(activeVariant, 0.0F, ageSeconds);
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverlay(activeVariant, i, 0.0F, ageSeconds);
             }
@@ -1030,6 +1143,7 @@ public final class ModelRuntime {
                 activeExtraStart = ageSeconds;
             }
             float extraTime = overlayTime(activeExtra, ageSeconds);
+            runTimeline(activeExtra, extraTime, ageSeconds);
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverlay(activeExtra, i, extraTime, ageSeconds);
             }
@@ -1047,16 +1161,23 @@ public final class ModelRuntime {
             }
             float overlayLength = lengthOf(overlayClip);
             float overlayTime = overlayLength <= 0.0F ? 0.0F : ageSeconds % overlayLength;
+            runTimeline(overlayClip, overlayTime, ageSeconds);
             for (int i = 0; i < bones.size(); i++) {
                 sampleOverlay(overlayClip, i, overlayTime, ageSeconds);
             }
         }
-        // 头部朝向：YSM 在**动画求值之后**把视线角度加到 Head 组骨骼上（CustomHumanoidEntity#applyHeadTracking）。
-        // 不做这一层，模型的头就永远跟着身体走，转头转头都不动，看着很怪。
+        // parallel 槽在 YSM 里排在 main 之后，所以它既能把通道加到主姿态上，也能在缩放上盖掉前面几层
+        sampleLayers(parallelBase, ageSeconds);
+        // 头部朝向：YSM 在动画求值之后把视线角度加到 Head 组骨骼上（CustomHumanoidEntity#codeAnimation），
+        // 加的是「头相对身体」的分量 —— 身体朝向由实体变换那一层（applyEntityTransform）负责，这里只管头怎么偏。
+        // YSM / SPM 在同一个（X/Y 已取负的）骨骼空间里加 headPitch = -xRot、netHeadYaw = -clamp(±85)，
+        // 两个值原样搬过来即可，再翻一次符号等于在镜像空间里多反了一次。
+        // avatar.yRot 本身就是 wrapDegrees(头朝向 - 身体朝向)（LivingEntityRenderer#extractRenderState），
+        // 再减 bodyRot 会把它当成绝对角用，转过头时被 clamp 顶死，看起来就是「只有身体在转」。
         if (avatar != null) {
             float headX = (float) Math.toRadians(-avatar.xRot);
             float headY = (float) Math.toRadians(-net.minecraft.util.Mth.clamp(
-                    net.minecraft.util.Mth.wrapDegrees(avatar.yRot - avatar.bodyRot), -85.0F, 85.0F));
+                    net.minecraft.util.Mth.wrapDegrees(avatar.yRot), -85.0F, 85.0F));
             for (int i = 0; i < bones.size(); i++) {
                 if (!isHeadBone(bones.get(i).name)) {
                     continue;
@@ -1102,8 +1223,11 @@ public final class ModelRuntime {
             lastClip = clip;
             lastClipStart = ageSeconds;
         }
-        MolangVariables.bind(Minecraft.getInstance().player, null);
+        MolangVariables.bind(Minecraft.getInstance().player, null, variables);
+        ModelPhysics.bind(physics);
+        physics.advance(ageSeconds);
         float time = clipTime(clip, ageSeconds);
+        runTimeline(clip, time, ageSeconds);
         java.util.Arrays.fill(frameState, (byte) 0);
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
@@ -1151,8 +1275,9 @@ public final class ModelRuntime {
     /**
      * 把片段里该骨骼的通道叠到当前姿态上，**不复位**。
      *
-     * <p>分层顺序：复位 → {@code pre_parallel0..7}（默认层，优先级最低）→ 主状态片段，
-     * 后写的覆盖先写的。这与 YSM 的控制器注册顺序一致（pre_parallel 先注册、main 后注册）。
+     * <p>分层顺序：复位 → {@code pre_parallel0..7}（默认层）→ 主状态片段。旋转与位移跨层相加（与 YSM 的
+     * {@code BedrockAnimationController#pollRotationPoint} 的 {@code fma} 一致），缩放则整体替换（见默认层那段注释）。
+     * 静止姿态的 rest 旋转只在 {@link #localOf} 里加一次，这里累加的一直是动画空间的偏移量。
      */
     private void samplePoseOver(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
         int offset = boneIndex * 9;
@@ -1166,15 +1291,15 @@ public final class ModelRuntime {
             }
             float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
             if (rotation != null) {
-                poses[offset] = (float) -Math.toRadians(finite(rotation[0], 0.0F));
-                poses[offset + 1] = (float) -Math.toRadians(finite(rotation[1], 0.0F));
-                poses[offset + 2] = (float) Math.toRadians(finite(rotation[2], 0.0F));
+                poses[offset] += (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                poses[offset + 1] += (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                poses[offset + 2] += (float) Math.toRadians(finite(rotation[2], 0.0F));
             }
             float[] position = sampleChannel(animation.position, time, lifeTime);
             if (position != null) {
-                poses[offset + 3] = finite(position[0], 0.0F);
-                poses[offset + 4] = finite(position[1], 0.0F);
-                poses[offset + 5] = finite(position[2], 0.0F);
+                poses[offset + 3] += finite(position[0], 0.0F);
+                poses[offset + 4] += finite(position[1], 0.0F);
+                poses[offset + 5] += finite(position[2], 0.0F);
             }
             float[] scale = sampleChannel(animation.scale, time, lifeTime);
             if (scale != null) {
@@ -1239,7 +1364,7 @@ public final class ModelRuntime {
             if (value instanceof Number number) {
                 result[i] = number.floatValue();
             } else if (value instanceof String text) {
-                result[i] = MolangExpression.of(text).eval(time, lifeTime);
+                result[i] = MolangExpression.channel(text, time, lifeTime);
             } else {
                 return null;
             }
@@ -1259,12 +1384,17 @@ public final class ModelRuntime {
         return elapsed % length;
     }
 
+    /**
+     * 片段时间轴长度（秒）。{@code length} 是 {@code Infinity} 的片段要原样留着 —— 作者的用意是
+     * 「不循环、{@code query.anim_time} 一直长下去」（pre_parallel 里那几条无限缠绕的发丝就是靠它算相位）；
+     * 折成关键帧最大时间会让 {@code ageSeconds % length} 恒为 0，动画和相位一起冻在开头。
+     */
     private static float lengthOf(RawYsmModel.RawAnimation clip) {
         float length = clip.length;
-        if (!Float.isFinite(length) || length <= 0.0F) {
+        if (!(length > 0.0F)) {
             length = maxKeyframeTime(clip);
         }
-        return Float.isFinite(length) && length > 0.0F ? length : 0.0F;
+        return length > 0.0F ? length : 0.0F;
     }
 
     private static float maxKeyframeTime(RawYsmModel.RawAnimation clip) {

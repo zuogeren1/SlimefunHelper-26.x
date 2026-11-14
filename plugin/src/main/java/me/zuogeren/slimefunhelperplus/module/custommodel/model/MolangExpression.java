@@ -9,9 +9,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Molang 的数值子集：覆盖模型里最常见的写法（{@code math.sin/cos}、{@code query.anim_time}、
  * {@code math.clamp} 等），够让 idle 呼吸、头发摆动这类通道动起来。
  *
- * <p>不是完整实现：条件、四则、比较、三元与常用数学函数都支持；YSM 的变量表（{@code v.*}、
- * {@code t.*}）与实体查询（{@code query.*} 除时间外）一律按 0 处理 —— 这些值要靠动画控制器
- * 或背包/装备状态写入，当前没有对应来源，返回 0 至少能保持静止而不是整条通道丢失。
+ * <p>不是完整实现：条件、四则、比较、三元、常用数学函数，以及 YSM 的物理内建函数
+ * （{@code ysm.second_order} / {@code ysm.first_order}，弹簧状态在 {@link ModelPhysics}）都支持。
+ * {@code v.*} 是模型自定义变量，读写都落在 {@link MolangVariables} 的变量表上；未赋值的按 0 读
+ * （NaN 会把整条通道算废）。写入侧是 {@link #statements}：模型的弹簧物理全写在各片段的 timeline 语句里，
+ * 功能骨骼（0 面片）则把同样的语句串直接写在通道上，由 {@link #channel} 分流。
  *
  * <p>解析失败按 0 处理，不抛异常：一个坏表达式不应该让整帧的骨骼矩阵算不出来。
  */
@@ -21,6 +23,11 @@ public final class MolangExpression {
         float eval(float animTime, float lifeTime);
     }
 
+    /** 时间轴上的语句：求值只为副作用（写 {@code v.*}），返回值丢弃。 */
+    public interface Statement {
+        void run(float animTime, float lifeTime);
+    }
+
     /**
      * 未知标识符（YSM 自己的 {@code ysm.*} 查询、控制器写入的 {@code v.*}）按 NaN 处理：
      * 算术上会传染成「无效值」，比较与三元当作 false，最后在采样时落回该通道的中性值。
@@ -28,7 +35,12 @@ public final class MolangExpression {
      */
     private static final float UNKNOWN = Float.NaN;
     private static final Expr ZERO = (animTime, lifeTime) -> 0.0F;
+    private static final Expr ONE = (animTime, lifeTime) -> 1.0F;
     private static final Map<String, Expr> CACHE = new ConcurrentHashMap<>();
+    /** 语句串按原文缓存：同一个模型每帧都会重复求值同一批语句。 */
+    private static final Map<String, List<Statement>> PROGRAM_CACHE = new ConcurrentHashMap<>();
+    /** 通道串「是不是语句」的判定结果，省得每帧重新探一次。 */
+    private static final Map<String, Boolean> STATEMENT_FLAGS = new ConcurrentHashMap<>();
     private static final int CACHE_LIMIT = 2048;
 
     private MolangExpression() {}
@@ -58,6 +70,72 @@ public final class MolangExpression {
         return parsed;
     }
 
+    /**
+     * 把一段时间轴语句（模型里的 {@code timelineEvents}，形如 {@code "v.a=1;v.b=v.a+1"}）编译成语句表。
+     *
+     * <p>单条语句解不出来只跳过这一条：模型的物理是一长串弹簧积分语句，一条写错的语句不该让整段停摆。
+     */
+    public static List<Statement> statements(String source) {
+        if (source == null || source.isBlank()) {
+            return List.of();
+        }
+        String key = source.trim();
+        List<Statement> cached = PROGRAM_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        List<Statement> parsed;
+        try {
+            parsed = new Parser(key).program();
+        } catch (RuntimeException malformed) {
+            parsed = List.of();
+        }
+        if (PROGRAM_CACHE.size() > CACHE_LIMIT) {
+            PROGRAM_CACHE.clear();
+        }
+        PROGRAM_CACHE.put(key, parsed);
+        return parsed;
+    }
+
+    /**
+     * 单个通道的字符串：通常是纯表达式；功能骨骼（模型里 0 面片的 {@code molang} 系列）把语句串写进通道，
+     * 这种按副作用执行、通道值给 0 —— 语句本身只为写变量，作者拿它承载纯表达式逻辑。
+     */
+    public static float channel(String source, float animTime, float lifeTime) {
+        if (source == null || source.isBlank()) {
+            return 0.0F;
+        }
+        if (!isStatement(source)) {
+            return of(source).eval(animTime, lifeTime);
+        }
+        for (Statement statement : statements(source)) {
+            statement.run(animTime, lifeTime);
+        }
+        return 0.0F;
+    }
+
+    /** 串的第一条语句是不是赋值（{@code v.x = ...}）；纯表达式即使含 {@code ==} 也不算。 */
+    public static boolean isStatement(String source) {
+        if (source == null || source.isBlank()) {
+            return false;
+        }
+        Boolean cached = STATEMENT_FLAGS.get(source);
+        if (cached != null) {
+            return cached;
+        }
+        boolean parsed;
+        try {
+            parsed = new Parser(source.trim()).assignmentStart();
+        } catch (RuntimeException malformed) {
+            parsed = false;
+        }
+        if (STATEMENT_FLAGS.size() > CACHE_LIMIT) {
+            STATEMENT_FLAGS.clear();
+        }
+        STATEMENT_FLAGS.put(source, parsed);
+        return parsed;
+    }
+
     private static boolean truthy(float value) {
         return !Float.isNaN(value) && value != 0.0F;
     }
@@ -83,6 +161,93 @@ public final class MolangExpression {
 
         Expr expression() {
             return ternary();
+        }
+
+        /** 逐条解析语句表；解不出来的一条跳到下一个分号，保证后面的语句还能跑。 */
+        List<Statement> program() {
+            List<Statement> statements = new ArrayList<>();
+            while (true) {
+                skipSpace();
+                while (peek(';')) {
+                    this.index++;
+                    skipSpace();
+                }
+                if (atEnd()) {
+                    return statements;
+                }
+                int start = this.index;
+                try {
+                    statements.add(statement());
+                    skipSpace();
+                    if (!atEnd() && !peek(';')) {
+                        throw new IllegalArgumentException("trailing text");
+                    }
+                } catch (RuntimeException broken) {
+                    this.index = start;
+                    while (this.index < this.text.length() && this.text.charAt(this.index) != ';') {
+                        this.index++;
+                    }
+                }
+            }
+        }
+
+        /** 只探「下一条语句是不是赋值」，给 {@link #isStatement} 分流通道串用。 */
+        boolean assignmentStart() {
+            // 作者常把一句说明串挂在语句前面（{@code '头发垂直';v.x=1}），跳过它再判
+            while (true) {
+                skipSpace();
+                char quote = peekChar();
+                if (quote != '\'' && quote != '"') {
+                    break;
+                }
+                text();
+                skipSpace();
+                if (peek(';')) {
+                    this.index++;
+                }
+            }
+            String name = identifierName();
+            if (name == null) {
+                return false;
+            }
+            skipSpace();
+            return peek('=') && !peek("==");
+        }
+
+        /** {@code v.x = expr} 是赋值，其余按纯表达式求值后丢弃。 */
+        private Statement statement() {
+            int start = this.index;
+            String target = identifierName();
+            if (target != null) {
+                skipSpace();
+                if (peek('=') && !peek("==")) {
+                    this.index++;
+                    Expr value = expression();
+                    return (animTime, lifeTime) -> MolangVariables.set(target, value.eval(animTime, lifeTime));
+                }
+            }
+            this.index = start;
+            Expr discarded = expression();
+            return (animTime, lifeTime) -> discarded.eval(animTime, lifeTime);
+        }
+
+        /** 只吃掉标识符本体（含命名空间的点），函数调用块留给后面的解析；不是标识符返回 null。 */
+        private String identifierName() {
+            skipSpace();
+            char first = peekChar();
+            if (!Character.isLetter(first) && first != '_') {
+                return null;
+            }
+            int start = this.index;
+            while (this.index < this.text.length()) {
+                char letter = this.text.charAt(this.index);
+                if (Character.isLetterOrDigit(letter) || letter == '_' || letter == '.') {
+                    this.index++;
+                } else {
+                    break;
+                }
+            }
+            return this.text.substring(start, this.index).toLowerCase(java.util.Locale.ROOT);
         }
 
         private Expr ternary() {
@@ -264,6 +429,9 @@ public final class MolangExpression {
             if (first == 0) {
                 throw new IllegalArgumentException("unexpected end");
             }
+            if (first == '\'' || first == '"') {
+                return text();
+            }
             if (Character.isDigit(first) || first == '.') {
                 return number();
             }
@@ -281,6 +449,29 @@ public final class MolangExpression {
             }
             float value = Float.parseFloat(this.text.substring(start, this.index));
             return (animTime, lifeTime) -> value;
+        }
+
+        /** 字符串字面量只当内建函数的实参（物理 key、骨骼名）用，本身求值为 0，名字由 {@link #literal} 取。 */
+        private Expr text() {
+            char quote = this.text.charAt(this.index);
+            this.index++;
+            int start = this.index;
+            while (this.index < this.text.length() && this.text.charAt(this.index) != quote) {
+                this.index++;
+            }
+            if (this.index >= this.text.length()) {
+                throw new IllegalArgumentException("unterminated string");
+            }
+            String value = this.text.substring(start, this.index);
+            this.index++;
+            return new Literal(value);
+        }
+
+        private record Literal(String text) implements Expr {
+            @Override
+            public float eval(float animTime, float lifeTime) {
+                return 0.0F;
+            }
         }
 
         private Expr identifier() {
@@ -372,18 +563,20 @@ public final class MolangExpression {
                 case "math.tan" -> {
                     return (animTime, lifeTime) -> (float) Math.tan(Math.toRadians(a.eval(animTime, lifeTime)));
                 }
+                // 反三角函数返回**弧度**：模型普遍写成 80*math.acos(x)/math.pi 这种「弧度除以 π 再缩放」的形式，
+                // 换成角度会让结果放大 57.3 倍，喂进弹簧直接发散。
                 case "math.asin" -> {
-                    return (animTime, lifeTime) -> (float) Math.toDegrees(Math.asin(a.eval(animTime, lifeTime)));
+                    return (animTime, lifeTime) -> (float) Math.asin(a.eval(animTime, lifeTime));
                 }
                 case "math.acos" -> {
-                    return (animTime, lifeTime) -> (float) Math.toDegrees(Math.acos(a.eval(animTime, lifeTime)));
+                    return (animTime, lifeTime) -> (float) Math.acos(a.eval(animTime, lifeTime));
                 }
                 case "math.atan" -> {
-                    return (animTime, lifeTime) -> (float) Math.toDegrees(Math.atan(a.eval(animTime, lifeTime)));
+                    return (animTime, lifeTime) -> (float) Math.atan(a.eval(animTime, lifeTime));
                 }
                 case "math.atan2" -> {
-                    return (animTime, lifeTime) -> (float) Math.toDegrees(
-                            Math.atan2(a.eval(animTime, lifeTime), b.eval(animTime, lifeTime)));
+                    return (animTime, lifeTime) -> (float) Math.atan2(
+                            a.eval(animTime, lifeTime), b.eval(animTime, lifeTime));
                 }
                 case "math.abs" -> {
                     return (animTime, lifeTime) -> Math.abs(a.eval(animTime, lifeTime));
@@ -435,6 +628,44 @@ public final class MolangExpression {
                         return t * t * (3.0F - 2.0F * t);
                     };
                 }
+                // 自然对数：SPM 的 math.ln 与 MoLang 的 math.log 同义
+                case "math.ln" -> {
+                    return (animTime, lifeTime) -> (float) Math.log(a.eval(animTime, lifeTime));
+                }
+                // YSM/SPM 的 math.random(min, max) 是闭区间随机；省参时取 [0,1)
+                case "math.random" -> {
+                    return (animTime, lifeTime) -> {
+                        if (arguments.size() < 2) {
+                            return java.util.concurrent.ThreadLocalRandom.current().nextFloat();
+                        }
+                        float low = a.eval(animTime, lifeTime);
+                        float high = b.eval(animTime, lifeTime);
+                        float min = Math.min(low, high);
+                        return min + java.util.concurrent.ThreadLocalRandom.current().nextFloat()
+                                * (Math.max(low, high) - min);
+                    };
+                }
+                case "query.position_delta" -> {
+                    return (animTime, lifeTime) -> MolangVariables.positionDelta(a.eval(animTime, lifeTime));
+                }
+                // YSM 的物理内建函数：首参是字符串 key（同名即同一个模拟器），其余是输入与弹簧参数
+                case "ysm.first_order" -> {
+                    String key = literal(arguments, 0);
+                    Expr input = argument(arguments, 1);
+                    Expr response = orOne(arguments, 2);
+                    return (animTime, lifeTime) -> ModelPhysics.firstOrder(
+                            key, input.eval(animTime, lifeTime), response.eval(animTime, lifeTime));
+                }
+                case "ysm.second_order" -> {
+                    String key = literal(arguments, 0);
+                    Expr input = argument(arguments, 1);
+                    Expr frequency = orOne(arguments, 2);
+                    Expr coefficient = orOne(arguments, 3);
+                    Expr response = orOne(arguments, 4);
+                    return (animTime, lifeTime) -> ModelPhysics.secondOrder(key, input.eval(animTime, lifeTime),
+                            frequency.eval(animTime, lifeTime), coefficient.eval(animTime, lifeTime),
+                            response.eval(animTime, lifeTime));
+                }
                 default -> {
                     return (animTime, lifeTime) -> UNKNOWN;
                 }
@@ -443,6 +674,17 @@ public final class MolangExpression {
 
         private static Expr argument(List<Expr> arguments, int index) {
             return index < arguments.size() ? arguments.get(index) : ZERO;
+        }
+
+        private static String literal(List<Expr> arguments, int index) {
+            return index < arguments.size() && arguments.get(index) instanceof Literal text
+                    ? text.text()
+                    : "";
+        }
+
+        /** 弹簧参数省掉时 YSM 取 1（{@code ModelBuiltins#physics}），不能跟着 {@link #argument} 取 0。 */
+        private static Expr orOne(List<Expr> arguments, int index) {
+            return index < arguments.size() ? arguments.get(index) : ONE;
         }
 
         private boolean peek(char expected) {
