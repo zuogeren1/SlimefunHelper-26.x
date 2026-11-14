@@ -36,8 +36,8 @@ public final class CustomModelManager {
      * 预览页专用的实例：与世界里那个分开，预览里播动作不会推进世界玩家的物理与控制器状态，
      * 也不会把选择写进配置。
      *
-     * <p>出图入口（实体提交 mixin）只认 {@link #runtime()}，没有别的上下文能区分「这是预览」，
-     * 所以预览期间由 {@link #runtime()} 让位给它，关闭时再换回来 —— 世界实例自始至终没被推进过。
+     * <p>预览期间由 {@link #runtime()} 让位给它，关闭时再换回来 —— 世界实例自始至终没被推进过。
+     * 世界玩家的出图走 {@link #worldRuntime()}，两者由实体提交 mixin 按渲染上下文分开。
      */
     private static volatile ModelRuntime previewRuntime;
     /** 已解析模型的元信息：文件 → {作者, tips}；只有加载过的模型才有，卡片 tooltip 用。 */
@@ -75,6 +75,17 @@ public final class CustomModelManager {
     public static ModelRuntime runtime() {
         ModelRuntime preview = previewRuntime;
         return preview != null ? preview : runtime;
+    }
+
+    /**
+     * 世界实例：预览页开着时 {@link #runtime()} 让位给预览实例，世界里的玩家必须继续用自己那份，
+     * 否则面板背后的角色会跟着播预览动作。
+     *
+     * <p>「这次出图是不是预览」由调用方按渲染上下文判断 —— 出图入口拿得到 {@code CameraRenderState}，
+     * 比在这里猜可靠。
+     */
+    public static ModelRuntime worldRuntime() {
+        return runtime;
     }
 
     public static ModelRuntime armRuntime() {

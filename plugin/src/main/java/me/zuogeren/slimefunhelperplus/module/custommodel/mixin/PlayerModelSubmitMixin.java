@@ -123,6 +123,9 @@ public abstract class PlayerModelSubmitMixin {
         // 从不经过 Camera#extractRenderState，initialized 恒为 false；世界里的实体拿的是
         // GameRenderer 每帧填好的那份，initialized 为 true。世界玩家必须继续用世界实例，
         // 否则面板背后的角色会跟着预览实例播动作。
+        //
+        // 不能用「预览页开着」这种全局标记：GUI 的实体出图是延迟的，paint 里只登记
+        // GuiEntityRenderState，真正出图在之后的 PiP 阶段，那时标记早已复位。
         boolean previewRender = camera != null && !camera.initialized;
         ModelRuntime runtime = previewRender ? CustomModelManager.runtime() : CustomModelManager.worldRuntime();
         if (runtime != null) {
