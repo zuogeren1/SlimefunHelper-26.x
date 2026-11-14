@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.utils.ClientUtils;
@@ -40,6 +41,9 @@ public class ModelRouletteScreen extends GenericScreen {
 
     /** 分类入口的标签后缀：一眼看出这一格是「进去」而不是「切换」。用 ASCII，自定义字体缺字也不会变方块。 */
     private static final String SUBMENU_MARK = " >";
+
+    /** 主轮盘圆心显示的目录名。 */
+    private static final String ROOT_LABEL = "根目录";
 
     /** 关掉再打开还停在上次的页；数据变了由 {@link #pageCount()} 夹回来。 */
     private static int rememberedPage;
@@ -110,10 +114,16 @@ public class ModelRouletteScreen extends GenericScreen {
      */
     private void buildSlots() {
         Map<String, String> categories = CustomModelManager.extraCategories();
+        // 根菜单里列过的动作留在根目录：SPM 的 extraAnimation 是根菜单、extraAnimationClassify 只是
+        // 子菜单表（UnifiedRouletteScreen:122-137），分类只给「额外的」动作提供入口。
+        // 按分类表无条件搬走会让根菜单里的动作凭空消失（樱羽艾玛的「名牌开关」）。
+        Set<String> rootKeys = CustomModelManager.rootExtraKeys();
         List<Slot> root = new ArrayList<>();
         Map<String, List<Slot>> groups = new LinkedHashMap<>();
         for (ModelRuntime.ExtraOption option : options) {
-            String group = option.variant() ? "" : categories.getOrDefault(option.key(), "");
+            String group = option.variant() || rootKeys.contains(option.key())
+                    ? ""
+                    : categories.getOrDefault(option.key(), "");
             if (option.variant() || group.isEmpty()) {
                 root.add(Slot.ofAction(option.key(), option.label(), option.variant()));
                 continue;
@@ -326,12 +336,14 @@ public class ModelRouletteScreen extends GenericScreen {
      * 子轮盘在圆心写分类名：轮盘中间本来就是空的，正好当面包屑，也提示这里能点回上一级。
      * 主轮盘不写 —— 那里要留给角色。
      */
+    /**
+     * 圆心显示**当前所在目录**，不是返回按钮：根目录写「根目录」，子轮盘写分类名。
+     *
+     * <p>返回走子轮盘末尾那一格（{@link Slot#ofBack()}），圆心只做指示。
+     */
     private void paintCenter(VDrawContext ctx) {
-        if (level == 0) {
-            return;
-        }
         int maxWidth = Math.max(20, Math.round(RouletteTheme.WHEEL_INNER_R * 2.0F * scale) - 8);
-        String text = Ef.ellipsis(openCategory, maxWidth);
+        String text = Ef.ellipsis(level == 0 ? ROOT_LABEL : openCategory, maxWidth);
         Ef.text(ctx, text, centerX - Ef.textWidth(text) / 2, centerY - Ef.lineH() / 2, RouletteTheme.TEXT_DIM);
     }
 

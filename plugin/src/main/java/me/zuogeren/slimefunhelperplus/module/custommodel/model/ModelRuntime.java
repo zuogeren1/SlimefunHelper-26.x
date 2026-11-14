@@ -185,6 +185,10 @@ public final class ModelRuntime {
     private final Matrix4f[] frameMatrices;
     private final Matrix3f[] frameNormals;
     private final byte[] frameState;
+    /** 父子链成环时的兜底矩阵：每帧每根环内骨骼都会取它，不能每次 new。 */
+    private final Matrix4f frameCycleGuard = new Matrix4f();
+    /** 缺法线的面用的默认法线（朝上），常量避免内层循环分配。 */
+    private static final float[] DEFAULT_FACE_NORMAL = {0.0F, 1.0F, 0.0F};
     private final float[] poses;
     /**
      * 上一帧结束时的姿态快照（布局同 {@link #poses}）。
@@ -1152,7 +1156,11 @@ public final class ModelRuntime {
      * 轮盘可选项：服装预设（主文件里的 {@code skirtN_original}，只含 scale/position，用来隐藏其它变体）
      * 在前，模型自带的额外动画（{@code animation-extra}，animType=3）在后。
      *
-     * <p>没有骨骼通道的动画（只有音效/锁定播放的占位）不列出来。返回默认服装预设的 key，没有则为空串。
+     * <p>没有骨骼通道、但**有 timeline 语句**的动画要列出来：嘴型差分 / 惊吓 / 名牌开关 / 骨翼开关
+     * 这类功能动作就是靠 timeline 写 {@code v.*} 变量驱动的，过滤掉会让轮盘只剩一半选项
+     * （樱羽艾玛 8 个 extra 里 4 个是这种）。真正空的占位（无骨骼也无语句）才跳过。
+     *
+     * <p>返回默认服装预设的 key，没有则为空串。
      */
     private static String collectExtras(RawYsmModel model, Map<String, RawYsmModel.RawAnimation> clips,
             List<ExtraOption> options) {
@@ -1170,7 +1178,7 @@ public final class ModelRuntime {
             }
             for (Map.Entry<String, RawYsmModel.RawAnimation> entry : file.animations.entrySet()) {
                 RawYsmModel.RawAnimation animation = entry.getValue();
-                if (animation == null || animation.boneAnimations == null || animation.boneAnimations.isEmpty()) {
+                if (animation == null || !hasContent(animation)) {
                     continue;
                 }
                 String name = entry.getKey();
@@ -1215,6 +1223,19 @@ public final class ModelRuntime {
             options.add(option);
         }
         return variants.isEmpty() ? "" : variants.get(0).getKey();
+    }
+
+    /**
+     * 片段有没有实际内容：骨骼通道或 timeline 语句任一非空即可。
+     *
+     * <p>只判骨骼会把功能型动作（嘴型/惊吓/开关类）整批漏掉 —— 它们只写 {@code v.*}，
+     * 由别的片段读走，本身一根骨都不动。
+     */
+    private static boolean hasContent(RawYsmModel.RawAnimation animation) {
+        if (animation.boneAnimations != null && !animation.boneAnimations.isEmpty()) {
+            return true;
+        }
+        return animation.timelineEvents != null && !animation.timelineEvents.isEmpty();
     }
 
     private static RawYsmModel.RawAnimation findAnimation(RawYsmModel model, String name) {
@@ -2709,7 +2730,9 @@ public final class ModelRuntime {
             return frameMatrices[index];
         }
         if (frameState[index] == 1) {
-            return new Matrix4f();
+            // 环保护：父子链成环时返回单位矩阵。走这条路的骨骼每帧都会命中，
+            // 每次 new 一个 Matrix4f 在 10 个模型同屏时是纯浪费，复用一块 scratch。
+            return frameCycleGuard.identity();
         }
         frameState[index] = 1;
         Matrix4f local = localOf(bones.get(index), poses, index * 9);
@@ -3261,6 +3284,8 @@ public final class ModelRuntime {
         int emitted = 0;
         Vector3f position = new Vector3f();
         Vector3f normal = new Vector3f();
+        // 缺法线的面用这个常量：原来在内层循环里 new float[3]，每帧上千次分配
+        float[] defaultNormal = DEFAULT_FACE_NORMAL;
         for (int i = 0; i < bones.size(); i++) {
             Matrix4f matrix = matrices[i];
             if (matrix == null) {
@@ -3284,7 +3309,7 @@ public final class ModelRuntime {
                     if (face.positions == null || face.u == null || face.v == null) {
                         continue;
                     }
-                    float[] faceNormal = face.normal == null ? new float[]{0.0F, 1.0F, 0.0F} : face.normal;
+                    float[] faceNormal = face.normal == null ? defaultNormal : face.normal;
                     normal.set(faceNormal[0], faceNormal[1], faceNormal[2]).mul(normalMatrix);
                     if (normal.lengthSquared() > 0.0F) {
                         normal.normalize();

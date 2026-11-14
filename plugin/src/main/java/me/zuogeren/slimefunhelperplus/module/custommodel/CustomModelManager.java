@@ -5,7 +5,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.crypto.YsmCrypt;
@@ -40,6 +42,14 @@ public final class CustomModelManager {
     private static volatile RawYsmModel loadedModel;
     /** 轮盘分组：额外动作键 → 分类名（{@code properties.extraAnimationClassifies}）；没有分类的模型为空表。 */
     private static volatile Map<String, String> extraCategories = Map.of();
+
+    /**
+     * 根菜单里直接列出的动作键。
+     *
+     * <p>这些动作即使同时出现在某个分类里，也要留在根目录：SPM 的 {@code extraAnimation} 是根菜单、
+     * {@code extraAnimationClassify} 只是子菜单表，分类只给「额外的」动作提供入口。
+     */
+    private static volatile Set<String> rootExtraKeys = Set.of();
     private static volatile boolean loadedHideProps;
 
     private static final String NO_EXTRA = "__none__";
@@ -70,6 +80,11 @@ public final class CustomModelManager {
     /** 轮盘分组表（动作键 → 分类名）；空表表示这个模型没有分类，轮盘按平铺显示。 */
     public static Map<String, String> extraCategories() {
         return extraCategories;
+    }
+
+    /** 根菜单里直接列出的动作键；轮盘据此决定哪些动作留在根目录。 */
+    public static Set<String> rootExtraKeys() {
+        return rootExtraKeys;
     }
 
     /** 轮盘点一条：同一项再点一次取消；服装与动作各自独立。 */
@@ -243,10 +258,20 @@ public final class CustomModelManager {
         for (Map.Entry<String, String> entry : extras.entrySet()) {
             labeled.put(entry.getKey(), labelOf(entry.getKey(), entry.getValue()));
         }
+        // 根菜单成员要在并分类之前记下来：并完之后分不清哪些是作者直接列的
+        Set<String> rootKeys = new LinkedHashSet<>();
+        for (String key : labeled.keySet()) {
+            if (key != null && !key.startsWith("#")) {
+                rootKeys.add(key);
+            }
+        }
+        rootExtraKeys = Set.copyOf(rootKeys);
         if (labeled.isEmpty()) {
             // 没有菜单的模型，轮盘会把 animType==3 的动画全列出来；先补上可读名，
             // 否则那一页是一排 extra0~extra7
             fillUnnamedExtras(model, labeled);
+            // 兜底列出的全部算根菜单成员
+            rootExtraKeys = Set.copyOf(labeled.keySet());
         }
         model.properties.extraAnimations = labeled;
         if (model.properties.extraAnimationClassifies == null
@@ -279,11 +304,9 @@ public final class CustomModelManager {
                 appendClassified(merged, categories, classify, groupNameOf(entry.getValue(), key.substring(1)));
             }
         }
-        // 作者只写了分类、根菜单里没有 #分类 标记的模型：整组追加到末尾，顺序照分类声明
-        for (Map.Entry<String, RawYsmModel.ExtraAnimationClassify> entry : byId.entrySet()) {
-            String id = entry.getKey();
-            appendClassified(merged, categories, entry.getValue(), groupNameOf(labeled.get("#" + id), id));
-        }
+        // 分类只在根菜单写了对应的 #id 标记时才成立：SPM 的 extraAnimation 是根菜单、
+        // extraAnimationClassify 只是子菜单表（UnifiedRouletteScreen:122-137），没有标记就没有入口，
+        // 那个分类整组不出现。作者写了 id 却忘了在根菜单留标记时，补入口等于凭空多一个目录。
         model.properties.extraAnimations = merged;
         return Map.copyOf(categories);
     }
