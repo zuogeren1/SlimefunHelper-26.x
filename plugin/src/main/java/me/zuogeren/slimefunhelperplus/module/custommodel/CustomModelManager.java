@@ -3,6 +3,7 @@ package me.zuogeren.slimefunhelperplus.module.custommodel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.LinkedHashSet;
@@ -31,6 +32,16 @@ public final class CustomModelManager {
     private static volatile ModelRuntime runtime;
     /** 第一人称手臂（{@code mainEntity.armModel}）；模型没有手部几何时是 null。 */
     private static volatile ModelRuntime armRuntime;
+    /**
+     * 预览页专用的实例：与世界里那个分开，预览里播动作不会推进世界玩家的物理与控制器状态，
+     * 也不会把选择写进配置。
+     *
+     * <p>出图入口（实体提交 mixin）只认 {@link #runtime()}，没有别的上下文能区分「这是预览」，
+     * 所以预览期间由 {@link #runtime()} 让位给它，关闭时再换回来 —— 世界实例自始至终没被推进过。
+     */
+    private static volatile ModelRuntime previewRuntime;
+    /** 已解析模型的元信息：文件 → {作者, tips}；只有加载过的模型才有，卡片 tooltip 用。 */
+    private static volatile Map<String, String[]> metadata = Map.of();
     private static volatile String loadedFile = "";
     /** 轮盘选择：服装预设与额外动作各记一份；空串 = 没选（新模型自动用默认服装）。 */
     private static volatile String selectedVariant = "";
@@ -62,11 +73,57 @@ public final class CustomModelManager {
     private CustomModelManager() {}
 
     public static ModelRuntime runtime() {
-        return runtime;
+        ModelRuntime preview = previewRuntime;
+        return preview != null ? preview : runtime;
     }
 
     public static ModelRuntime armRuntime() {
         return armRuntime;
+    }
+
+    /** 预览实例是否就绪；没就绪时预览页不该把动作落到世界实例上。 */
+    public static boolean previewActive() {
+        return previewRuntime != null;
+    }
+
+    /**
+     * 为预览页建一个独立实例。
+     *
+     * <p>几何与贴图都取自当前模型，所以预览看到的外观与世界一致；服装预设照搬，动作留空由预览页自己点。
+     * 必须在渲染线程调用（{@link ModelRuntime#build} 会注册贴图）。
+     */
+    public static void beginPreview() {
+        if (previewRuntime != null) {
+            return;
+        }
+        RawYsmModel model = loadedModel;
+        ModelRuntime world = runtime;
+        if (model == null || world == null) {
+            return;
+        }
+        ModelRuntime built = ModelRuntime.build(model, world.texture(), loadedHideProps);
+        if (built == null) {
+            return;
+        }
+        built.setVariant(world.activeVariantKey());
+        if (built.activeVariantKey().isEmpty()) {
+            built.setVariant(built.defaultVariantKey());
+        }
+        previewRuntime = built;
+    }
+
+    /** 预览页关闭：丢掉预览实例，世界实例的状态自始至终没被推进过。 */
+    public static void endPreview() {
+        ModelRuntime preview = previewRuntime;
+        previewRuntime = null;
+        if (preview != null) {
+            preview.release();
+        }
+    }
+
+    /** 已解析模型的 {作者, tips}；没加载过这个模型时返回 {@code null}。 */
+    public static String[] metadataOf(String file) {
+        return file == null ? null : metadata.get(file);
     }
 
     public static String loadedFile() {
@@ -118,6 +175,11 @@ public final class CustomModelManager {
         ModelTexture.releaseAll();
         runtime = null;
         armRuntime = null;
+        ModelRuntime preview = previewRuntime;
+        previewRuntime = null;
+        if (preview != null) {
+            preview.release();
+        }
         loadedFile = "";
         selectedVariant = "";
         selectedExtra = "";
@@ -219,10 +281,17 @@ public final class CustomModelManager {
         }
         loadedFile = loaded == null ? "" : fileName;
         loadedModel = loaded == null ? null : model;
+        rememberMetadata(fileName, model.metadata);
         loadedHideProps = hideUnreferenced;
         textureSources = loaded == null ? Map.of() : textures;
         extraCategories = loaded == null ? Map.of() : categories;
         activeTexture = loaded == null ? "" : defaultName;
+        // 换模型会释放旧贴图，预览实例持有的那张随之失效：丢掉它，预览页下一帧按新模型重建
+        ModelRuntime stalePreview = previewRuntime;
+        previewRuntime = null;
+        if (stalePreview != null) {
+            stalePreview.release();
+        }
         if (loaded == null) {
             Debug.info("[SFH+] 模型加载失败（几何为空或贴图不可用）: " + fileName);
         } else {
@@ -401,6 +470,33 @@ public final class CustomModelManager {
                 selectedExtra = extra;
             }
         }
+    }
+
+    /**
+     * 记下模型的作者与 tips：卡片 tooltip 要显示它们，而元信息只有反序列化之后才有。
+     *
+     * <p>按文件缓存而不是只留当前模型：切走再切回来时不必重新解析就能显示。
+     */
+    private static void rememberMetadata(String file, RawYsmModel.RawMetadata meta) {
+        if (file == null || file.isEmpty() || meta == null) {
+            return;
+        }
+        StringBuilder authors = new StringBuilder();
+        if (meta.authors != null) {
+            for (RawYsmModel.RawMetadata.Author author : meta.authors) {
+                if (author == null || author.name == null || author.name.isBlank()) {
+                    continue;
+                }
+                if (authors.length() > 0) {
+                    authors.append(" / ");
+                }
+                authors.append(ModelCatalog.stripFormatting(author.name).trim());
+            }
+        }
+        String tips = meta.tips == null ? "" : ModelCatalog.stripFormatting(meta.tips).trim();
+        Map<String, String[]> next = new HashMap<>(metadata);
+        next.put(file, new String[]{authors.toString(), tips});
+        metadata = Map.copyOf(next);
     }
 
     /** 读这个模型上次的选择；没有记录返回两个空串。同一个模型出现多条时以最后一条为准。 */

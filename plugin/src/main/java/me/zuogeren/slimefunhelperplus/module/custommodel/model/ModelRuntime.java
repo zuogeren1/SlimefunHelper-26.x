@@ -302,6 +302,8 @@ public final class ModelRuntime {
     private RawYsmModel.RawAnimation activeExtra;
     private String activeExtraKey = "";
     private float activeExtraStart = Float.NaN;
+    /** 额外动作是否单次播放（预览页用）；循环语义下末帧永远播不到。 */
+    private boolean extraOnce;
     private boolean frameValid;
     private boolean logged;
     /** 手臂模型专用：每根骨骼的根、根 pivot 的 X（用来分左右手）；主模型上是 null。 */
@@ -1303,6 +1305,26 @@ public final class ModelRuntime {
         }
         activeExtra = clip;
         activeExtraKey = clip == null ? "" : wanted;
+        extraOnce = false;
+        recomputeHidden();
+    }
+
+    /**
+     * 预览页播一个动作：从头播一次，播完停在末帧。
+     *
+     * <p>与 {@link #setExtra(String)} 的差别只在时间取模方式 —— 循环语义下末帧永远播不到，
+     * 而预览要看的正是收尾姿势。重复点同一个动作会重新起算，方便反复看。
+     */
+    public void playExtraOnce(String key) {
+        String wanted = key == null ? "" : key;
+        RawYsmModel.RawAnimation clip = wanted.isEmpty() ? null : extraClips.get(wanted);
+        if (clip == null) {
+            return;
+        }
+        activeExtra = clip;
+        activeExtraKey = wanted;
+        extraOnce = true;
+        activeExtraStart = Float.NaN;
         recomputeHidden();
     }
 
@@ -1325,6 +1347,7 @@ public final class ModelRuntime {
         activeExtra = null;
         activeExtraKey = "";
         activeExtraStart = Float.NaN;
+        extraOnce = false;
         recomputeHidden();
     }
 
@@ -1443,7 +1466,8 @@ public final class ModelRuntime {
             return 0.0F;
         }
         float elapsed = Math.max(0.0F, ageSeconds - activeExtraStart);
-        return elapsed % length;
+        // 单次动作播完停在末帧：取模会让末帧永远播不到
+        return extraOnce ? Math.min(elapsed, length) : elapsed % length;
     }
 
     /**
@@ -2346,10 +2370,15 @@ public final class ModelRuntime {
     }
 
     /**
-     * 定位组里第 {@code index} 根骨的挂点矩阵：{@code 骨骼矩阵 · translate(pivot)}。
+     * 定位组里第 {@code index} 根骨的挂点矩阵。
      *
-     * <p>与 YSM {@code GeoModelState#visitLocatorGroup:154-162} 同形 —— 先乘骨骼的世界矩阵，
-     * 再平移到该骨的 pivot（模型空间单位是 1/16 格）。组不存在或下标越界返回 {@code null}。
+     * <p><b>不要再平移 pivot</b>：{@link #localOf} 算骨骼局部矩阵时是
+     * {@code translate(pivot) · rot · scale · translate(-pivot)}，净效果已经把骨骼原点挪到了 pivot 上。
+     * 再 translate 一次等于把挂点推高一个 pivot —— 鞘翅「偏上」就是这么来的。
+     *
+     * <p>SPM 的 {@code prepMatrixForLocator} 对末骨确实会 {@code translateToPivotPoint}，但那是配着
+     * {@code prepMatrixForBone} 里的 {@code translateAwayFromPivotPoint} 用的；我们的 {@code localOf}
+     * 已经抵消过，语义不同。
      */
     public Matrix4f locatorMatrix(String locator, int index) {
         int[] group = locatorGroups.get(locator);
@@ -2357,10 +2386,7 @@ public final class ModelRuntime {
             return null;
         }
         int bone = group[index];
-        Matrix4f matrix = new Matrix4f(frameValid ? frameMatrices[bone] : restMatrices[bone]);
-        float[] pivot = bones.get(bone).pivot;
-        matrix.translate(pivot[0] / 16.0F, pivot[1] / 16.0F, pivot[2] / 16.0F);
-        return matrix;
+        return new Matrix4f(frameValid ? frameMatrices[bone] : restMatrices[bone]);
     }
 
     /**

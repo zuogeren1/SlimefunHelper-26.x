@@ -67,10 +67,6 @@ public class ModelPickerScreen extends GenericScreen {
     private static final int SEARCH_W = 140;
     private static final int SEARCH_H = 16;
 
-    private static final int CAT_SIZE = 18;
-    private static final int CAT_Y = 5;
-    private static final int[] CAT_X = {288, 308, 328};
-
     private static final int CARD_W = 52;
     private static final int CARD_H = 90;
     private static final int CARD_GAP_X = 3;
@@ -99,7 +95,6 @@ public class ModelPickerScreen extends GenericScreen {
     private static final int HOVER_NONE = 0;
     private static final int HOVER_GEAR = 1;
     private static final int HOVER_TEX = 2;
-    private static final int HOVER_CAT = 3;
     private static final int HOVER_PREV = 6;
     private static final int HOVER_NEXT = 7;
     private static final int HOVER_CARD = 10;
@@ -239,6 +234,7 @@ public class ModelPickerScreen extends GenericScreen {
         paintCards(ctx, px, py);
         paintPager(ctx, px, py);
         paintFooter(ctx, px, py);
+        paintCardTooltip(ctx, mouseX, mouseY);
     }
 
     private void paintPreview(VDrawContext ctx, int px, int py) {
@@ -302,25 +298,6 @@ public class ModelPickerScreen extends GenericScreen {
         int sy = py + SEARCH_Y;
         // 框体自己画，字交给 EditBox：占位提示也由它画，这里不再补一遍
         Ef.cutFill(ctx, sx, sy, SEARCH_W, SEARCH_H, pal.chip(), Ef.CUT, Ef.Corner.BR);
-
-        // 单字标签：18px 的方块放不下两个字，图标资源又没有现成的，用汉字最稳
-        String[] labels = {"收", "权", "全"};
-        for (int i = 0; i < CAT_X.length; i++) {
-            int cx = px + CAT_X[i];
-            int cy = py + CAT_Y;
-            boolean on = i == 2;
-            boolean hot = hovered == HOVER_CAT + i;
-            float wipe = hot ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
-            int base = on ? Ef.SIGNAL : pal.chip();
-            if (hot && !on) {
-                Ef.wipeCut(ctx, cx, cy, CAT_SIZE, CAT_SIZE, base, Ef.SIGNAL, wipe, Ef.CUT, Ef.Corner.BR);
-            } else {
-                Ef.cutFill(ctx, cx, cy, CAT_SIZE, CAT_SIZE, base, Ef.CUT, Ef.Corner.BR);
-            }
-            int catInk = on || hot ? Ef.ON_SIGNAL : 0xFF5C5C5C;
-            Ef.text(ctx, labels[i], cx + (CAT_SIZE - Ef.textWidth(labels[i])) / 2,
-                    cy + (CAT_SIZE - Ef.lineH()) / 2, catInk);
-        }
     }
 
     private void paintCards(VDrawContext ctx, int px, int py) {
@@ -401,6 +378,35 @@ public class ModelPickerScreen extends GenericScreen {
     private void paintFooter(VDrawContext ctx, int px, int py) {
         String count = view.size() + " 个模型";
         Ef.text(ctx, count, px + 2, py + PANEL_H - 9, 0xFF5C5C5C);
+    }
+
+    /**
+     * 卡片悬停说明：模型名、作者、作者写的 tips。
+     *
+     * <p>作者与 tips 只有解析过的模型才有（元信息在反序列化之后才存在），没解析过的只显示名字 ——
+     * 为了一个 tooltip 去解析整页模型不划算。
+     */
+    private void paintCardTooltip(VDrawContext ctx, int mouseX, int mouseY) {
+        if (hovered < HOVER_CARD) {
+            return;
+        }
+        int index = page * PER_PAGE + (hovered - HOVER_CARD);
+        if (index < 0 || index >= view.size()) {
+            return;
+        }
+        String file = view.get(index);
+        List<String> lines = new ArrayList<>();
+        lines.add(ModelCatalog.displayName(file));
+        String[] meta = CustomModelManager.metadataOf(file);
+        if (meta != null) {
+            if (!meta[0].isEmpty()) {
+                lines.add("作者 " + meta[0]);
+            }
+            if (!meta[1].isEmpty()) {
+                lines.addAll(Ef.wrap(meta[1], 180));
+            }
+        }
+        Ef.tooltip(ctx, pal, lines, mouseX, mouseY, this.width, this.height);
     }
 
     // ------------------------------------------------------------------ 3D 预览
@@ -516,17 +522,9 @@ public class ModelPickerScreen extends GenericScreen {
             } else if (inside(mx, my, NEXT_X, PG_Y, PG_W, PG_H)) {
                 next = HOVER_NEXT;
             } else {
-                for (int i = 0; i < CAT_X.length; i++) {
-                    if (inside(mx, my, CAT_X[i], CAT_Y, CAT_SIZE, CAT_SIZE)) {
-                        next = HOVER_CAT + i;
-                        break;
-                    }
-                }
-                if (next == HOVER_NONE) {
-                    int card = cardAt(mx, my);
-                    if (card >= 0) {
-                        next = HOVER_CARD + (card - page * PER_PAGE);
-                    }
+                int card = cardAt(mx, my);
+                if (card >= 0) {
+                    next = HOVER_CARD + (card - page * PER_PAGE);
                 }
             }
         }

@@ -25,8 +25,11 @@ import net.minecraft.network.chat.Component;
  * <p>从模型选择页的齿轮进来，返回（按钮或 Esc）回到模型选择页 —— 父屏由
  * {@link ScreenAccess#openFromCurrent()} 记下，所以这里只管调 {@code onClose()}。
  *
- * <p>动作列表直接取 {@link ModelRuntime#extras()}：服装预设与额外动作都在里面，点一下切换、再点取消，
- * 与轮盘同一套语义（{@link CustomModelManager#selectExtra(String)}）。
+ * <p>动作列表直接取 {@link ModelRuntime#extras()}：服装预设与额外动作都在里面。动作点一下从头播一次、
+ * 播完停在末帧（{@link ModelRuntime#playExtraOnce(String)}）；服装预设是静态覆盖层，点一下切换。
+ *
+ * <p>预览跑在 {@link CustomModelManager#beginPreview()} 建出来的独立实例上：世界里的玩家有自己的
+ * 物理与控制器状态，预览里播动作不会推进它，关掉页面也不会留下选择。
  */
 public class ActionPreviewScreen extends GenericScreen {
 
@@ -105,6 +108,14 @@ public class ActionPreviewScreen extends GenericScreen {
         this.y = 0;
         this.panelX = Math.max(0, (this.width - PANEL_W) / 2);
         this.panelY = Math.max(0, (this.height - PANEL_H) / 2);
+        CustomModelManager.beginPreview();
+    }
+
+    /** 关页时丢掉预览实例：世界实例的状态自始至终没被推进过，不需要还原。 */
+    @Override
+    public void removed() {
+        CustomModelManager.endPreview();
+        super.removed();
     }
 
     @Override
@@ -137,6 +148,10 @@ public class ActionPreviewScreen extends GenericScreen {
     // ------------------------------------------------------------------ 绘制
 
     private void paint(EfWidget self, VDrawContext ctx, int mouseX, int mouseY) {
+        // 模型可能在页面开着时被换掉（配置重载），预览实例跟着重建，否则预览会停在旧模型上
+        if (!CustomModelManager.previewActive()) {
+            CustomModelManager.beginPreview();
+        }
         Ef.fill(ctx, 0, 0, this.width, this.height, VEIL);
         updateHover(mouseX, mouseY);
         int px = panelX;
@@ -164,7 +179,7 @@ public class ActionPreviewScreen extends GenericScreen {
         Ef.text(ctx, Ef.ellipsis(name, 200), sx + 8, sy + 7, pal.ink());
 
         ModelRuntime runtime = CustomModelManager.runtime();
-        String badge = runtime == null ? "-" : "循环";
+        String badge = runtime == null ? "-" : "单次";
         Ef.fill(ctx, sx + STAGE_W - 8 - 3, sy + 10, 3, 3, Ef.SIGNAL);
         Ef.text(ctx, badge, sx + STAGE_W - 8 - 3 - 4 - Ef.textWidth(badge), sy + 7, pal.ink2());
 
@@ -395,10 +410,27 @@ public class ActionPreviewScreen extends GenericScreen {
         }
         int row = rowAt(mx, my);
         if (row >= 0) {
-            CustomModelManager.selectExtra(options().get(row).key());
+            play(options().get(row));
             return true;
         }
         return false;
+    }
+
+    /**
+     * 点一条动作：在预览实例上从头播一次。
+     *
+     * <p>预览实例没建起来（模型没加载）时什么都不做 —— 落到世界实例上就等于把预览的选择带进世界。
+     */
+    private void play(ModelRuntime.ExtraOption option) {
+        ModelRuntime runtime = CustomModelManager.runtime();
+        if (runtime == null || !CustomModelManager.previewActive()) {
+            return;
+        }
+        if (option.variant()) {
+            runtime.setVariant(option.key());
+        } else {
+            runtime.playExtraOnce(option.key());
+        }
     }
 
     private void turnPage(int step) {
