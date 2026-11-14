@@ -320,8 +320,11 @@ public abstract class PlayerModelSubmitMixin {
      * 鞘翅：{@code WingsLayer} 的等价物。
      *
      * <p>原版把翅膀挂在 {@code translate(0, 0, 0.125)} 之后，YSM 挂在 {@code ElytraLocator} 上并额外
-     * {@code translate(0, 1.5, 0) · rotZ(180°) · scale(2)}。有定位组时用后者（作者按模型体型摆过位置），
-     * 没有时退回原版偏移，至少滑翔时有翅膀。
+     * {@code translate(0, 1.5, 0) · rotZ(180°) · scale(2)}。
+     *
+     * <p><b>没有 {@code ElytraLocator} 就不画</b>：YSM 的 {@code CustomPlayerElytraLayer} 走的是
+     * {@code visitLocatorGroup}（不是 {@code OrDefault}），空组时回调根本不触发。退回原版偏移会把
+     * 一对倒着的原版翅膀糊在模型背后 —— 模型作者没摆过挂点，那个位置本来就没有翅膀。
      */
     private static void renderElytra(ModelRuntime runtime, AvatarRenderState avatar, LocalPlayer player,
             PoseStack poseStack, SubmitNodeCollector collector, int light, EntityModelSet models) {
@@ -334,10 +337,6 @@ public abstract class PlayerModelSubmitMixin {
         Identifier texture = elytraTexture(avatar);
         int count = runtime.locatorGroupSize("ElytraLocator");
         if (count == 0) {
-            poseStack.pushPose();
-            poseStack.translate(0.0F, 0.0F, 0.125F);
-            submitModel(collector, model, avatar, poseStack, texture, light);
-            poseStack.popPose();
             return;
         }
         for (int i = 0; i < count; i++) {

@@ -124,7 +124,19 @@ java {
 	targetCompatibility = JavaVersion.VERSION_25
 }
 
-// 不加 classifier：普通 jar 就是最终插件产物（空骨架阶段没有需要 shadow 的依赖）。
+// 不加 classifier：普通 jar 就是最终插件产物。
+//
+// ImageStream（WebP/AVIF 解码器）必须**解包进 jar**：`implementation` 只进编译类路径，
+// 运行时 Fabric Loader 不会替插件解析传递依赖，缺了就是 NoClassDefFoundError。
+// 它没有嵌套依赖，直接 zipTree 展开即可，不需要 shadow。
+configurations {
+	imageStream
+}
+
+dependencies {
+	imageStream 'com.github.TartaricAlkaline:ImageStream:-SNAPSHOT'
+}
+
 jar {
 	// 与宿主一致地带上 LICENSE 的副本（没有该文件时 Gradle 会跳过）
 	def license = rootProject.file('../LICENSE')
@@ -133,5 +145,9 @@ jar {
 		from(license) {
 			rename { "${it}_${licenseSuffix}" }
 		}
+	}
+	// 解码器类打进产物；排除签名与模块描述，避免与 jar 自身冲突
+	from({ configurations.imageStream.collect { zipTree(it) } }) {
+		exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/MANIFEST.MF', 'module-info.class'
 	}
 }
