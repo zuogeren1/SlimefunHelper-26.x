@@ -2624,6 +2624,17 @@ public final class ModelRuntime {
             }
             float span = next.timestamp - current.timestamp;
             float t = span <= 0.0F ? 0.0F : (time - current.timestamp) / span;
+            if (current.interpolationMode == RawYsmModel.RawKeyframe.INTERPOLATION_CATMULLROM) {
+                // 段两端各多取一个控制点；越界时用端点自身（SPM 的 Math.max(0, i-2) / Math.min(size-1, i+1)）
+                float[] left = valuesOf(postOf(frames.get(Math.max(0, i - 1))), time, lifeTime);
+                float[] right = valuesOf(preOf(frames.get(Math.min(last, i + 2))), time, lifeTime);
+                if (left != null && right != null) {
+                    return new float[]{
+                            catmullRom(t, left[0], a[0], b[0], right[0]),
+                            catmullRom(t, left[1], a[1], b[1], right[1]),
+                            catmullRom(t, left[2], a[2], b[2], right[2])};
+                }
+            }
             return new float[]{
                     a[0] + (b[0] - a[0]) * t,
                     a[1] + (b[1] - a[1]) * t,
@@ -2635,6 +2646,27 @@ public final class ModelRuntime {
     /** 关键帧的「段起点值」：没有 preData 时与 post 相同（SPM 的 {@code contiguous}）。 */
     private static Object[] preOf(RawYsmModel.RawKeyframe frame) {
         return frame.hasPreData ? frame.preData : frame.postData;
+    }
+
+    /** 关键帧的「帧点值」：到帧点后跳到 post。 */
+    private static Object[] postOf(RawYsmModel.RawKeyframe frame) {
+        return frame.postData;
+    }
+
+    /**
+     * Catmull-Rom 插值（SPM {@code MathUtil.catmullRom} 同形）。
+     *
+     * <p>用左右两个邻居控制切线，比线性插值多一次导数连续 —— 走跑、裙摆、头发这类
+     * 关键帧密集的通道，线性插值会在每个帧点留下折角。
+     */
+    private static float catmullRom(float t, float left, float begin, float end, float right) {
+        float v0 = (end - left) * 0.5F;
+        float v1 = (right - begin) * 0.5F;
+        float t2 = t * t;
+        float t3 = t2 * t;
+        return (2.0F * begin - 2.0F * end + v0 + v1) * t3
+                + (-3.0F * begin + 3.0F * end - 2.0F * v0 - v1) * t2
+                + v0 * t + begin;
     }
 
     private static float[] valuesOf(Object[] values, float time, float lifeTime) {
