@@ -28,6 +28,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.Pose;
 import org.joml.Matrix3f;
+import org.joml.Quaternionf;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
@@ -230,6 +231,21 @@ public final class ModelRuntime {
      * {@code pre_parallel} 藏道具用的 {@code scale=0} 一起抹成 1。
      */
     private final byte[] blendChannels;
+    /** 控制器状态切换时的过渡暂存：切换那一帧的姿态快照 + 起点 + 时长。 */
+    private final Map<ModelController, ControllerTransition> transitions = new HashMap<>();
+    /** 旋转过渡用的四元数暂存（SPM 的 {@code nlerpEulerAngles} 同形）。 */
+    private final Quaternionf blendQuatA = new Quaternionf();
+    private final Quaternionf blendQuatB = new Quaternionf();
+    private final Vector3f blendEuler = new Vector3f();
+
+    /** 一个控制器最近一次状态切换的过渡窗口；{@code from == null} 表示当前没有过渡。 */
+    private static final class ControllerTransition {
+        private float[] from;
+        private ModelController.Blend blend = ModelController.Blend.NONE;
+        private float start;
+        private float lastStateStart = Float.NaN;
+    }
+
     /** {@link #bonePivotAbs} 的累乘暂存，避免每次查询都新建矩阵。 */
     private final Matrix4f pivotAbsScratch = new Matrix4f();
 
@@ -1270,6 +1286,9 @@ public final class ModelRuntime {
         for (ModelController controller : layer) {
             List<String> overlayNames = controller.tick(ageSeconds, this::lengthOfClip);
             if (!overlayNames.isEmpty()) {
+                // 状态切换那一帧把切换前的姿态存下来，之后按目标状态的 blend_transition 淡过去。
+                // 放在这里而不是 tick 之后：空状态不产生姿态，没有「旧姿态」可混。
+                ControllerTransition transition = trackTransition(controller, ageSeconds);
                 float elapsed = Math.max(0.0F, ageSeconds - controller.stateStart());
                 java.util.Arrays.fill(blendChannels, (byte) 0);
                 boolean blended = false;
@@ -1289,7 +1308,7 @@ public final class ModelRuntime {
                     accumulateBlend(overlayClip, overlayTime, ageSeconds);
                 }
                 if (blended) {
-                    applyBlend();
+                    applyBlend(transition, ageSeconds);
                 }
             }
             controller.finishFrame();
@@ -1376,7 +1395,11 @@ public final class ModelRuntime {
      * {@code PlayerControllerCollection:73} 那个带 {@code blendRotation=true} 的控制器，
      * 走 {@link #sampleLayers} 的 {@code override=false}（相加）。
      */
-    private void applyBlend() {
+    private void applyBlend(ControllerTransition transition, float ageSeconds) {
+        float weight = 1.0F;
+        if (transition != null) {
+            weight = transition.blend.weight(Math.max(0.0F, ageSeconds - transition.start));
+        }
         for (int i = 0; i < bones.size(); i++) {
             byte channels = blendChannels[i];
             if (channels == 0) {
@@ -1384,22 +1407,121 @@ public final class ModelRuntime {
             }
             int offset = i * 9;
             if ((channels & ROTATION) != 0) {
-                poses[offset] = blendPose[offset];
-                poses[offset + 1] = blendPose[offset + 1];
-                poses[offset + 2] = blendPose[offset + 2];
+                if (transition == null) {
+                    poses[offset] = blendPose[offset];
+                    poses[offset + 1] = blendPose[offset + 1];
+                    poses[offset + 2] = blendPose[offset + 2];
+                } else {
+                    blendRotation(weight, transition.from, blendPose, offset, bones.get(i).rotation);
+                }
             }
             if ((channels & POSITION) != 0) {
-                poses[offset + 3] = blendPose[offset + 3];
-                poses[offset + 4] = blendPose[offset + 4];
-                poses[offset + 5] = blendPose[offset + 5];
+                if (transition == null) {
+                    poses[offset + 3] = blendPose[offset + 3];
+                    poses[offset + 4] = blendPose[offset + 4];
+                    poses[offset + 5] = blendPose[offset + 5];
+                } else {
+                    poses[offset + 3] = lerp(weight, transition.from[offset + 3], blendPose[offset + 3]);
+                    poses[offset + 4] = lerp(weight, transition.from[offset + 4], blendPose[offset + 4]);
+                    poses[offset + 5] = lerp(weight, transition.from[offset + 5], blendPose[offset + 5]);
+                }
             }
             if ((channels & SCALE) != 0) {
-                poses[offset + 6] = blendPose[offset + 6];
-                poses[offset + 7] = blendPose[offset + 7];
-                poses[offset + 8] = blendPose[offset + 8];
+                if (transition == null) {
+                    poses[offset + 6] = blendPose[offset + 6];
+                    poses[offset + 7] = blendPose[offset + 7];
+                    poses[offset + 8] = blendPose[offset + 8];
+                } else {
+                    poses[offset + 6] = lerp(weight, transition.from[offset + 6], blendPose[offset + 6]);
+                    poses[offset + 7] = lerp(weight, transition.from[offset + 7], blendPose[offset + 7]);
+                    poses[offset + 8] = lerp(weight, transition.from[offset + 8], blendPose[offset + 8]);
+                }
             }
             markDriven(i);
         }
+    }
+
+    /**
+     * 记下控制器最近一次状态切换的过渡窗口。
+     *
+     * <p>过渡挂在**目标状态**上（SPM {@code AnimationControllerRuntime:326} 用
+     * {@code nextState.getBlendTransition()} 覆盖槽位插值器），所以起点姿态取切换那一帧、
+     * 本控制器还没叠上去之前的 {@link #poses} —— 那正是「旧姿态」。
+     *
+     * <p>首帧进入不算切换（没有「从哪来」），{@code ModelController#lastBlend} 那时也返回
+     * {@link ModelController.Blend#NONE}；未声明过渡或时长为 0 时同样硬切。
+     */
+    private ControllerTransition trackTransition(ModelController controller, float ageSeconds) {
+        ControllerTransition transition = transitions.get(controller);
+        if (transition == null) {
+            transition = new ControllerTransition();
+            transitions.put(controller, transition);
+        }
+        float stateStart = controller.stateStart();
+        if (transition.lastStateStart != stateStart) {
+            boolean first = !Float.isFinite(transition.lastStateStart);
+            transition.lastStateStart = stateStart;
+            ModelController.Blend blend = controller.lastBlend();
+            if (first || !blend.declared() || blend.seconds() <= 0.0F) {
+                transition.from = null;
+            } else {
+                if (transition.from == null || transition.from.length != poses.length) {
+                    transition.from = new float[poses.length];
+                }
+                System.arraycopy(poses, 0, transition.from, 0, poses.length);
+                transition.blend = blend;
+                transition.start = ageSeconds;
+            }
+        }
+        if (transition.from == null) {
+            return null;
+        }
+        if (ageSeconds - transition.start >= transition.blend.seconds()) {
+            transition.from = null;
+            return null;
+        }
+        return transition;
+    }
+
+    /**
+     * 旋转按四元数最短弧插值：欧拉角直接线性插值会在两轴同时转时走出一条外扩的弧。
+     *
+     * <p>与 SPM {@code MathUtil.nlerpEulerAngles} 同形 —— 先把 rest 旋转加回去换成四元数，
+     * 插完再减掉，因为 {@link #poses} 存的是动画空间的偏移量。
+     */
+    private void blendRotation(float weight, float[] from, float[] to, int offset, float[] initial) {
+        if (weight >= 1.0F) {
+            poses[offset] = to[offset];
+            poses[offset + 1] = to[offset + 1];
+            poses[offset + 2] = to[offset + 2];
+            return;
+        }
+        if (weight <= 0.0F) {
+            poses[offset] = from[offset];
+            poses[offset + 1] = from[offset + 1];
+            poses[offset + 2] = from[offset + 2];
+            return;
+        }
+        blendQuatA.identity().rotateZYX(from[offset + 2] + initial[2], from[offset + 1] + initial[1],
+                from[offset] + initial[0]);
+        blendQuatB.identity().rotateZYX(to[offset + 2] + initial[2], to[offset + 1] + initial[1],
+                to[offset] + initial[0]);
+        blendQuatA.nlerp(blendQuatB, weight);
+        eulerZYX(blendQuatA, blendEuler);
+        poses[offset] = blendEuler.x - initial[0];
+        poses[offset + 1] = blendEuler.y - initial[1];
+        poses[offset + 2] = blendEuler.z - initial[2];
+    }
+
+    /** 四元数 → ZYX 欧拉角（joml 自带的同名方法有 bug，SPM 也是自己写的）。 */
+    private static void eulerZYX(Quaternionf q, Vector3f out) {
+        out.x = (float) Math.atan2(q.y * q.z + q.w * q.x, 0.5F - q.x * q.x - q.y * q.y);
+        out.y = (float) Math.asin(Math.max(-1.0F, Math.min(1.0F, -2.0F * (q.x * q.z - q.w * q.y))));
+        out.z = (float) Math.atan2(q.x * q.y + q.w * q.z, 0.5F - q.y * q.y - q.z * q.z);
+    }
+
+    private static float lerp(float weight, float from, float to) {
+        return from + (to - from) * weight;
     }
 
     /**
