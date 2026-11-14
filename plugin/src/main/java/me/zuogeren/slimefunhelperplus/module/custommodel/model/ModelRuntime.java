@@ -79,7 +79,14 @@ public final class ModelRuntime {
     private static final String[] SWING_MAIN = {"swing_hand", "swing"};
     private static final String[] SWING_OFF = {"swing_offhand"};
     private static final String[] JUMP = {"jump"};
-    private static final String[] FP_ARM = {"fp_arm", "arm", "idle", "empty"};
+    /**
+     * 第一人称手臂的片段名。
+     *
+     * <p>只有 {@code fp_arm}：YSM 的 {@code ExpressionSet.FP_ARM} 只收 animType=11 那一个文件，
+     * {@code arm}（animType=2）归 {@code ExpressionSet.MAIN}，是第三人称的手部条件层。
+     * 语料里 {@code arm}/{@code idle}/{@code empty} 作为片段名 0 命中，留着只会误命中。
+     */
+    private static final String[] FP_ARM = {"fp_arm"};
 
     /** 只播一次的状态；其余主状态按 YSM 的 {@code playLoopAnimation} 语义一律循环。 */
     private static final Set<String> ONE_SHOT = Set.of("death", "attacked");
@@ -630,22 +637,20 @@ public final class ModelRuntime {
                 parallelCount++;
             }
         }
-        // 控制器槽名与片段名差一个下划线（player.parallel_6 驱动 parallel6），先换算成片段名
-        Set<String> driven = new HashSet<>();
-        for (ModelController controller : runtime.controllers) {
-            driven.add(clipNameOfSlot(controller.slot()));
-        }
+        // 控制器槽名与片段名差一个下划线（player.parallel_6 驱动 parallel6），先换算成片段名。
+        // 这些槽**仍然保留默认循环**：YSM 的 HybridAnimationController 在模型控制器处于内置状态
+        // （{@code ysm-builtin}，动画数为 0）时照跑 coded 控制器，也就是 ParallelPredicate 的无条件循环；
+        // 只有模型自定义状态真正生效时才 reset 掉它。构建期直接摘除会让「控制器条件不匹配」的模型
+        // 整条物理不播（弹簧恒 0、头发挂 rest），所以让位判断挪到运行期，见 {@link #yieldedSlots}。
         List<String> base = new ArrayList<>();
         List<String> parallel = new ArrayList<>();
         for (int index = 0; index < 8; index++) {
-            // 有模型控制器的槽让位给状态机：YSM 里一个槽只有一个控制器，模型的定义会顶掉
-            // 「无条件循环 parallelN」这个默认实现，两边都跑就是同一段动画叠两遍。
             String baseName = "pre_parallel" + index;
-            if (clips.containsKey(baseName) && !driven.contains(baseName)) {
+            if (clips.containsKey(baseName)) {
                 base.add(baseName);
             }
             String parallelName = "parallel" + index;
-            if (clips.containsKey(parallelName) && !driven.contains(parallelName)) {
+            if (clips.containsKey(parallelName)) {
                 parallel.add(parallelName);
             }
         }
@@ -653,7 +658,7 @@ public final class ModelRuntime {
         // （YSM 的 builtin/misc/4_default_controllers/controller/main_controllers.json），
         // 名字不在 pre_parallelN 这一族里，不单独挑出来就整条不播。
         String hair = findClipIgnoreCase(clips, "hair_physics");
-        if (hair != null && !driven.contains("pre_parallel0")) {
+        if (hair != null) {
             base.add(0, hair);
         }
         runtime.preParallelBase = base;
@@ -759,7 +764,10 @@ public final class ModelRuntime {
         main.animationFiles = new LinkedHashMap<>();
         for (Map.Entry<String, RawYsmModel.RawAnimationFile> entry : model.mainEntity.animationFiles.entrySet()) {
             RawYsmModel.RawAnimationFile file = entry.getValue();
-            if (file == null || (file.animType != 2 && file.animType != 11)) {
+            // 只收 animType=11（fp_arm）。animType=2 是第三人称的手部条件层：它的片段名与
+            // 手臂表撞车（hold_mainhand:sword 之类能解析到），但写的是身体骨骼的姿态，
+            // 套到 armModel 上会错位 —— 语料里 arm 片段引用的骨骼有 48% 在 armModel 里不存在。
+            if (file == null || file.animType != 11) {
                 continue;
             }
             RawYsmModel.RawAnimationFile copy = new RawYsmModel.RawAnimationFile();
@@ -799,8 +807,32 @@ public final class ModelRuntime {
                 node = parents[node];
             }
             armRootOf[i] = node;
-            armRootX[i] = bones.get(node).pivot[0];
+            armRootX[i] = armSideOf(i, node);
         }
+    }
+
+    /**
+     * 一根骨骼属于哪只手：正数右手、负数左手、0 未知。
+     *
+     * <p>优先按骨名判（YSM {@code FirstPersonModelState:41-43} 直接认 {@code LeftArm}/{@code RightArm}）：
+     * 语料里有 11/37 个模型的手臂是**单根无面容器**（{@code Arm}），按根 pivot 的 X 正负分会让所有骨骼
+     * 落到同一侧，另一只手整个不画。骨名找不到才退回 pivot 符号。
+     */
+    private float armSideOf(int boneIndex, int root) {
+        for (int node = boneIndex; node >= 0; node = parents[node]) {
+            String name = bones.get(node).name;
+            if (name == null) {
+                continue;
+            }
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("left")) {
+                return -1.0F;
+            }
+            if (lower.startsWith("right")) {
+                return 1.0F;
+            }
+        }
+        return bones.get(root).pivot[0];
     }
 
     private static boolean hasZeroScale(RawYsmModel.RawBoneAnimation boneAnimation) {
@@ -1321,6 +1353,18 @@ public final class ModelRuntime {
     /** 本帧控制器状态机选中的片段（{@link #sampleControllerLayers} 每帧重填）。 */
     private final List<RawYsmModel.RawAnimation> controllerPlayingClips = new ArrayList<>();
 
+    /**
+     * 本帧真正由模型控制器驱动的槽（片段名口径，如 {@code parallel6}）：默认循环遇到它们要让位。
+     *
+     * <p>YSM 的 {@code HybridAnimationController} 只在模型控制器进入**自定义状态**时才 reset 掉
+     * coded 控制器；处于内置状态（{@code ysm-builtin}）时两者都跑，默认循环照常生效。
+     * 所以让位是逐帧的，不是构建期一次性的。
+     */
+    private final Set<String> yieldedSlots = new HashSet<>();
+
+    /** 本帧各控制器 tick 出来的动画名：控制器只 tick 一次，采样按桶顺序消费这份结果。 */
+    private final Map<ModelController, List<String>> controllerFrame = new LinkedHashMap<>();
+
     private void collectPropRoots(RawYsmModel.RawAnimation clip, Set<Integer> roots) {
         if (clip == null) {
             return;
@@ -1393,6 +1437,10 @@ public final class ModelRuntime {
      */
     private void sampleLayers(List<String> names, float ageSeconds, boolean override) {
         for (String name : names) {
+            // 模型控制器本帧在驱动这个槽 → 默认循环让位（YSM 的 HybridAnimationController 语义）
+            if (yieldedSlots.contains(name)) {
+                continue;
+            }
             RawYsmModel.RawAnimation layer = clip(name);
             if (layer == null) {
                 continue;
@@ -1405,6 +1453,37 @@ public final class ModelRuntime {
                     sampleOverride(layer, i, time, ageSeconds);
                 } else {
                     sampleOverlay(layer, i, time, ageSeconds);
+                }
+            }
+        }
+    }
+
+    /**
+     * 每帧开头把所有控制器 tick 一遍，结果留给 {@link #sampleControllerLayers} 按桶顺序消费。
+     *
+     * <p>必须与采样分开：{@code pre_parallel} / {@code parallel} 的默认循环排在各自控制器**之前**，
+     * 而「这个槽本帧要不要让位」只有 tick 完才知道。tick 本身不碰姿态，提前跑没有副作用。
+     */
+    private void tickControllers(float ageSeconds) {
+        controllerFrame.clear();
+        yieldedSlots.clear();
+        for (List<ModelController> layer : controllerBuckets.values()) {
+            for (ModelController controller : layer) {
+                List<String> overlayNames = controller.tick(ageSeconds, this::lengthOfClip);
+                // 状态机 tick 期间会写 q.all_animations_finished 这类标志位；一次性 tick 完所有控制器，
+                // 不逐个清掉就会让上一个控制器的标志位参与下一个控制器的转移条件求值。
+                controller.finishFrame();
+                controllerFrame.put(controller, overlayNames);
+                if (overlayNames.isEmpty()) {
+                    continue;
+                }
+                // 模型控制器本帧真的在播东西 → 它自己的槽让位给状态机（YSM 的 reset 语义）
+                yieldedSlots.add(clipNameOfSlot(controller.slot()));
+                for (String overlayName : overlayNames) {
+                    RawYsmModel.RawAnimation playing = clip(overlayName);
+                    if (playing != null) {
+                        controllerPlayingClips.add(playing);
+                    }
                 }
             }
         }
@@ -1428,14 +1507,8 @@ public final class ModelRuntime {
             return;
         }
         for (ModelController controller : layer) {
-            List<String> overlayNames = controller.tick(ageSeconds, this::lengthOfClip);
+            List<String> overlayNames = controllerFrame.getOrDefault(controller, List.of());
             if (!overlayNames.isEmpty()) {
-                for (String overlayName : overlayNames) {
-                    RawYsmModel.RawAnimation playing = clip(overlayName);
-                    if (playing != null) {
-                        controllerPlayingClips.add(playing);
-                    }
-                }
                 // 状态切换那一帧把切换前的姿态存下来，之后按目标状态的 blend_transition 淡过去。
                 // 放在这里而不是 tick 之后：空状态不产生姿态，没有「旧姿态」可混。
                 ControllerTransition transition = trackTransition(controller, ageSeconds);
@@ -2467,6 +2540,8 @@ public final class ModelRuntime {
         lastFrameAge = ageSeconds;
         // 控制器本帧会播哪些片段还不知道，先清空；采样完再按实际播的重算一次隐藏表
         controllerPlayingClips.clear();
+        // 控制器先 tick：默认循环要不要让位取决于它本帧有没有真的在播
+        tickControllers(ageSeconds);
         for (int i = 0; i < bones.size(); i++) {
             resetPose(i);
         }
@@ -2574,9 +2649,11 @@ public final class ModelRuntime {
     }
 
     /**
-     * 第一人称手臂的每帧出图：只播 {@code fp_arm}（没有就退回 {@code arm}），循环。
+     * 第一人称手臂的每帧出图：只播 {@code fp_arm}，循环。
      *
      * <p>不按实体状态选片段 —— 第一人称看不到身体，YSM 在这里也只播手臂动画。
+     * 模型没有 {@code fp_arm} 文件时画静止姿态：语料 37 个模型里只有 1 个带它，
+     * 而 {@code arm}（animType=2）是第三人称的手部条件层，套过来会错位。
      */
     public void renderFirstPerson(PoseStack.Pose pose, VertexConsumer buffer, int light, float ageSeconds,
             boolean rightArm) {
