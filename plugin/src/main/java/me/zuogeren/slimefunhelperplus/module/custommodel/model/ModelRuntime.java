@@ -215,6 +215,13 @@ public final class ModelRuntime {
 
     /** 定位组名 → 该组的骨骼下标（构建期算好，渲染期只查表）。 */
     private final Map<String, int[]> locatorGroups;
+    /** 模型高度的合理区间（格）：语料实测几何高度在 2.5~12.6 之间，留一点余量。 */
+    private static final float MIN_MODEL_HEIGHT = 1.0F;
+    private static final float MAX_MODEL_HEIGHT = 16.0F;
+    /** 作者声明的预览动画名（{@code properties.preview_animation}）；空串表示没声明。 */
+    private String previewAnimation = "";
+    /** 作者声明「预览时不要转」（{@code properties.disable_preview_rotation}）。 */
+    private boolean disablePreviewRotation;
     private final int rightHandBone;
     private final int leftHandBone;
     private RawYsmModel.RawAnimation lastClip;
@@ -302,6 +309,23 @@ public final class ModelRuntime {
     private RawYsmModel.RawAnimation activeExtra;
     private String activeExtraKey = "";
     private float activeExtraStart = Float.NaN;
+    /**
+     * 卡片预览的第二个覆盖层（{@code focus}）。
+     *
+     * <p>YSM 的 {@code ModelButton} 用两个独立槽：{@code previous} 播 hover/hover_fadeout、
+     * {@code queued} 播 focus，两者可以同时非空 —— 悬停中的选中卡片本来就该同时播这两条。
+     * 轮盘的额外动作只有一个槽，卡片预览另开一个，互不顶掉。
+     */
+    private RawYsmModel.RawAnimation cardFocus;
+    private float cardFocusStart = Float.NaN;
+    /**
+     * 卡片预览模式：主体态固定为 {@code idle}，不跟玩家状态走。
+     *
+     * <p>卡片要回答的是「这个模型长什么样」，不是「玩家现在在干什么」；跟着世界玩家走会让
+     * 十张卡片同时摆出同一个姿势（潜行、游泳、骑乘）。查询量仍然绑定真实玩家，
+     * 所以 idle 里的 {@code q.ground_speed} 这类条件照常求值。
+     */
+    private boolean cardMode;
     /** 额外动作是否单次播放（预览页用）；循环语义下末帧永远播不到。 */
     private boolean extraOnce;
     private boolean frameValid;
@@ -641,6 +665,11 @@ public final class ModelRuntime {
         ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
                 children, extraClips, extraOptions, defaultExtraKey, texture, rightHand, leftHand,
                 collectLocatorGroups(bones), defaultClips, glow);
+        if (model.properties != null) {
+            runtime.previewAnimation = model.properties.previewAnimation == null
+                    ? "" : model.properties.previewAnimation;
+            runtime.disablePreviewRotation = model.properties.disablePreviewRotation;
+        }
         runtime.scanSwordGeometry(bones, parents);
         runtime.soundCursors = ModelSoundCursorTable.build(ModelSound.build(model));
         runtime.controllers = parseControllers(model);
@@ -1400,6 +1429,7 @@ public final class ModelRuntime {
         Set<Integer> roots = new HashSet<>();
         collectPropRoots(activeVariant, roots);
         collectPropRoots(activeExtra, roots);
+        collectPropRoots(cardFocus, roots);
         for (RawYsmModel.RawAnimation playing : controllerPlayingClips) {
             collectPropRoots(playing, roots);
         }
@@ -2411,6 +2441,69 @@ public final class ModelRuntime {
         return swordGeometry[rightHand ? 1 : 0];
     }
 
+    /**
+     * 模型在模型空间里的高度（格），给「按模型体型缩放」用。
+     *
+     * <p>取几何包围盒的 Y 跨度（面片坐标在反序列化阶段已烘成方块单位）。
+     *
+     * <p><b>不能用 {@code visible_bounds_height}</b>：语料实测该字段与真实几何高度毫无对应关系
+     * （47 个模型里它从 5.5 到 1226，而几何高度只有 2.5~12.6 格），作者填的是随手写的数，
+     * 拿它换算缩放会让模型缩成一个点。
+     *
+     * <p><b>也不能用骨骼 pivot 的 Y 跨度</b>：pivot 含离群骨（{@code ysmGlow}/特效骨能到 ±90 格）。
+     *
+     * <p>结果按 {@link #MIN_MODEL_HEIGHT}~{@link #MAX_MODEL_HEIGHT} 夹取：个别模型的几何里混着
+     * 背景板/舞台这类超大部件，不夹会让卡片里的角色缩得看不见。
+     */
+    public float modelHeight() {
+        if (bones.isEmpty()) {
+            return 0.0F;
+        }
+        float min = Float.MAX_VALUE;
+        float max = -Float.MAX_VALUE;
+        for (RawYsmModel.RawBone bone : bones) {
+            if (bone.cubes == null) {
+                continue;
+            }
+            for (RawYsmModel.RawCube cube : bone.cubes) {
+                if (cube.faces == null) {
+                    continue;
+                }
+                for (RawYsmModel.RawFace face : cube.faces) {
+                    if (face.positions == null) {
+                        continue;
+                    }
+                    for (float[] position : face.positions) {
+                        if (position == null) {
+                            continue;
+                        }
+                        min = Math.min(min, position[1]);
+                        max = Math.max(max, position[1]);
+                    }
+                }
+            }
+        }
+        if (!(max > min)) {
+            return 0.0F;
+        }
+        return Math.min(Math.max(max - min, MIN_MODEL_HEIGHT), MAX_MODEL_HEIGHT);
+    }
+
+    /**
+     * 作者声明的预览动画名；空串表示没声明。
+     *
+     * <p>YSM 的 {@code PlayerModelScreen:464} 用它当卡片初始动画 —— 作者明确指定了
+     * 「这个模型在预览里该播什么」，比一律 idle 更贴近作者意图。
+     */
+    public String previewAnimation() {
+        return previewAnimation;
+    }
+
+    /** 作者声明预览时不要转（{@code properties.disable_preview_rotation}）。 */
+    public boolean disablePreviewRotation() {
+        return disablePreviewRotation;
+    }
+
     /** 定位组的骨骼数量（YSM 的 {@code locatorGroupSize}）；没有该组返回 0。 */
     public int locatorGroupSize(String locator) {
         int[] group = locatorGroups.get(locator);
@@ -2634,6 +2727,27 @@ public final class ModelRuntime {
         recomputeHidden();
     }
 
+    /**
+     * 卡片预览的第二个覆盖层（{@code focus}），与 {@link #setCardAnimation} 各占一个槽。
+     *
+     * <p>YSM 的 {@code ModelButton:180-184} 把 focus 写在 {@code queued} 槽、hover 写在
+     * {@code previous} 槽，两个槽同时生效；合成顺序上 focus 在后（盖住 hover 写到的通道）。
+     */
+    public void setCardFocus(String name) {
+        RawYsmModel.RawAnimation clip = name == null || name.isEmpty() ? null : clip(name);
+        if (clip == cardFocus) {
+            return;
+        }
+        cardFocus = clip;
+        cardFocusStart = Float.NaN;
+        recomputeHidden();
+    }
+
+    /** 卡片预览模式：主体态固定 idle，不跟世界玩家的状态走。 */
+    public void setCardMode(boolean card) {
+        this.cardMode = card;
+    }
+
     public void render(PoseStack.Pose pose, VertexConsumer buffer, int light,
             AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
         if (!sampleFrame(avatar, player, ageSeconds)) {
@@ -2656,8 +2770,10 @@ public final class ModelRuntime {
         }
         MolangVariables.bind(player, avatar, variables);
         MolangVariables.bindRuntime(this);
-        // 控制器条件里写的 ctrl.idle / ctrl.run 就是这套主体态判定
-        MolangVariables.bindControl(selectControlName(avatar, player));
+        // 控制器条件里写的 ctrl.idle / ctrl.run 就是这套主体态判定。
+        // 卡片预览固定 idle，这里也要跟着报 idle：否则主体态是 idle、控制器却按玩家的 run/sneak
+        // 切分支，模型自带控制器会把姿势摆成跑步/潜行，与卡片要的「模型本身」不符。
+        MolangVariables.bindControl(cardMode ? "idle" : selectControlName(avatar, player));
         MolangVariables.clearControllerState();
         ModelPhysics.bind(physics);
         physics.advance(ageSeconds);
@@ -2724,6 +2840,17 @@ public final class ModelRuntime {
                 sampleOverlay(activeExtra, i, extraTime, ageSeconds);
             }
         }
+        // 卡片预览的 focus 槽排在 hover 之后：YSM 的 queued 槽在 previous 槽之上
+        if (cardFocus != null) {
+            if (!Float.isFinite(cardFocusStart)) {
+                cardFocusStart = ageSeconds;
+            }
+            float focusTime = layerTime(cardFocus, ageSeconds - cardFocusStart, true);
+            runTimeline(cardFocus, focusTime, ageSeconds, "cardfocus");
+            for (int i = 0; i < bones.size(); i++) {
+                sampleOverlay(cardFocus, i, focusTime, ageSeconds);
+            }
+        }
         // 控制器槽（parallel*/pre_parallel*/模型自定义槽）：道具显隐、换装、连击链都写在这些片段里，
         // 由状态机按 Molang 条件选出来当覆盖层。
         sampleControllerLayers("post_main", ageSeconds);
@@ -2731,7 +2858,12 @@ public final class ModelRuntime {
         // 它是**覆盖**语义，只改自己写到的骨骼，所以持物姿势能盖住 idle 的手臂，而没写到的身体骨
         // 仍保持主动画的呼吸与迈腿。放在主动画之前会被 idle 的手臂通道盖掉，表现成「拿着剑但手臂还是待机」。
         sampleControllerLayers("pre_hold", ageSeconds);
-        sampleHoldLayers(player, ageSeconds);
+        // 卡片预览不跑手部层：持有/挥动/使用都会按玩家当前手持物覆盖手臂姿态，
+        // 卡片就会摆出「拿着玩家手里那把剑」的姿势。YSM 的卡片预览同样清空装备
+        // （{@code renderLivingEntityPreview} 的 {@code hideEquipment}），这里直接跳过这几层。
+        if (!cardMode) {
+            sampleHoldLayers(player, ageSeconds);
+        }
         sampleControllerLayers("post_hold", ageSeconds);
         // 槽名不在 YSM 注册表里的控制器（模型自定义槽）保持原来的位置：主动画之后、手部动作之前。
         sampleControllerLayers("", ageSeconds);
@@ -2740,10 +2872,14 @@ public final class ModelRuntime {
         // 主副手各一层、互不覆盖（不同手臂），万一同骨骼则 mainhand 赢（顺序在后）。
         blendBasePose(ageSeconds);
         sampleControllerLayers("pre_swing", ageSeconds);
-        sampleSwingLayer(avatar, player, ageSeconds);
+        if (!cardMode) {
+            sampleSwingLayer(avatar, player, ageSeconds);
+        }
         sampleControllerLayers("post_swing", ageSeconds);
         sampleControllerLayers("pre_use", ageSeconds);
-        sampleUseLayer(avatar, player, ageSeconds);
+        if (!cardMode) {
+            sampleUseLayer(avatar, player, ageSeconds);
+        }
         sampleControllerLayers("post_use", ageSeconds);
         // parallel 槽在 YSM 里排在 main 之后，所以它既能把通道加到主姿态上，也能在缩放上盖掉前面几层。
         // 它是 YSM 里唯一带 blendRotation 的控制器，合成方式就是相加。
@@ -3256,6 +3392,10 @@ public final class ModelRuntime {
     /** 状态表按 YSM 的 {@code AnimationRegister} 排序；缺失的动画退回 idle，再退回静止。 */
     private RawYsmModel.RawAnimation pickClip(AvatarRenderState avatar, LocalPlayer player) {
         if (avatar == null) {
+            return firstOf(IDLE);
+        }
+        // 卡片预览固定 idle：卡片要的是「模型本身」，不是玩家此刻的状态
+        if (cardMode) {
             return firstOf(IDLE);
         }
         RawYsmModel.RawAnimation clip;

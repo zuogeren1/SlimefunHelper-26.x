@@ -128,13 +128,18 @@ public class ModelPickerScreen extends GenericScreen {
     /** 本帧要画的卡片槽位 {x, y, h, hot, selected} 与对应文件；3D 统一排在 2D 之后画。 */
     private final List<int[]> cardSlots = new ArrayList<>();
     private final List<String> cardFiles = new ArrayList<>();
-    /** 已经采样过姿态的文件：没悬停的卡片采一次就够，逐帧全量采样会把主线程吃满。 */
-    private final Set<String> cardSampled = new HashSet<>();
-    /** 文件 → 上一次应用的卡片动画名。动画换了必须重采一次，否则静止的卡片停在旧姿势。 */
+    /** 文件 → 上一次应用的卡片动画名。动画换了要立刻重采一次，别等下一个采样窗口。 */
     private final Map<String, String> cardAnimations = new HashMap<>();
-    /** 悬停卡片的重采样间隔（毫秒）：卡片只有 52×90，20Hz 看不出卡顿。 */
+    /**
+     * 卡片的重采样间隔（毫秒）。
+     *
+     * <p>卡片只有 52×90，20Hz 看不出卡顿；而一页十份逐帧全量采样会把主线程吃满。
+     * 节拍是**整页**的：到点的那一帧把本页所有卡片各推进一次，其余帧只出图不采样。
+     */
     private static final long CARD_SAMPLE_MS = 50L;
     private long cardSampleAt;
+    /** 本帧是否已经推进过卡片采样：一帧只推进一轮，十张卡片在这一轮里各采一次。 */
+    private boolean cardSampledThisFrame;
     /**
      * 卡片动画的时钟起点。
      *
@@ -159,6 +164,7 @@ public class ModelPickerScreen extends GenericScreen {
     public ModelPickerScreen() {
         super(Component.literal("模型选择"), 0, 0);
         rebuildView();
+        retainPageCards();
     }
 
     /**
@@ -195,7 +201,6 @@ public class ModelPickerScreen extends GenericScreen {
     public void removed() {
         CustomModelManager.dropCards();
         cardStates.clear();
-        cardSampled.clear();
         cardAnimations.clear();
         super.removed();
     }
@@ -238,6 +243,7 @@ public class ModelPickerScreen extends GenericScreen {
         this.query = text == null ? "" : text;
         this.page = 0;
         rebuildView();
+        retainPageCards();
         this.cardEnterStart = System.currentTimeMillis();
     }
 
@@ -282,6 +288,7 @@ public class ModelPickerScreen extends GenericScreen {
         // 卡片实例按帧预算逐个建：一页十个模型一次全建会把打开页面卡住好几秒。
         // 必须在 updateHover 之前重置 —— 悬停切换要查片段长度，那也要建实例。
         CustomModelManager.beginCardFrame();
+        cardSampledThisFrame = false;
         updateHover(mouseX, mouseY);
         int px = panelX;
         int py = panelY;
@@ -464,8 +471,10 @@ public class ModelPickerScreen extends GenericScreen {
         }
         AvatarRenderState state = cardStates.computeIfAbsent(file, key -> cardState(stateId));
         state.id = stateId;
-        // 卡片是静态展示：不跟鼠标转，正面朝前，只留一点俯角让立体感出来
-        state.bodyRot = 180.0F;
+        // 卡片是静态展示：不跟鼠标转，正面朝前，只留一点俯角让立体感出来。
+        // bodyRot 必须是 0：applyPose 里转的是 (180 - bodyRot)，填 180 会把它抵消成 0，
+        // 模型朝 -Z 背对镜头；再叠一次 rotateY(π) 就是转两圈等于没转。
+        state.bodyRot = 0.0F;
         state.yRot = 0.0F;
         state.xRot = 0.0F;
         state.pose = Pose.STANDING;
@@ -483,12 +492,13 @@ public class ModelPickerScreen extends GenericScreen {
         int cardIndex = view.indexOf(file) - page * PER_PAGE;
         boolean fading = cardIndex >= 0 && cardIndex == cardFadeIndex
                 && System.currentTimeMillis() - cardFadeStart < cardFadeSeconds * 1000.0F;
+        // 卡片固定播 idle：不跟世界玩家的潜行/游泳/骑乘走，否则十张卡片摆同一个姿势
+        runtime.setCardMode(true);
         // 先定动画再采样：采样要按本帧的覆盖层算姿态，反过来的话动画永远慢一帧
         String animation = applyCardAnimation(runtime, hot, isSelected, fading);
-        // 动画换了要重采一次：静止的卡片只采一次，不重采会一直停在旧姿势
+        // 动画换了立刻重采一次，别等下一个节拍（否则新动画要晚 50ms 才出现）
         boolean changed = !animation.equals(cardAnimations.put(file, animation));
-        // 淡出期间也要重采：不采的话姿态停在移出那一帧，动画根本播不出来
-        sampleCard(file, runtime, state, hot || fading || changed);
+        sampleCard(runtime, state, changed);
         // 裁剪到卡片槽位：模型比槽位高，不裁会画到编号标签和名字上
         graphics.enableScissor(cx, slotY, cx + CARD_W, slotY + slotH);
         try {
@@ -496,15 +506,22 @@ public class ModelPickerScreen extends GenericScreen {
             // 原版那套 rotZ(180) 是给 Y 向下的原版模型用的，套上来会把模型倒过来。
             // 模型原生朝 -Z，转 180° 才正对镜头；再压一点俯角，立体感来自这一下。
             //
-            // 平移量是「模型中心到脚底」：几何脚在原点、身高 1.8 格，再乘上玩家模型的 0.9375
-            // 与作者声明的整体缩放（YSM 默认 0.7），中心落在 0.59 格。PiP 把模型画在纹理正中，
-            // 不往下挪这半格，模型会顶在卡片上沿。
-            Vector3f translation = new Vector3f(0.0F, -0.59F, 0.0F);
-            Quaternionf rotation = new Quaternionf().rotateY(3.1415927F);
-            rotation.mul(new Quaternionf().rotateX(-10.0F * 0.017453292F));
-            // 38 是「模型占满槽位约四分之三」的取值：几何高 1.8 格，乘上 0.9375 与 0.7 之后
-            // 是 1.18 格，38 × 1.18 ≈ 45 GUI 像素，槽位高 59。
-            graphics.entity(state, 38.0F, translation, rotation, null,
+            // 缩放与平移都按模型高度换算：几何脚在原点，PiP 把模型画在纹理正中，
+            // 不往下挪半个身高就会顶在卡片上沿。固定值只对 1.8 格的默认骨架成立，
+            // 作者把骨架放大到十几格时卡片里只剩头顶那一截。
+            float modelHeight = runtime.modelHeight();
+            float height = modelHeight > 0.0F ? modelHeight : 1.8F;
+            // 目标：模型在卡片里占约 45 GUI 像素。有效高度 = 身高 × 0.9375 × 整体缩放，
+            // 1.8 格时 38 × 1.18 ≈ 45，所以系数是 68.6 / 身高。
+            float cardScale = Math.max(4.0F, Math.min(38.0F, 68.6F / height));
+            Vector3f translation = new Vector3f(0.0F, -height * 0.328F, 0.0F);
+            // GuiEntityRenderer 内部已经做过 overrideCameraAngle.conjugate() 再 rotateY(180°)，
+            // 这里再转一次 Y 就是转两圈等于没转（模型背对）。只补俯角。
+            // 作者声明 disable_preview_rotation 时连俯角也不要：那是「这个模型必须正对着看」的意思。
+            Quaternionf rotation = runtime.disablePreviewRotation()
+                    ? new Quaternionf()
+                    : new Quaternionf().rotateX(-10.0F * 0.017453292F);
+            graphics.entity(state, cardScale, translation, rotation, null,
                     cx, slotY + rise, cx + CARD_W, slotY + slotH + rise);
         } finally {
             graphics.disableScissor();
@@ -520,33 +537,41 @@ public class ModelPickerScreen extends GenericScreen {
     }
 
     /**
-     * 采样卡片姿态：悬停的那张按 {@link #CARD_SAMPLE_MS} 重采，其余只采一次。
+     * 采样卡片姿态：所有卡片共用 {@link #CARD_SAMPLE_MS} 的节拍持续推进。
      *
-     * <p>没悬停的卡片是静止画面，逐帧重采纯属浪费；悬停的那张要播 {@code hover}，
-     * 必须持续推进物理与控制器。
+     * <p>卡片不是静态截图 —— 待机动画（呼吸、头发、裙摆）本来就在播，只采一次会让整页卡片
+     * 冻在打开页面那一帧。节拍是全局的：一帧最多推进一轮，十张卡片同帧各推一次，
+     * 20Hz 下与逐帧采样的观感没有差别，主线程开销却只有三分之一。
+     *
+     * <p>{@code force} 为真时无视节拍立刻采一次（动画刚换、刚翻页），否则新动画要等一个节拍才出现。
      */
-    private void sampleCard(String file, ModelRuntime runtime, AvatarRenderState state, boolean hot) {
-        long now = System.currentTimeMillis();
-        boolean sampled = cardSampled.contains(file);
-        if (sampled && !hot) {
-            return;
+    private void sampleCard(ModelRuntime runtime, AvatarRenderState state, boolean force) {
+        if (!force) {
+            // 节拍只决定「这一帧要不要推进」，不决定「哪张卡片推进」：
+            // 到点的那一帧本页所有卡片各采一次，其余帧只出图。
+            long now = System.currentTimeMillis();
+            if (!cardSampledThisFrame && now - cardSampleAt >= CARD_SAMPLE_MS) {
+                cardSampleAt = now;
+                cardSampledThisFrame = true;
+            }
+            if (!cardSampledThisFrame) {
+                return;
+            }
         }
-        if (hot && now - cardSampleAt < CARD_SAMPLE_MS) {
-            return;
-        }
-        if (hot) {
-            cardSampleAt = now;
-        }
-        cardSampled.add(file);
-        runtime.sampleFrame(state, null, state.ageInTicks / 20.0F);
+        // 传真实玩家：卡片固定播 idle（runtime 的 cardMode），但 idle 里的查询量
+        // （q.ground_speed / q.is_sneaking / ysm.food_level …）要有值，否则整条表达式落 NaN。
+        runtime.sampleFrame(state, Minecraft.getInstance().player, state.ageInTicks / 20.0F);
     }
 
     /**
-     * 卡片动画：照 OpenYSM 的 {@code ModelButton} 那套状态机。
+     * 卡片动画：照 OpenYSM 的 {@code ModelButton} 那套状态机，两个槽各管各的。
      *
-     * <p>悬停播 {@code hover}、移出播 {@code hover_fadeout}（播完停在末帧）、聚焦播 {@code focus}，
-     * 都没有就退回 {@code empty}。片段是作者写在模型里的，不是每个模型都有 ——
-     * 缺片段时 {@link ModelRuntime#setCardAnimation} 收到空名，等于不播。
+     * <p>YSM 的 {@code ModelButton:172-184} 把 hover/hover_fadeout 写在 {@code previous} 槽、
+     * focus 写在 {@code queued} 槽，**两个槽可以同时非空** —— 悬停中的选中卡片本来就该同时播这两条。
+     * 所以这里也拆成两个槽：{@link ModelRuntime#setCardAnimation} 管 hover 系，
+     * {@link ModelRuntime#setCardFocus} 管 focus，互不顶掉。
+     *
+     * <p>片段是作者写在模型里的，不是每个模型都有；缺片段时收到空名，等于不播。
      */
     private String applyCardAnimation(ModelRuntime runtime, boolean hot, boolean isSelected, boolean fading) {
         String name = "";
@@ -557,11 +582,17 @@ public class ModelPickerScreen extends GenericScreen {
             // 刚移出的那一张：播一次淡出，播完停在末帧
             name = runtime.hasClip("hover_fadeout") ? "hover_fadeout" : "";
             once = true;
-        } else if (isSelected && runtime.hasClip("focus")) {
-            // 当前选中的那张用 focus 当待机：卡片没有键盘焦点，focus 在这里表示「就是它」
-            name = "focus";
+        } else {
+            // 作者在 properties 里指定了预览动画就用它（YSM 的 PlayerModelScreen:464 同做法），
+            // 没指定才退回 idle —— 卡片的主体态本来就是 idle，这里只是换一条覆盖层。
+            String preview = runtime.previewAnimation();
+            if (!preview.isEmpty() && runtime.hasClip(preview)) {
+                name = preview;
+            }
         }
         runtime.setCardAnimation(name, once);
+        // focus 是独立槽：卡片没有键盘焦点，这里表示「就是当前选中的那个模型」
+        runtime.setCardFocus(isSelected && runtime.hasClip("focus") ? "focus" : "");
         return name;
     }
 
@@ -841,13 +872,17 @@ public class ModelPickerScreen extends GenericScreen {
     /** 只保留当前页的卡片实例；顺带清掉它们的渲染状态，编号变了要重建。 */
     private void retainPageCards() {
         Set<String> keep = new HashSet<>();
+        List<String> pageFiles = new ArrayList<>();
         int base = page * PER_PAGE;
         for (int i = 0; i < PER_PAGE && base + i < view.size(); i++) {
-            keep.add(view.get(base + i));
+            String file = view.get(base + i);
+            keep.add(file);
+            pageFiles.add(file);
         }
+        // 先把这一页的模型丢给后台线程解析：翻页那一帧就能出图，不用等十帧逐张补齐
+        CustomModelManager.prebuildCards(pageFiles);
         CustomModelManager.retainCards(keep);
         cardStates.keySet().retainAll(keep);
-        cardSampled.retainAll(keep);
         cardAnimations.keySet().retainAll(keep);
         this.lastHoverCard = -1;
         this.cardFadeIndex = -1;

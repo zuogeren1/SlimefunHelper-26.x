@@ -196,6 +196,10 @@ public abstract class PlayerModelSubmitMixin {
      */
     private void submitCardModel(ModelRuntime runtime, AvatarRenderState avatar, PoseStack poseStack,
             SubmitNodeCollector collector, int light) {
+        // 卡片走 EntityRenderDispatcher.submit → 原版 LivingEntityRenderer.submit，那里有
+        // scale(-1,-1,1) 把 Y 向下的原版模型翻正；我们的几何在反序列化阶段已经是 Y 向上，
+        // 再翻一次就是倒立。这里先翻回来抵消掉。
+        poseStack.scale(-1.0F, -1.0F, 1.0F);
         // 与世界里同一套缩放：玩家模型的 0.9375 与作者声明的整体缩放（YSM 默认 0.7）。
         // 少了这两层，卡片里的模型会比世界里大一圈，选完进游戏观感对不上。
         poseStack.scale(avatar.scale, avatar.scale, avatar.scale);
@@ -398,7 +402,10 @@ public abstract class PlayerModelSubmitMixin {
             // SPM 的图层同样跑在模型整体缩放之后，它没补偿就是对的 —— 补偿反而把翅膀推偏。
             poseStack.translate(0.0F, 1.5F, 0.0F);
             rotateDegrees(poseStack, Axis.ZP, 180.0F);
-            poseStack.scale(2.0F, 2.0F, 2.0F);
+            // 1.0 是实机调出来的：2.0 明显偏大、0.5 明显偏小，取中间。
+            // 按模型高度自适应的公式不可靠 —— 语料里骨骼 pivot 的 Y 跨度含大量离群骨
+            // （ysmGlow/特效骨能到 ±90 格），算出来的身高与实际渲染尺寸对不上。
+            poseStack.scale(1.0F, 1.0F, 1.0F);
             submitModel(collector, model, avatar, poseStack, texture, light);
             poseStack.popPose();
         }

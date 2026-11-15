@@ -70,15 +70,29 @@ public final class CustomModelManager {
      * 只保留当前页用到的那些：一个模型的几何 + 贴图不小，翻页时把不在页内的丢掉。
      */
     private static final Map<String, ModelRuntime> cardRuntimes = new LinkedHashMap<>();
-    /** 文件 → 卡片预览的渲染状态编号；编号一旦分配就不再变，翻页丢掉实例也不回收。 */
+    /**
+     * 文件 → 卡片预览的渲染状态编号。
+     *
+     * <p>编号在实例存活期间保持不变（渲染状态按文件缓存，换号会让 {@code cardStates} 里的旧状态
+     * 认领到别的模型）；实例被丢掉时连同编号一起清掉，否则长时间翻页会无限累积。
+     */
     private static final Map<String, Integer> cardIds = new HashMap<>();
     /** 卡片预览的渲染状态编号 → runtime。出图入口（实体提交 mixin）只拿得到渲染状态，靠它认领实例。 */
     private static final Map<Integer, ModelRuntime> cardByStateId = new HashMap<>();
+    /** 后台线程预解析好的模型（文件 → 原始模型）；渲染线程取用后即删，避免常驻两份。 */
+    private static final Map<String, RawYsmModel> cardParsed = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 正在后台解析的文件：快速翻页时同一页会被反复请求，靠它去重，避免线程堆积。 */
+    private static final Set<String> cardParsing = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** 卡片预览用的合成实体编号：负数，不会与真实实体撞号。 */
     private static final int CARD_STATE_BASE = -100000;
     private static int cardIdSeq;
-    /** 一帧最多建几个卡片实例：解析 + 建几何是重活，摊到多帧做，翻页时不会卡一下。 */
-    private static final int CARD_BUILD_PER_FRAME = 1;
+    /**
+     * 一帧最多建几个卡片实例。
+     *
+     * <p>解密 + 反序列化已经由 {@link #prebuildCards} 挪到后台线程，渲染线程只剩贴图注册与几何构建，
+     * 单张代价小得多，所以一页十张可以在一帧内建完 —— 翻页时不会再出现「卡片逐帧补齐」的空窗。
+     */
+    private static final int CARD_BUILD_PER_FRAME = 10;
     private static int cardBuildBudget;
 
     private static final String NO_EXTRA = "__none__";
@@ -197,6 +211,62 @@ public final class CustomModelManager {
     }
 
     /**
+     * 预建一页卡片实例：后台线程解密 + 反序列化，渲染线程注册贴图并建几何。
+     *
+     * <p>逐帧建一个（{@link #CARD_BUILD_PER_FRAME}）会让翻页后一页卡片要十帧才补齐，
+     * 期间卡片是空底纹。这里把「解析」这一步挪到后台线程，渲染线程只做必须在那里的
+     * 贴图注册与几何构建，一页十张在翻页那一帧就能出图。
+     *
+     * <p>解析结果按文件缓存，同一页反复翻回来不会重复解密。
+     */
+    public static void prebuildCards(List<String> files) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        List<String> pending = new ArrayList<>();
+        for (String file : files) {
+            if (file == null || file.isEmpty() || cardRuntimes.containsKey(file)
+                    || cardParsed.containsKey(file)) {
+                continue;
+            }
+            // 已经在解析的跳过：连续翻页会把同一页反复丢进来，不去重就是一堆线程各解析一遍
+            if (cardParsing.add(file)) {
+                pending.add(file);
+            }
+        }
+        if (pending.isEmpty()) {
+            return;
+        }
+        Thread thread = new Thread(() -> {
+            for (String file : pending) {
+                try {
+                    RawYsmModel model = parseCardModel(file);
+                    if (model != null) {
+                        // 只碰 cardParsed（ConcurrentHashMap）：cardRuntimes 归渲染线程所有，
+                        // 后台线程读它属于跨线程访问非线程安全容器。重复解析由 putIfAbsent 兜住。
+                        cardParsed.putIfAbsent(file, model);
+                    }
+                } catch (Throwable throwable) {
+                    Debug.info("[SFH+] 卡片预解析失败 " + file + ": " + throwable);
+                } finally {
+                    cardParsing.remove(file);
+                }
+            }
+        }, "SFH+ card prebuild");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** 后台线程只做解密 + 反序列化；贴图注册与几何构建必须在渲染线程。 */
+    private static RawYsmModel parseCardModel(String file) throws Exception {
+        Path dir = FabricLoader.getInstance().getConfigDir()
+                .resolve("slimefunhelper-plus")
+                .resolve("models");
+        byte[] clear = YsmCrypt.decryptYsmFile(Files.readAllBytes(dir.resolve(file)));
+        return new YSMBinaryDeserializer(clear).deserialize();
+    }
+
+    /**
      * 丢掉全部卡片实例。
      *
      * <p>换模型会 {@code ModelTexture.releaseAll()}，卡片实例手里的 Identifier 随之失效；
@@ -210,6 +280,9 @@ public final class CustomModelManager {
         }
         cardRuntimes.clear();
         cardByStateId.clear();
+        cardIds.clear();
+        cardParsed.clear();
+        cardParsing.clear();
     }
 
     /**
@@ -219,6 +292,9 @@ public final class CustomModelManager {
      */
     public static void retainCards(Set<String> keep) {
         cardBuildBudget = CARD_BUILD_PER_FRAME;
+        // 预解析缓存先裁：即使当前页还没建出实例（cardRuntimes 为空）也要裁，
+        // 否则翻走的那一页模型会一直留在内存里
+        cardParsed.keySet().retainAll(keep);
         if (cardRuntimes.isEmpty()) {
             return;
         }
@@ -233,6 +309,7 @@ public final class CustomModelManager {
             if (dropped != null) {
                 dropped.release();
             }
+            cardIds.remove(file);
         }
         cardByStateId.clear();
         for (Map.Entry<String, ModelRuntime> entry : cardRuntimes.entrySet()) {
@@ -248,11 +325,11 @@ public final class CustomModelManager {
      */
     private static ModelRuntime buildCardRuntime(String file) {
         try {
-            Path dir = FabricLoader.getInstance().getConfigDir()
-                    .resolve("slimefunhelper-plus")
-                    .resolve("models");
-            byte[] clear = YsmCrypt.decryptYsmFile(Files.readAllBytes(dir.resolve(file)));
-            RawYsmModel model = new YSMBinaryDeserializer(clear).deserialize();
+            // 预解析过的直接用：解密 + 反序列化是重活，已经挪到后台线程做过了
+            RawYsmModel model = cardParsed.remove(file);
+            if (model == null) {
+                model = parseCardModel(file);
+            }
             ModelCatalog.putDisplayName(file, model.metadata == null ? null : model.metadata.name);
             rememberMetadata(file, model.metadata);
             Map<String, RawYsmModel.RawTexture> textures = collectTextures(model);
