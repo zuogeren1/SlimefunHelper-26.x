@@ -63,6 +63,24 @@ public final class CustomModelManager {
     private static volatile Set<String> rootExtraKeys = Set.of();
     private static volatile boolean loadedHideProps;
 
+    /**
+     * 卡片预览实例：文件 → 独立 runtime。
+     *
+     * <p>选择页一屏十份，每份都要自己的物理与控制器状态（共用一份会互相踩），所以按文件各建一个。
+     * 只保留当前页用到的那些：一个模型的几何 + 贴图不小，翻页时把不在页内的丢掉。
+     */
+    private static final Map<String, ModelRuntime> cardRuntimes = new LinkedHashMap<>();
+    /** 文件 → 卡片预览的渲染状态编号；编号一旦分配就不再变，翻页丢掉实例也不回收。 */
+    private static final Map<String, Integer> cardIds = new HashMap<>();
+    /** 卡片预览的渲染状态编号 → runtime。出图入口（实体提交 mixin）只拿得到渲染状态，靠它认领实例。 */
+    private static final Map<Integer, ModelRuntime> cardByStateId = new HashMap<>();
+    /** 卡片预览用的合成实体编号：负数，不会与真实实体撞号。 */
+    private static final int CARD_STATE_BASE = -100000;
+    private static int cardIdSeq;
+    /** 一帧最多建几个卡片实例：解析 + 建几何是重活，摊到多帧做，翻页时不会卡一下。 */
+    private static final int CARD_BUILD_PER_FRAME = 1;
+    private static int cardBuildBudget;
+
     private static final String NO_EXTRA = "__none__";
     /** 选择记录最多保存几个模型（够用且不会让配置行无限长）。 */
     private static final int SELECTION_LIMIT = 8;
@@ -132,6 +150,127 @@ public final class CustomModelManager {
         }
     }
 
+    /**
+     * 卡片预览的渲染状态编号；这个文件还没有实例时返回 {@link #CARD_STATE_BASE} 之前的占位值。
+     *
+     * <p>实例按需建、每帧最多一个（{@link #CARD_BUILD_PER_FRAME}）：一页十个模型，一次全建会把
+     * 打开页面卡住好几秒。没建好之前卡片画占位底纹，建好自然出现。
+     *
+     * <p>必须在渲染线程调用（注册贴图要求渲染线程）。
+     */
+    public static int cardStateId(String file) {
+        if (file == null || file.isEmpty()) {
+            return CARD_STATE_BASE - 1;
+        }
+        if (cardRuntimes.containsKey(file)) {
+            return cardIds.get(file);
+        }
+        if (cardBuildBudget <= 0) {
+            return CARD_STATE_BASE - 1;
+        }
+        cardBuildBudget--;
+        ModelRuntime built = buildCardRuntime(file);
+        if (built == null) {
+            return CARD_STATE_BASE - 1;
+        }
+        Integer known = cardIds.get(file);
+        int id = known != null ? known : CARD_STATE_BASE - (cardIdSeq++);
+        cardIds.put(file, id);
+        cardRuntimes.put(file, built);
+        cardByStateId.put(id, built);
+        return id;
+    }
+
+    /** 出图入口按渲染状态编号认领卡片实例；不是卡片预览时返回 {@code null}。 */
+    public static ModelRuntime cardRuntime(int stateId) {
+        return cardByStateId.get(stateId);
+    }
+
+    /**
+     * 每帧开头重置建实例的预算。
+     *
+     * <p>由选择页在画卡片之前调用：一页十个模型，一次全建会把打开页面卡住好几秒，
+     * 摊到多帧做才不卡；预算按帧重置，翻页后新的一页自然逐帧补齐。
+     */
+    public static void beginCardFrame() {
+        cardBuildBudget = CARD_BUILD_PER_FRAME;
+    }
+
+    /**
+     * 丢掉全部卡片实例。
+     *
+     * <p>换模型会 {@code ModelTexture.releaseAll()}，卡片实例手里的 Identifier 随之失效；
+     * 不丢掉的话卡片会一直画成 missing texture。丢掉之后选择页下一帧按需重建。
+     *
+     * <p>选择页关闭时也走这里：一页十个模型的几何不小，关掉页面就该还回去。
+     */
+    public static void dropCards() {
+        for (ModelRuntime runtime : cardRuntimes.values()) {
+            runtime.release();
+        }
+        cardRuntimes.clear();
+        cardByStateId.clear();
+    }
+
+    /**
+     * 只保留这些文件的卡片实例，其余丢掉。
+     *
+     * <p>翻页时调用：上一页的实例留着只会白占内存，而重建代价与首次加载相同。
+     */
+    public static void retainCards(Set<String> keep) {
+        cardBuildBudget = CARD_BUILD_PER_FRAME;
+        if (cardRuntimes.isEmpty()) {
+            return;
+        }
+        List<String> stale = new ArrayList<>();
+        for (String file : cardRuntimes.keySet()) {
+            if (!keep.contains(file)) {
+                stale.add(file);
+            }
+        }
+        for (String file : stale) {
+            ModelRuntime dropped = cardRuntimes.remove(file);
+            if (dropped != null) {
+                dropped.release();
+            }
+        }
+        cardByStateId.clear();
+        for (Map.Entry<String, ModelRuntime> entry : cardRuntimes.entrySet()) {
+            cardByStateId.put(cardIds.get(entry.getKey()), entry.getValue());
+        }
+    }
+
+    /**
+     * 建一个卡片实例：解密、反序列化、注册贴图、建几何。
+     *
+     * <p>与 {@link #reload} 走同一套解析，但不碰世界实例的任何字段 —— 卡片是只读展示，
+     * 换页不该影响玩家身上那个模型。
+     */
+    private static ModelRuntime buildCardRuntime(String file) {
+        try {
+            Path dir = FabricLoader.getInstance().getConfigDir()
+                    .resolve("slimefunhelper-plus")
+                    .resolve("models");
+            byte[] clear = YsmCrypt.decryptYsmFile(Files.readAllBytes(dir.resolve(file)));
+            RawYsmModel model = new YSMBinaryDeserializer(clear).deserialize();
+            ModelCatalog.putDisplayName(file, model.metadata == null ? null : model.metadata.name);
+            rememberMetadata(file, model.metadata);
+            Map<String, RawYsmModel.RawTexture> textures = collectTextures(model);
+            Identifier textureId = ModelTexture.register(textures.get(pickDefaultTextureName(model, textures)));
+            if (textureId == null) {
+                textureId = ModelTexture.placeholder();
+            }
+            ModelRuntime built = ModelRuntime.buildCard(model, textureId, loadedHideProps);
+            if (built != null) {
+                built.setVariant(built.defaultVariantKey());
+            }
+            return built;
+        } catch (Throwable throwable) {
+            Debug.info("[SFH+] 卡片预览加载失败 " + file + ": " + throwable);
+            return null;
+        }
+    }
+
     /** 已解析模型的 {作者, tips}；没加载过这个模型时返回 {@code null}。 */
     public static String[] metadataOf(String file) {
         return file == null ? null : metadata.get(file);
@@ -184,6 +323,7 @@ public final class CustomModelManager {
         VERSION.incrementAndGet();
         // 贴图是 GPU 资源，Identifier 被丢弃不会让 TextureManager 回收它
         ModelTexture.releaseAll();
+        dropCards();
         runtime = null;
         armRuntime = null;
         ModelRuntime preview = previewRuntime;
@@ -268,6 +408,8 @@ public final class CustomModelManager {
         // 先释放旧模型的贴图再注册新的：反过来的话 releaseAll 会把刚注册的那张一起释放掉，
         // 渲染时拿到的是已释放的 Identifier，整模型变成 missing texture。
         ModelTexture.releaseAll();
+        // 卡片实例持有同一批贴图，释放后必须一起丢掉，否则卡片画成 missing texture
+        dropCards();
         Identifier textureId = ModelTexture.register(textures.get(defaultName));
         if (textureId == null) {
             // 贴图注册失败（GPU 未就绪等）不该连几何一起丢：占位图至少让模型能画出来
@@ -643,6 +785,8 @@ public final class CustomModelManager {
         ModelRuntime previous = runtime;
         ModelRuntime previousArm = armRuntime;
         ModelTexture.release(activeTexture);
+        // 卡片实例持有同一批贴图，释放后必须一起丢掉，否则卡片画成 missing texture
+        dropCards();
         runtime = rebuilt;
         armRuntime = ModelRuntime.buildArm(model, textureId);
         if (previous != null) {

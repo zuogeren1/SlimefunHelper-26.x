@@ -1,8 +1,12 @@
 package me.zuogeren.slimefunhelperplus.module.custommodel.ui;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.utils.ClientUtils;
@@ -17,7 +21,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Pose;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 /**
  * 模型选择页：左栏一块模型展示，右栏 5×2 张卡片，点卡片即切换模型。
@@ -110,6 +118,44 @@ public class ModelPickerScreen extends GenericScreen {
     private int hovered = HOVER_NONE;
     private long hoverStart = System.currentTimeMillis();
 
+    /**
+     * 卡片 3D 预览的渲染状态：文件 → 状态。
+     *
+     * <p>每个文件一份而不是共用一份：{@code GuiGraphicsExtractor#entity} 只记下状态引用，
+     * 真正的出图在 {@code GuiRenderer} 里晚一步发生，共用一份会让十张卡片都画成最后一张。
+     */
+    private final Map<String, AvatarRenderState> cardStates = new HashMap<>();
+    /** 本帧要画的卡片槽位 {x, y, h, hot, selected} 与对应文件；3D 统一排在 2D 之后画。 */
+    private final List<int[]> cardSlots = new ArrayList<>();
+    private final List<String> cardFiles = new ArrayList<>();
+    /** 已经采样过姿态的文件：没悬停的卡片采一次就够，逐帧全量采样会把主线程吃满。 */
+    private final Set<String> cardSampled = new HashSet<>();
+    /** 文件 → 上一次应用的卡片动画名。动画换了必须重采一次，否则静止的卡片停在旧姿势。 */
+    private final Map<String, String> cardAnimations = new HashMap<>();
+    /** 悬停卡片的重采样间隔（毫秒）：卡片只有 52×90，20Hz 看不出卡顿。 */
+    private static final long CARD_SAMPLE_MS = 50L;
+    private long cardSampleAt;
+    /**
+     * 卡片动画的时钟起点。
+     *
+     * <p>不能用 {@code System.currentTimeMillis()} 直接当秒数：它取模后每 100 秒回卷一次，
+     * 回卷那一帧片段内时间会跳回 0，动作会闪一下。这里只记页面打开的时刻，差值单调递增。
+     */
+    private final long cardClockStart = System.currentTimeMillis();
+    /** 卡片进场动画的起点：翻页/换搜索词时重置，卡片按序号错开滑入。 */
+    private long cardEnterStart = System.currentTimeMillis();
+    /** 进场动画时长与逐卡错开间隔（毫秒）：短、硬、机械，一个入场序列不超过 1 秒。 */
+    private static final float CARD_ENTER_MS = 260.0F;
+    private static final long CARD_ENTER_STAGGER_MS = 38L;
+    /** 进场时卡片从下方滑入的距离（GUI 像素）。 */
+    private static final int CARD_ENTER_RISE = 8;
+    /** 上一帧的悬停卡片下标，用来认出「刚移出」并播 {@code hover_fadeout}。 */
+    private int lastHoverCard = -1;
+    /** 正在播淡出的卡片下标与它的起止时刻；{@code -1} 表示没有卡片在淡出。 */
+    private int cardFadeIndex = -1;
+    private long cardFadeStart = System.currentTimeMillis();
+    private float cardFadeSeconds;
+
     public ModelPickerScreen() {
         super(Component.literal("模型选择"), 0, 0);
         rebuildView();
@@ -142,6 +188,16 @@ public class ModelPickerScreen extends GenericScreen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    /** 关页时把卡片实例还回去：一页十个模型的几何不小，留着只是白占内存。 */
+    @Override
+    public void removed() {
+        CustomModelManager.dropCards();
+        cardStates.clear();
+        cardSampled.clear();
+        cardAnimations.clear();
+        super.removed();
     }
 
     /**
@@ -182,6 +238,7 @@ public class ModelPickerScreen extends GenericScreen {
         this.query = text == null ? "" : text;
         this.page = 0;
         rebuildView();
+        this.cardEnterStart = System.currentTimeMillis();
     }
 
     /**
@@ -222,6 +279,9 @@ public class ModelPickerScreen extends GenericScreen {
 
     private void paint(EfWidget self, VDrawContext ctx, int mouseX, int mouseY) {
         Ef.fill(ctx, 0, 0, this.width, this.height, VEIL);
+        // 卡片实例按帧预算逐个建：一页十个模型一次全建会把打开页面卡住好几秒。
+        // 必须在 updateHover 之前重置 —— 悬停切换要查片段长度，那也要建实例。
+        CustomModelManager.beginCardFrame();
         updateHover(mouseX, mouseY);
         int px = panelX;
         int py = panelY;
@@ -308,6 +368,8 @@ public class ModelPickerScreen extends GenericScreen {
         }
         String selected = selectedFile();
         int base = page * PER_PAGE;
+        cardSlots.clear();
+        cardFiles.clear();
         for (int i = 0; i < PER_PAGE; i++) {
             int index = base + i;
             if (index >= view.size()) {
@@ -336,6 +398,9 @@ public class ModelPickerScreen extends GenericScreen {
             int slotH = CARD_H - 11 - 20;
             Ef.fill(ctx, cx, slotY, CARD_W, slotH, isSelected ? 0xFF3A3A3A : 0xFF2A2A2A);
             hatch(ctx, cx, slotY, CARD_W, slotH, 0x0AFFFFFF);
+            // 3D 排在所有 2D 之后统一画：PiP 贴回时盖在 2D 之上，先画会被卡片自己的底纹盖掉
+            cardSlots.add(new int[]{cx, slotY, slotH, hot ? 1 : 0, isSelected ? 1 : 0});
+            cardFiles.add(file);
 
             Ef.rule(ctx, cx, cy + CARD_H - 20, CARD_W, pal.rule());
             List<String> lines = Ef.wrap(ModelCatalog.displayName(file), CARD_W - 6);
@@ -352,6 +417,152 @@ public class ModelPickerScreen extends GenericScreen {
                 Ef.fill(ctx, cx, cy, 2, CARD_H, Ef.SIGNAL);
             }
         }
+        for (int i = 0; i < cardSlots.size(); i++) {
+            int[] slot = cardSlots.get(i);
+            // 进场：按序号错开，从下方滑到位。PiP 的贴回位置就是矩形，挪矩形即可，
+            // 不需要给离屏纹理做 alpha —— 卡片尺寸下位移比淡入更「机械」，也更省。
+            // 裁剪框留在原位，滑入过程才会被槽位下沿切掉，而不是整块跟着往下跑。
+            paintCardModel(ctx, cardFiles.get(i), slot[0], slot[1], slot[2],
+                    slot[3] != 0, slot[4] != 0, enterRise(i));
+        }
+    }
+
+    /**
+     * 第 {@code index} 张卡片本帧的进场位移（GUI 像素，0 = 已到位）。
+     *
+     * <p>错开间隔只有 38ms：十张卡片全进场也不到 400ms，符合「一个入场序列不超过 1 秒」。
+     * 关掉动效时 {@link Ef#progress} 直接返回 1，位移恒为 0。
+     */
+    private int enterRise(int index) {
+        float progress = Ef.snap(Ef.progress(
+                cardEnterStart + index * CARD_ENTER_STAGGER_MS, CARD_ENTER_MS));
+        return Math.round(CARD_ENTER_RISE * (1.0F - progress));
+    }
+
+    // ------------------------------------------------------------------ 卡片 3D
+
+    /**
+     * 卡片里的模型：走原版 PiP 提交，每张卡片一个渲染状态。
+     *
+     * <p>PiP 是「先渲到离屏纹理、再贴回 GUI」，贴回的位置由矩形决定，所以卡片之间互不干扰 ——
+     * 这也是唯一能同帧画十份的路子：直接往 GUI 的顶点缓冲里写自定义几何没有入口
+     * （{@code GuiGraphicsExtractor} 只暴露 fill/blit/text/item 与 PiP 提交）。
+     *
+     * <p>姿态由 {@link #sampleCard} 按节奏采样，出图走 {@code renderSnapshot}：
+     * 十份模型逐帧全量采样会把主线程吃满，而卡片尺寸下 20Hz 与 60Hz 看不出差别。
+     */
+    private void paintCardModel(VDrawContext ctx, String file, int cx, int slotY, int slotH,
+            boolean hot, boolean isSelected, int rise) {
+        GuiGraphicsExtractor graphics = extractor(ctx);
+        if (graphics == null) {
+            return;
+        }
+        int stateId = CustomModelManager.cardStateId(file);
+        ModelRuntime runtime = CustomModelManager.cardRuntime(stateId);
+        if (runtime == null) {
+            return;
+        }
+        AvatarRenderState state = cardStates.computeIfAbsent(file, key -> cardState(stateId));
+        state.id = stateId;
+        // 卡片是静态展示：不跟鼠标转，正面朝前，只留一点俯角让立体感出来
+        state.bodyRot = 180.0F;
+        state.yRot = 0.0F;
+        state.xRot = 0.0F;
+        state.pose = Pose.STANDING;
+        state.isCrouching = false;
+        state.isUsingItem = false;
+        state.isPassenger = false;
+        state.isFallFlying = false;
+        state.isVisuallySwimming = false;
+        state.walkAnimationSpeed = 0.0F;
+        state.walkAnimationPos = 0.0F;
+        state.ageInTicks = (System.currentTimeMillis() - cardClockStart) / 50.0F;
+        state.boundingBoxWidth = 0.6F;
+        state.boundingBoxHeight = 1.8F;
+        state.scale = 1.0F;
+        int cardIndex = view.indexOf(file) - page * PER_PAGE;
+        boolean fading = cardIndex >= 0 && cardIndex == cardFadeIndex
+                && System.currentTimeMillis() - cardFadeStart < cardFadeSeconds * 1000.0F;
+        // 先定动画再采样：采样要按本帧的覆盖层算姿态，反过来的话动画永远慢一帧
+        String animation = applyCardAnimation(runtime, hot, isSelected, fading);
+        // 动画换了要重采一次：静止的卡片只采一次，不重采会一直停在旧姿势
+        boolean changed = !animation.equals(cardAnimations.put(file, animation));
+        // 淡出期间也要重采：不采的话姿态停在移出那一帧，动画根本播不出来
+        sampleCard(file, runtime, state, hot || fading || changed);
+        // 裁剪到卡片槽位：模型比槽位高，不裁会画到编号标签和名字上
+        graphics.enableScissor(cx, slotY, cx + CARD_W, slotY + slotH);
+        try {
+            // 只转 Y 不转 Z：几何在反序列化阶段已经烘成「Y 向上、脚在原点」，
+            // 原版那套 rotZ(180) 是给 Y 向下的原版模型用的，套上来会把模型倒过来。
+            // 模型原生朝 -Z，转 180° 才正对镜头；再压一点俯角，立体感来自这一下。
+            //
+            // 平移量是「模型中心到脚底」：几何脚在原点、身高 1.8 格，再乘上玩家模型的 0.9375
+            // 与作者声明的整体缩放（YSM 默认 0.7），中心落在 0.59 格。PiP 把模型画在纹理正中，
+            // 不往下挪这半格，模型会顶在卡片上沿。
+            Vector3f translation = new Vector3f(0.0F, -0.59F, 0.0F);
+            Quaternionf rotation = new Quaternionf().rotateY(3.1415927F);
+            rotation.mul(new Quaternionf().rotateX(-10.0F * 0.017453292F));
+            // 38 是「模型占满槽位约四分之三」的取值：几何高 1.8 格，乘上 0.9375 与 0.7 之后
+            // 是 1.18 格，38 × 1.18 ≈ 45 GUI 像素，槽位高 59。
+            graphics.entity(state, 38.0F, translation, rotation, null,
+                    cx, slotY + rise, cx + CARD_W, slotY + slotH + rise);
+        } finally {
+            graphics.disableScissor();
+        }
+    }
+
+    /** 卡片用的渲染状态：只填出图需要的字段，其余保持默认。 */
+    private static AvatarRenderState cardState(int stateId) {
+        AvatarRenderState state = new AvatarRenderState();
+        state.id = stateId;
+        state.lightCoords = 15728880;
+        return state;
+    }
+
+    /**
+     * 采样卡片姿态：悬停的那张按 {@link #CARD_SAMPLE_MS} 重采，其余只采一次。
+     *
+     * <p>没悬停的卡片是静止画面，逐帧重采纯属浪费；悬停的那张要播 {@code hover}，
+     * 必须持续推进物理与控制器。
+     */
+    private void sampleCard(String file, ModelRuntime runtime, AvatarRenderState state, boolean hot) {
+        long now = System.currentTimeMillis();
+        boolean sampled = cardSampled.contains(file);
+        if (sampled && !hot) {
+            return;
+        }
+        if (hot && now - cardSampleAt < CARD_SAMPLE_MS) {
+            return;
+        }
+        if (hot) {
+            cardSampleAt = now;
+        }
+        cardSampled.add(file);
+        runtime.sampleFrame(state, null, state.ageInTicks / 20.0F);
+    }
+
+    /**
+     * 卡片动画：照 OpenYSM 的 {@code ModelButton} 那套状态机。
+     *
+     * <p>悬停播 {@code hover}、移出播 {@code hover_fadeout}（播完停在末帧）、聚焦播 {@code focus}，
+     * 都没有就退回 {@code empty}。片段是作者写在模型里的，不是每个模型都有 ——
+     * 缺片段时 {@link ModelRuntime#setCardAnimation} 收到空名，等于不播。
+     */
+    private String applyCardAnimation(ModelRuntime runtime, boolean hot, boolean isSelected, boolean fading) {
+        String name = "";
+        boolean once = false;
+        if (hot) {
+            name = runtime.hasClip("hover") ? "hover" : "";
+        } else if (fading) {
+            // 刚移出的那一张：播一次淡出，播完停在末帧
+            name = runtime.hasClip("hover_fadeout") ? "hover_fadeout" : "";
+            once = true;
+        } else if (isSelected && runtime.hasClip("focus")) {
+            // 当前选中的那张用 focus 当待机：卡片没有键盘焦点，focus 在这里表示「就是它」
+            name = "focus";
+        }
+        runtime.setCardAnimation(name, once);
+        return name;
     }
 
     private void paintPager(VDrawContext ctx, int px, int py) {
@@ -531,7 +742,31 @@ public class ModelPickerScreen extends GenericScreen {
         if (next != hovered) {
             this.hovered = next;
             this.hoverStart = System.currentTimeMillis();
+            trackCardHover(next);
         }
+    }
+
+    /**
+     * 卡片悬停变化：移出时记下淡出起点与时长，让 {@code hover_fadeout} 播完再回 idle。
+     *
+     * <p>时长取片段自己的长度 —— 作者写多长就播多长，写死一个数会让长尾动画被截断。
+     */
+    private void trackCardHover(int next) {
+        int card = next >= HOVER_CARD ? next - HOVER_CARD : -1;
+        if (card == lastHoverCard) {
+            return;
+        }
+        if (lastHoverCard >= 0) {
+            int index = page * PER_PAGE + lastHoverCard;
+            if (index < view.size()) {
+                ModelRuntime runtime = CustomModelManager.cardRuntime(
+                        CustomModelManager.cardStateId(view.get(index)));
+                this.cardFadeSeconds = runtime == null ? 0.0F : runtime.clipLength("hover_fadeout");
+                this.cardFadeStart = System.currentTimeMillis();
+                this.cardFadeIndex = this.cardFadeSeconds > 0.0F ? lastHoverCard : -1;
+            }
+        }
+        this.lastHoverCard = card;
     }
 
     private boolean click(EfWidget self, double mouseX, double mouseY, int button) {
@@ -593,7 +828,30 @@ public class ModelPickerScreen extends GenericScreen {
 
     private void turnPage(int step) {
         int pages = pageCount();
-        this.page = Math.max(0, Math.min(pages - 1, this.page + step));
+        int next = Math.max(0, Math.min(pages - 1, this.page + step));
+        if (next == this.page) {
+            return;
+        }
+        this.page = next;
+        // 翻页后上一页的实例没人用了：留着白占内存，而重建代价与首次加载相同
+        retainPageCards();
+        this.cardEnterStart = System.currentTimeMillis();
+    }
+
+    /** 只保留当前页的卡片实例；顺带清掉它们的渲染状态，编号变了要重建。 */
+    private void retainPageCards() {
+        Set<String> keep = new HashSet<>();
+        int base = page * PER_PAGE;
+        for (int i = 0; i < PER_PAGE && base + i < view.size(); i++) {
+            keep.add(view.get(base + i));
+        }
+        CustomModelManager.retainCards(keep);
+        cardStates.keySet().retainAll(keep);
+        cardSampled.retainAll(keep);
+        cardAnimations.keySet().retainAll(keep);
+        this.lastHoverCard = -1;
+        this.cardFadeIndex = -1;
+        this.cardFadeSeconds = 0.0F;
     }
 
     private boolean wheel(EfWidget self, double mouseX, double mouseY, double amount) {

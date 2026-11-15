@@ -106,6 +106,14 @@ public abstract class PlayerModelSubmitMixin {
             return;
         }
         LocalPlayer localPlayer = Minecraft.getInstance().player;
+        // 卡片预览：合成实体编号认领自己的 runtime，姿态由卡片自己采样好，这里只出图。
+        // 走同一条提交路径是为了复用渲染类型、发光趟与图层逻辑，不必另写一套渲染器。
+        ModelRuntime card = CustomModelManager.cardRuntime(avatar.id);
+        if (card != null) {
+            submitCardModel(card, avatar, poseStack, collector, avatar.lightCoords);
+            callbackInfo.cancel();
+            return;
+        }
         if (localPlayer == null || avatar.id != localPlayer.getId()) {
             return;
         }
@@ -177,6 +185,31 @@ public abstract class PlayerModelSubmitMixin {
             }
         }
         callbackInfo.cancel();
+    }
+
+    /**
+     * 卡片预览的出图：几何来自卡片自己的 runtime，姿态是它最近一次采样好的快照。
+     *
+     * <p>不复刻 {@link #applyEntityTransform}：卡片要的是「模型本身长什么样」，
+     * 实体姿态（睡觉、游泳、潜行）属于世界里的玩家，套到卡片上只会让十个模型摆出同一个姿势。
+     * 朝向由卡片在 PoseStack 上自己转。
+     */
+    private void submitCardModel(ModelRuntime runtime, AvatarRenderState avatar, PoseStack poseStack,
+            SubmitNodeCollector collector, int light) {
+        // 与世界里同一套缩放：玩家模型的 0.9375 与作者声明的整体缩放（YSM 默认 0.7）。
+        // 少了这两层，卡片里的模型会比世界里大一圈，选完进游戏观感对不上。
+        poseStack.scale(avatar.scale, avatar.scale, avatar.scale);
+        this.scale(avatar, poseStack);
+        poseStack.scale(runtime.heightScale(), runtime.widthScale(), runtime.heightScale());
+        RenderType mainType = runtime.hasTranslucentPixels()
+                ? RenderTypes.entityTranslucent(runtime.texture())
+                : RenderTypes.entityCutout(runtime.texture());
+        collector.submitCustomGeometry(poseStack, mainType,
+                (pose, buffer) -> runtime.renderSnapshot(pose, buffer, light));
+        if (runtime.hasGlowBones()) {
+            collector.submitCustomGeometry(poseStack, RenderTypes.entityTranslucentEmissive(runtime.texture()),
+                    (pose, buffer) -> runtime.renderGlowSnapshot(pose, buffer, FULL_BRIGHT));
+        }
     }
 
     /**

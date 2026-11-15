@@ -415,6 +415,20 @@ public final class ModelRuntime {
     }
 
     /**
+     * 卡片预览用的实例：几何与贴图照常，音效表丢掉。
+     *
+     * <p>选择页一屏十份，而单个模型的 ogg 字节最大 64MB —— 卡片是静态展示，不需要音效，
+     * 留着等于把模型常驻内存翻好几倍。
+     */
+    public static ModelRuntime buildCard(RawYsmModel model, Identifier texture, boolean hideProps) {
+        ModelRuntime built = build(model, texture, hideProps);
+        if (built != null) {
+            built.release();
+        }
+        return built;
+    }
+
+    /**
      * {@code defaultClips} 是缺失片段的兜底表：主模型接默认模型的 main + arm，第一人称手臂传空表
      * —— 默认动画按渲染目标分域，main/arm 那套不属于手臂模型，套上去只会让手臂摆出身体姿势。
      */
@@ -2554,12 +2568,91 @@ public final class ModelRuntime {
         }
     }
 
+    /**
+     * 只出图不采样：用最近一次 {@link #sampleFrame} 算好的姿态，没有就退回静止姿态。
+     *
+     * <p>卡片预览一屏十份，逐帧全量采样会把主线程吃满；采样按调用方的节奏跑
+     * （{@code ModelPickerScreen#sampleCard}），出图每帧都走这里。姿态矩阵是采样那一帧的快照，
+     * 所以两次采样之间画面是静止的 —— 卡片尺寸下看不出来。
+     */
+    public void renderSnapshot(PoseStack.Pose pose, VertexConsumer buffer, int light) {
+        if (frameValid) {
+            emit(pose, buffer, light, frameMatrices, frameNormals);
+        } else {
+            emit(pose, buffer, light, restMatrices, restNormals);
+        }
+    }
+
+    /** {@link #renderSnapshot} 的发光骨第二趟；没有发光骨时什么都不做。 */
+    public void renderGlowSnapshot(PoseStack.Pose pose, VertexConsumer buffer, int light) {
+        if (glowMask == null) {
+            return;
+        }
+        if (frameValid) {
+            emit(pose, buffer, light, frameMatrices, frameNormals, glowMask);
+        } else {
+            emit(pose, buffer, light, restMatrices, restNormals, glowMask);
+        }
+    }
+
+    /**
+     * 模型里有没有这条片段。
+     *
+     * <p>卡片动画（{@code hover} / {@code hover_fadeout} / {@code focus}）是作者在模型里自己写的，
+     * 没有就退回 {@code empty}；判据与 {@link #setExtra(String)} 一致，走同一张片段表。
+     */
+    public boolean hasClip(String name) {
+        return name != null && !name.isEmpty() && clip(name) != null;
+    }
+
+    /** 片段时长（秒）；没有这条片段时返回 0。卡片按它决定 {@code hover_fadeout} 要播多久。 */
+    public float clipLength(String name) {
+        RawYsmModel.RawAnimation clip = clip(name);
+        return clip == null ? 0.0F : lengthOf(clip);
+    }
+
+    /**
+     * 卡片动画：把一条按名字找到的片段当覆盖层播。
+     *
+     * <p>与 {@link #setExtra(String)} 的差别是查找范围 —— 卡片的 {@code hover} / {@code focus}
+     * 是作者写在主动画文件里的普通片段，不在轮盘的额外动作表里，走 {@code extraClips} 永远找不到。
+     *
+     * <p>{@code once} 为真时播完停在末帧（{@code hover_fadeout} 要停在收尾姿势），
+     * 为假时循环（{@code hover} / {@code focus} 是持续状态）。
+     */
+    public void setCardAnimation(String name, boolean once) {
+        RawYsmModel.RawAnimation clip = name == null || name.isEmpty() ? null : clip(name);
+        if (clip == activeExtra && once == extraOnce) {
+            return;
+        }
+        if (clip != activeExtra) {
+            activeExtraStart = Float.NaN;
+        }
+        activeExtra = clip;
+        activeExtraKey = clip == null ? "" : name;
+        extraOnce = once;
+        recomputeHidden();
+    }
+
     public void render(PoseStack.Pose pose, VertexConsumer buffer, int light,
             AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
-        RawYsmModel.RawAnimation clip = pickClip(avatar, player);
-        if (clip == null) {
+        if (!sampleFrame(avatar, player, ageSeconds)) {
             render(pose, buffer, light);
             return;
+        }
+        emit(pose, buffer, light, frameMatrices, frameNormals);
+    }
+
+    /**
+     * 只采样不出图：把本帧姿态算进 {@link #frameMatrices}，物理与控制器照常推进。
+     *
+     * <p>卡片预览一屏十份，逐帧全量采样太贵，所以采样与出图拆开：采样按调用方的节奏跑，
+     * 出图走 {@link #renderSnapshot}。返回 {@code false} 表示没有可播的片段，调用方退回静止姿态。
+     */
+    public boolean sampleFrame(AvatarRenderState avatar, LocalPlayer player, float ageSeconds) {
+        RawYsmModel.RawAnimation clip = pickClip(avatar, player);
+        if (clip == null) {
+            return false;
         }
         MolangVariables.bind(player, avatar, variables);
         MolangVariables.bindRuntime(this);
@@ -2690,14 +2783,14 @@ public final class ModelRuntime {
         frameValid = true;
         // 每帧只拷一次：表达式在采样过程中求值，读的是上一帧的完整姿态（见 lastFramePoses）
         System.arraycopy(poses, 0, lastFramePoses, 0, poses.length);
-        int emitted = emit(pose, buffer, light, frameMatrices, frameNormals);
         if (!logged) {
             logged = true;
             Matrix4f first = frameMatrices.length == 0 ? null : frameMatrices[0];
             Debug.info("[SFH+] anim clip=" + clipName(clip) + " len=" + clip.length + " loop=" + clip.loopMode
-                    + " t=" + time + " bones=" + bones.size() + " emitted=" + emitted
+                    + " t=" + time + " bones=" + bones.size()
                     + " m0=" + (first == null ? "null" : first.m30() + "," + first.m31() + "," + first.m32()));
         }
+        return true;
     }
 
     /**
