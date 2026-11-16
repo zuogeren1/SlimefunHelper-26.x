@@ -33,31 +33,14 @@ public class CustomModelModule extends BaseModule {
     /**
      * 模型文件名（相对 {@code config/slimefun-plus/models}）。
      *
-     * <p>用 {@link StringChoiceRef} 而不是普通 {@code StringRef}：宿主 ClickGui 对后者一律画文本框，
-     * 而模型文件名只能从已有里选。{@code StringChoiceRef} 把 keyValue 换成
-     * {@code EnumAttrKeyValue}，宿主那套下拉就自动生效了。
+     * <p>宿主 ClickGui 对 {@code StringRef} 一律画文本框，只有 {@code EnumAttrKeyValue} 走下拉；
+     * 而配置项必须经 {@code builder(...)} 才会登记进界面，那条路固定产出 {@code StringRef}。
+     * 所以宿主侧保持文本框，下拉只在 newclickgui 里提供（见 {@code registerStringChoices}）。
      */
-    public final StringRef model = createModelRef();
-
-    /**
-     * 建模型文件配置项。
-     *
-     * <p>不走 {@code builder(...)}：那条路固定产出普通 {@code StringRef}，而宿主 ClickGui 对
-     * {@code StringRef} 一律画文本框。这里直接 {@code getOrCreate} 一个 {@link StringChoiceRef}，
-     * 它的 keyValue 是 {@code EnumAttrKeyValue}，宿主那套下拉就自动生效。
-     *
-     * <p>{@code StringChoiceRef.isSameTypeWith} 只认自己，所以配置里已有的普通 {@code StringRef}
-     * 会被替换掉（值通过 {@code copyValueFrom} 带过去），不会出现「字段指向旧节点」的脱节。
-     */
-    private StringRef createModelRef() {
-        StringChoiceRef created = new StringChoiceRef("", CustomModelModule::modelChoices);
-        me.matl114.managers.config.Ref<String> stored =
-                CONFIG.getOrCreate(created, root.add("model").toPath());
-        StringRef result = stored instanceof StringRef ref ? ref : created;
-        result.setDefaultValue("");
-        result.addUpdateListener(this::onModelChanged);
-        return result;
-    }
+    public final StringRef model = builder(root.add("model"), String.class)
+            .defaultValue("")
+            .updateListener(this::onModelChanged)
+            .build();
 
     /**
      * 第一人称用模型自带的手臂替换原版皮肤手臂。
