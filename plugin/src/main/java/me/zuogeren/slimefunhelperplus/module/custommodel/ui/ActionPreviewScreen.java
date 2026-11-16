@@ -59,12 +59,17 @@ public class ActionPreviewScreen extends GenericScreen {
     private static final int BACK_Y = 40;
     private static final int BACK_W = 145;
     private static final int BACK_H = 22;
+    /** 分类切换条：返回按钮下方一行三个标签。 */
+    private static final int TAB_Y = 66;
+    private static final int TAB_H = 14;
+    private static final int TAB_W = 47;
     private static final int LIST_X = 265;
-    private static final int LIST_Y = 66;
+    private static final int LIST_Y = 84;
     private static final int LIST_W = 145;
     private static final int ROW_H = 18;
     private static final int ROW_STEP = 20;
-    private static final int ACT_PER_PAGE = 8;
+    /** 每页动作数：分类切换条占掉一行后，面板只剩 151px，7 行刚好不溢出。 */
+    private static final int ACT_PER_PAGE = 7;
 
     private static final float WIPE_MS = 260.0F;
 
@@ -75,6 +80,11 @@ public class ActionPreviewScreen extends GenericScreen {
     private static final int HOVER_PREV = 1;
     private static final int HOVER_NEXT = 2;
     private static final int HOVER_BACK = 3;
+    private static final int HOVER_TAB = 4;
+    /** 分类切换条的顺序，与 {@link #paintTabs} 的标签一一对应。 */
+    private static final ModelRuntime.Category[] TAB_CATEGORIES = {
+            ModelRuntime.Category.MAIN, ModelRuntime.Category.EXTRA, ModelRuntime.Category.VARIANT
+    };
     private static final int HOVER_ROW = 10;
 
     private final Ef.Palette pal = Ef.DARK;
@@ -82,6 +92,8 @@ public class ActionPreviewScreen extends GenericScreen {
     private int panelX;
     private int panelY;
     private int page;
+    /** 当前分类筛选；{@code null} 表示全部。 */
+    private ModelRuntime.Category category = ModelRuntime.Category.MAIN;
     private int hovered = HOVER_NONE;
     private long hoverStart = System.currentTimeMillis();
 
@@ -136,9 +148,37 @@ public class ActionPreviewScreen extends GenericScreen {
                 .addTo(this);
     }
 
+    /**
+     * 当前分类下的动作列表。
+     *
+     * <p>主体态动作（idle/walk/run/death…）与轮盘额外动作分开列：语料实测每个模型有 22~26 条
+     * 主体态动作，混在一起会把轮盘动作挤到后面几页。
+     */
     private List<ModelRuntime.ExtraOption> options() {
         ModelRuntime runtime = CustomModelManager.runtime();
-        return runtime == null ? List.of() : runtime.extras();
+        if (runtime == null) {
+            return List.of();
+        }
+        List<ModelRuntime.ExtraOption> all = runtime.extras();
+        if (category == null) {
+            return all;
+        }
+        List<ModelRuntime.ExtraOption> filtered = new java.util.ArrayList<>();
+        for (ModelRuntime.ExtraOption option : all) {
+            if (option.category() == category) {
+                filtered.add(option);
+            }
+        }
+        return filtered;
+    }
+
+    /** 切换分类；页码归零，否则会停在超出范围的页。 */
+    private void setCategory(ModelRuntime.Category next) {
+        if (category == next) {
+            return;
+        }
+        category = next;
+        page = 0;
     }
 
     private int pageCount() {
@@ -161,6 +201,7 @@ public class ActionPreviewScreen extends GenericScreen {
         Ef.cutFill(ctx, px + RIGHT_X, py, RIGHT_W, PANEL_H, pal.panel(), Ef.CUT_PANEL, Ef.Corner.BR);
         paintStage(ctx, px, py);
         paintNav(ctx, px, py);
+        paintTabs(ctx, px, py);
         paintList(ctx, px, py);
     }
 
@@ -241,6 +282,35 @@ public class ActionPreviewScreen extends GenericScreen {
         int ink = !enabled ? 0xFF5C5C5C : (hot ? Ef.ON_SIGNAL : pal.ink());
         Ef.text(ctx, glyph, x + (NAV_SIZE - Ef.textWidth(glyph)) / 2,
                 y + (NAV_SIZE - Ef.lineH()) / 2, ink);
+    }
+
+    /**
+     * 分类切换：主体动作 / 轮盘动作 / 服装。
+     *
+     * <p>语料实测每个模型有 22~26 条主体态动作（idle/walk/run/death…），
+     * 与轮盘动作混在一列会把后者挤到后面几页，所以分开列。
+     */
+    private void paintTabs(VDrawContext ctx, int px, int py) {
+        ModelRuntime.Category[] cats = {
+                ModelRuntime.Category.MAIN, ModelRuntime.Category.EXTRA, ModelRuntime.Category.VARIANT
+        };
+        String[] labels = {"主体", "轮盘", "服装"};
+        for (int i = 0; i < cats.length; i++) {
+            int tx = px + LIST_X + i * (TAB_W + 2);
+            int ty = py + TAB_Y;
+            boolean active = category == cats[i];
+            boolean hot = hovered == HOVER_TAB + i;
+            if (active) {
+                Ef.cutFill(ctx, tx, ty, TAB_W, TAB_H, Ef.SIGNAL, 2, Ef.Corner.BR);
+            } else if (hot) {
+                Ef.cutFill(ctx, tx, ty, TAB_W, TAB_H, pal.chip(), 2, Ef.Corner.BR);
+            } else {
+                Ef.cutFill(ctx, tx, ty, TAB_W, TAB_H, pal.panel(), 2, Ef.Corner.BR);
+            }
+            int ink = active ? Ef.ON_SIGNAL : (hot ? pal.ink() : pal.ink2());
+            Ef.text(ctx, labels[i], tx + (TAB_W - Ef.textWidth(labels[i])) / 2,
+                    ty + (TAB_H - Ef.lineH()) / 2, ink);
+        }
     }
 
     private void paintList(VDrawContext ctx, int px, int py) {
@@ -374,6 +444,8 @@ public class ActionPreviewScreen extends GenericScreen {
                 next = HOVER_NEXT;
             } else if (inside(mx, my, BACK_X, BACK_Y, BACK_W, BACK_H)) {
                 next = HOVER_BACK;
+            } else if (tabAt(mx, my) >= 0) {
+                next = HOVER_TAB + tabAt(mx, my);
             } else {
                 int row = rowAt(mx, my);
                 if (row >= 0) {
@@ -385,6 +457,20 @@ public class ActionPreviewScreen extends GenericScreen {
             this.hovered = next;
             this.hoverStart = System.currentTimeMillis();
         }
+    }
+
+    /** 分类切换条的下标；不在条上返回 -1。 */
+    private int tabAt(int mx, int my) {
+        if (my < TAB_Y || my >= TAB_Y + TAB_H) {
+            return -1;
+        }
+        for (int i = 0; i < TAB_CATEGORIES.length; i++) {
+            int tx = LIST_X + i * (TAB_W + 2);
+            if (mx >= tx && mx < tx + TAB_W) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private boolean click(EfWidget self, double mouseX, double mouseY, int button) {
@@ -406,6 +492,11 @@ public class ActionPreviewScreen extends GenericScreen {
         }
         if (inside(mx, my, NEXT_X, NAV_Y, NAV_SIZE, NAV_SIZE)) {
             turnPage(1);
+            return true;
+        }
+        int tab = tabAt(mx, my);
+        if (tab >= 0) {
+            setCategory(TAB_CATEGORIES[tab]);
             return true;
         }
         int row = rowAt(mx, my);

@@ -382,7 +382,27 @@ public final class ModelRuntime {
     private final ModelPhysics physics = new ModelPhysics();
 
     /** 轮盘里的一条：{@code key} 是动画名，{@code variant} 标记「服装预设」而不是额外动作。 */
-    public record ExtraOption(String key, String label, boolean variant) {}
+    /**
+     * 预览页/轮盘的一条可选动作。
+     *
+     * <p>{@code category} 区分来源：主体态动作（{@code animType=1} 的 idle/walk/death…）、
+     * 轮盘额外动作（{@code animType=3}）、服装预设。预览页按它分组，轮盘只列后两类。
+     */
+    public record ExtraOption(String key, String label, boolean variant, Category category) {
+        public ExtraOption(String key, String label, boolean variant) {
+            this(key, label, variant, variant ? Category.VARIANT : Category.EXTRA);
+        }
+    }
+
+    /** 动作来源分类。 */
+    public enum Category {
+        /** 主体态动作：idle/walk/run/death 等，作者写在主动画文件里。 */
+        MAIN,
+        /** 轮盘额外动作：作者用 {@code extra_animation} 声明的。 */
+        EXTRA,
+        /** 服装预设：静态覆盖层，不是动作。 */
+        VARIANT
+    }
 
     private static String clipName(RawYsmModel.RawAnimation clip) {
         return clip == null || clip.name == null ? "none" : clip.name;
@@ -1240,6 +1260,10 @@ public final class ModelRuntime {
                 String name = entry.getKey();
                 if (isVariantName(name)) {
                     variants.add(entry);
+                } else if (file.animType == 1 && MAIN_STATES.contains(name)) {
+                    // 主体态动作（idle/walk/run/death…）也进预览列表：作者把它们写在主动画文件里，
+                    // 轮盘只列 extra 文件（animType=3）会整批漏掉。动作预览页要能单独看这些。
+                    extras.add(new ExtraOption(name, mainStateLabel(name), false, Category.MAIN));
                 } else if (file.animType == 3) {
                     // 作者用 extraAnimations 给出菜单；没有出现在菜单里的（如 extra0 配置动画）不列
                     if (!labels.isEmpty() && !labels.containsKey(name)) {
@@ -1279,6 +1303,38 @@ public final class ModelRuntime {
             options.add(option);
         }
         return variants.isEmpty() ? "" : variants.get(0).getKey();
+    }
+
+    /** 主体态动作的中文标签；没列到的直接用原名。 */
+    private static String mainStateLabel(String name) {
+        return switch (name) {
+            case "idle" -> "待机";
+            case "walk" -> "走路";
+            case "run" -> "跑步";
+            case "sneak", "sneaking" -> "潜行";
+            case "fly" -> "飞行";
+            case "elytra_fly" -> "鞘翅飞行";
+            case "swim" -> "游泳";
+            case "swim_stand" -> "水中站立";
+            case "ride" -> "骑乘";
+            case "boat" -> "坐船";
+            case "jump" -> "跳跃";
+            case "attacked" -> "受击";
+            case "death" -> "死亡";
+            case "riptide" -> "激流";
+            case "sleep" -> "睡觉";
+            case "climb" -> "攀爬";
+            case "climbing" -> "攀爬中";
+            case "ladder_up" -> "爬梯上";
+            case "ladder_down" -> "爬梯下";
+            case "ladder_stillness" -> "爬梯静止";
+            case "use_mainhand" -> "使用主手";
+            case "use_offhand" -> "使用副手";
+            case "swing_hand" -> "挥动主手";
+            case "swing_offhand" -> "挥动副手";
+            case "sit" -> "坐下";
+            default -> name;
+        };
     }
 
     /**
