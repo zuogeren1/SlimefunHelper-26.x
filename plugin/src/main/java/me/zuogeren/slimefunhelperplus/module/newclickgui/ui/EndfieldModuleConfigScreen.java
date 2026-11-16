@@ -157,6 +157,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     private final List<Row> rows = new ArrayList<>();
 
+    /** 下拉每行高度。 */
+    private static final int DROP_ROW_H = 13;
+    /** 下拉最多显示几行；超出部分靠滚轮翻。 */
+    private static final int DROP_MAX_ROWS = 12;
+    /** 下拉的滚动偏移（行）。 */
+    private int dropScroll;
+
     /** 打开中的枚举下拉：绘制与命中都用记录下来的矩形；{@code dropPart >= 0} 表示下拉的是记录里的那一格。 */
     private WrapperConfigRef<?> dropdown;
     private int dropPart = -1;
@@ -1171,7 +1178,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * {@code WrapEnum} 只是把枚举包了一层，取值表仍按里面的枚举类型列。
      */
     /**
-     * 字符串型配置的候选值提供者：键是配置路径，值是「当前值 → 候选列表」。
+     * 字符串型配置的候选值提供者：键是配置路径，值是候选列表。
      *
      * <p>枚举型配置自带 {@code getEnumConstants()}，但字符串型（比如模型文件名）的候选是运行时才知道的，
      * 只能由模块自己注册。没注册的字符串仍然走文本框。
@@ -1182,6 +1189,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 给一个字符串型配置注册候选值；传 {@code null} 取消注册。 */
     public static void registerStringChoices(String path,
             java.util.function.Supplier<java.util.List<String>> choices) {
+        if (path == null || path.isEmpty()) {
+            return;
+        }
         if (choices == null) {
             STRING_CHOICES.remove(path);
         } else {
@@ -2360,24 +2370,38 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             dropPart = -1;
             return;
         }
-        int rowH = 13;
-        int height = options.length * rowH + 4;
+        int rowH = DROP_ROW_H;
+        // 候选多时限制高度并滚动：模型文件动辄几十上百个，全画出来会顶出屏幕
+        int visible = Math.min(options.length, DROP_MAX_ROWS);
+        int height = visible * rowH + 4;
         int top = dropTop(height);
+        dropScroll = Math.max(0, Math.min(options.length - visible, dropScroll));
         Ef.fill(ctx, dropX, top, dropW, height, p.panel());
         Ef.cutOutline(ctx, dropX, top, dropW, height, p.ink(), Ef.CUT);
 
         Object current = currentOf(dropdown, dropPart);
-        for (int i = 0; i < options.length; i++) {
+        for (int i = 0; i < visible; i++) {
+            int index = dropScroll + i;
             int oy = top + 2 + i * rowH;
             boolean hover = mouseX >= dropX && mouseX <= dropX + dropW && mouseY >= oy && mouseY < oy + rowH;
-            boolean active = options[i] == current;
+            boolean active = options[index] == current;
             if (hover) {
                 Ef.fill(ctx, dropX + 1, oy, dropW - 2, rowH, Ef.mix(p.panel(), p.ink(), 0.08F));
             }
             if (active) {
                 Ef.fill(ctx, dropX + 1, oy, 2, rowH, p.trace());
             }
-            Ef.text(ctx, Ef.ellipsis(enumLabel(options[i]), dropW - 14), dropX + 8, oy + 3, active ? p.ink() : p.ink2());
+            Ef.text(ctx, Ef.ellipsis(enumLabel(options[index]), dropW - 14), dropX + 8, oy + 3,
+                    active ? p.ink() : p.ink2());
+        }
+        // 滚动条：只在真的滚得动时画，免得短列表也挂一条
+        if (options.length > visible) {
+            int trackX = dropX + dropW - 3;
+            int trackH = height - 4;
+            Ef.fill(ctx, trackX, top + 2, 2, trackH, Ef.mix(p.panel(), p.ink(), 0.12F));
+            int thumbH = Math.max(8, trackH * visible / options.length);
+            int thumbY = top + 2 + (trackH - thumbH) * dropScroll / Math.max(1, options.length - visible);
+            Ef.fill(ctx, trackX, thumbY, 2, thumbH, p.ink2());
         }
     }
 
@@ -2431,16 +2455,19 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
         if (dropdown != null) {
             Object[] options = optionsFor(dropdown, dropPart);
-            int rowH = 13;
-            int top = dropTop(options.length * rowH + 4);
-            if (mx >= dropX && mx <= dropX + dropW && my >= top && my <= top + options.length * rowH + 4) {
-                int index = (my - top - 2) / rowH;
+            int rowH = DROP_ROW_H;
+            int visible = Math.min(options.length, DROP_MAX_ROWS);
+            int top = dropTop(visible * rowH + 4);
+            if (mx >= dropX && mx <= dropX + dropW && my >= top && my <= top + visible * rowH + 4) {
+                // 命中要加上滚动偏移：画出来的是 dropScroll 之后的那一段
+                int index = dropScroll + (my - top - 2) / rowH;
                 if (index >= 0 && index < options.length) {
                     applyOption(dropdown, dropPart, options[index]);
                 }
             }
             dropdown = null;
             dropPart = -1;
+            dropScroll = 0;
             return true;
         }
 
@@ -2579,6 +2606,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private boolean wheel(EfWidget self, double mouseX, double mouseY, double amount) {
+        // 下拉打开时滚轮先滚它：候选多到要滚动时，滚轮是唯一能翻的手段
+        if (dropdown != null) {
+            Object[] options = optionsFor(dropdown, dropPart);
+            int visible = Math.min(options.length, DROP_MAX_ROWS);
+            if (options.length > visible) {
+                int step = (int) Math.signum(amount);
+                dropScroll = Math.max(0, Math.min(options.length - visible, dropScroll - step));
+                return true;
+            }
+        }
         // 滚动等于离开这一格：正在编辑的文本先提交，打的字不该丢
         closeTextEdit();
         if (listPanel != null) {

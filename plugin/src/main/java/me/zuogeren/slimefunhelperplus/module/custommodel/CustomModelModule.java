@@ -30,11 +30,34 @@ public class CustomModelModule extends BaseModule {
 
     public final FlagRef enable = flagBuilder(root.addEnable()).defaultValue(false).build();
 
-    /** 模型文件名（相对 {@code config/slimefun-plus/models}），P4 接 ClickGui 选择器。 */
-    public final StringRef model = builder(root.add("model"), String.class)
-            .defaultValue("")
-            .updateListener(this::onModelChanged)
-            .build();
+    /**
+     * 模型文件名（相对 {@code config/slimefun-plus/models}）。
+     *
+     * <p>用 {@link StringChoiceRef} 而不是普通 {@code StringRef}：宿主 ClickGui 对后者一律画文本框，
+     * 而模型文件名只能从已有里选。{@code StringChoiceRef} 把 keyValue 换成
+     * {@code EnumAttrKeyValue}，宿主那套下拉就自动生效了。
+     */
+    public final StringRef model = createModelRef();
+
+    /**
+     * 建模型文件配置项。
+     *
+     * <p>不走 {@code builder(...)}：那条路固定产出普通 {@code StringRef}，而宿主 ClickGui 对
+     * {@code StringRef} 一律画文本框。这里直接 {@code getOrCreate} 一个 {@link StringChoiceRef}，
+     * 它的 keyValue 是 {@code EnumAttrKeyValue}，宿主那套下拉就自动生效。
+     *
+     * <p>{@code StringChoiceRef.isSameTypeWith} 只认自己，所以配置里已有的普通 {@code StringRef}
+     * 会被替换掉（值通过 {@code copyValueFrom} 带过去），不会出现「字段指向旧节点」的脱节。
+     */
+    private StringRef createModelRef() {
+        StringChoiceRef created = new StringChoiceRef("", CustomModelModule::modelChoices);
+        me.matl114.managers.config.Ref<String> stored =
+                CONFIG.getOrCreate(created, root.add("model").toPath());
+        StringRef result = stored instanceof StringRef ref ? ref : created;
+        result.setDefaultValue("");
+        result.addUpdateListener(this::onModelChanged);
+        return result;
+    }
 
     /**
      * 第一人称用模型自带的手臂替换原版皮肤手臂。
@@ -58,18 +81,21 @@ public class CustomModelModule extends BaseModule {
             .registerHotkey(HotKeyUtils.wrapAsHandler((Runnable) this::openModelPicker))
             .build();
 
+    /** 模型文件的候选值：空串（不选）+ 目录里扫到的所有模型。 */
+    private static java.util.List<String> modelChoices() {
+        java.util.List<String> names = ModelCatalog.names();
+        java.util.List<String> choices = new java.util.ArrayList<>(names.size() + 1);
+        choices.add("");
+        choices.addAll(names);
+        return choices;
+    }
+
     public CustomModelModule() {
         super("CustomModel");
         bindFlag(enable);
-        // 模型文件从已有里选，不让人手打文件名：候选由 ModelCatalog 提供，扫描后自动更新
+        // newclickgui 的下拉读这张表；宿主 ClickGui 走 StringChoiceRef 的 keyValue，不需要注册
         me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen
-                .registerStringChoices(root.add("model").asString(), () -> {
-                    java.util.List<String> names = ModelCatalog.names();
-                    java.util.List<String> choices = new java.util.ArrayList<>(names.size() + 1);
-                    choices.add("");
-                    choices.addAll(names);
-                    return choices;
-                });
+                .registerStringChoices(root.add("model").asString(), CustomModelModule::modelChoices);
     }
 
     @Override
