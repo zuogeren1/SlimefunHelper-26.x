@@ -15,10 +15,10 @@ import java.util.Map;
 import java.util.Set;
 import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
-import me.zuogeren.slimefunhelperplus.module.custommodel.texture.ModelTexture;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSound;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSoundCursorTable;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
+import me.zuogeren.slimefunhelperplus.module.custommodel.texture.ModelTexture;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
@@ -219,6 +219,25 @@ public final class ModelRuntime {
     /** 模型高度的合理区间（格）：语料实测几何高度在 2.5~12.6 之间，留一点余量。 */
     private static final float MIN_MODEL_HEIGHT = 1.0F;
     private static final float MAX_MODEL_HEIGHT = 16.0F;
+    /**
+     * 模型在**世界空间**里的 Y 包围盒（格），构建期算一次。
+     *
+     * <p>必须累加父链：面片坐标是骨骼局部坐标，直接取 min/max 得到的是「所有骨骼局部包围盒的并集」，
+     * 与真实尺寸对不上（实测 fuxuan 局部 5.82 格、真实 4.27 格）。卡片定位与缩放都按它算。
+     */
+    private float boundsMinY;
+    private float boundsMaxY;
+    private boolean boundsValid;
+    /**
+     * 全部骨骼（含默认隐藏的）的 Y 下界，只用来定卡片锚点。
+     *
+     * <p>与 {@link #boundsMinY} 分开：那个跳过隐藏骨（量的是「静止时看得见的身体」），
+     * 但卡片播的 {@code preview_animation} 会把背景板/舞台这类隐藏骨放出来
+     * （AveMujica 的 {@code stage} 驱动 {@code Backgrounds}），它们的脚底才是真正的下界。
+     */
+    private float feetMinY;
+    private boolean feetValid;
+    /** 卡片取景锚点（YSM 的 {@code posY}）：脚底落在卡片 y=65 处，见 {@code ModelPickerScreen}。 */
     /** 作者声明的预览动画名（{@code properties.preview_animation}）；空串表示没声明。 */
     private String previewAnimation = "";
     /** 作者声明「预览时不要转」（{@code properties.disable_preview_rotation}）。 */
@@ -495,6 +514,8 @@ public final class ModelRuntime {
         for (int i = 0; i < count; i++) {
             normals[i] = normalOf(matrices[i]);
         }
+        // 作者声明的预览动画名：它也算主体态（见下面的 mainAnimated 判定）
+        String previewName = model.properties == null ? "" : model.properties.previewAnimation;
         Map<String, RawYsmModel.RawAnimation> clips = new HashMap<>();
         Map<String, List<String>> references = new HashMap<>();
         Set<String> zeroScaled = new HashSet<>();
@@ -520,7 +541,10 @@ public final class ModelRuntime {
                             continue;
                         }
                         references.computeIfAbsent(boneAnimation.boneName, key -> new java.util.ArrayList<>()).add(name);
-                        if (mainState) {
+                        // preview_animation 也算主体态：卡片播的就是它，作者在里面把背景板/标题
+                        // 从 0 缩放到 1 放出来（AveMujica 的 stage 片段驱动 Backgrounds/title/error）。
+                        // 不算进来的话这些根会被当成「舞台道具」整棵隐藏，卡片里就只剩角色本体。
+                        if (mainState || name.equals(previewName)) {
                             mainAnimated.add(boneAnimation.boneName);
                         } else if (name.startsWith("pre_parallel") && hasZeroScale(boneAnimation)) {
                             zeroScaled.add(boneAnimation.boneName);
@@ -552,7 +576,10 @@ public final class ModelRuntime {
             boolean mainReferenced = false;
             boolean propReferenced = false;
             for (String reference : rootRefs) {
-                if (MAIN_STATES.contains(reference)) {
+                // preview_animation 也算主体态：卡片播的就是它，作者在里面把背景板/标题
+                // 从 0 缩放到 1 放出来（AveMujica 的 stage 驱动 Backgrounds/title/error）。
+                // 只认 MAIN_STATES 的话这些根会被当成「舞台道具」整棵隐藏。
+                if (MAIN_STATES.contains(reference) || reference.equals(previewName)) {
                     mainReferenced = true;
                 } else {
                     propReferenced = true;
@@ -674,6 +701,7 @@ public final class ModelRuntime {
                     ? "" : model.properties.previewAnimation;
             runtime.disablePreviewRotation = model.properties.disablePreviewRotation;
         }
+        runtime.computeBounds();
         runtime.scanSwordGeometry(bones, parents);
         runtime.soundCursors = ModelSoundCursorTable.build(ModelSound.build(model));
         runtime.controllers = parseControllers(model);
@@ -2462,12 +2490,62 @@ public final class ModelRuntime {
      * 背景板/舞台这类超大部件，不夹会让卡片里的角色缩得看不见。
      */
     public float modelHeight() {
-        if (bones.isEmpty()) {
+        if (!boundsValid) {
             return 0.0F;
         }
+        return Math.min(Math.max(boundsMaxY - boundsMinY, MIN_MODEL_HEIGHT), MAX_MODEL_HEIGHT);
+    }
+
+    /**
+     * 模型世界包围盒的 Y 中心（格）。
+     *
+     * <p>卡片预览要把模型摆正，就得知道「模型中心在哪」—— 几何的脚不一定在原点
+     * （实测 fuxuan 的 Y 范围是 -0.71~3.56，中心 1.43 而不是身高的一半）。
+     */
+    public float modelCenterY() {
+        return boundsValid ? (boundsMinY + boundsMaxY) * 0.5F : 0.0F;
+    }
+
+    /**
+     * 模型静止姿态的脚底 Y（格）。
+     *
+     * <p>卡片取景要把脚底锚在固定位置，而脚底**不一定在 Y=0**：
+     * 语料实测 Trissy 是 -0.40、AveMujica 是 -1.10。按 0 算会让模型整体偏上
+     * （脚底越低偏得越多）。
+     */
+    public float modelFeetY() {
+        return feetValid ? feetMinY : 0.0F;
+    }
+
+    /**
+     * **本帧姿态**下的脚底 Y（格），排除背景/舞台根。
+     *
+     * <p>卡片取景**不用**它：YSM 的 {@code renderModelInGuiStateful} 把 {@code posY} 作用在
+     * 模型空间原点上，锚的是原点而不是脚底，几何原点不在 Y=0 的模型在 YSM 里同样会偏。
+     * 保留是因为「只取脚底」在将来的对齐需求里仍可能用到。
+     *
+     * <p>姿态里的位移会让脚底大幅移动（Trissy 静止 -0.40，{@code gui} 姿态下 -4.45），
+     * 所以取的是本帧姿态而不是静止值。
+     *
+     * <p>排除背景根：{@code Backgrounds}/{@code title} 这类舞台部件常被作者摆到很远
+     * （AveMujica 的 {@code title} 在 x=-30、{@code misumi} 在 x=-252），
+     * 它们的下界会把角色本身挤出取景。
+     */
+    public float posedFeetY() {
+        if (!frameValid || bones.isEmpty()) {
+            return modelFeetY();
+        }
         float min = Float.MAX_VALUE;
-        float max = -Float.MAX_VALUE;
-        for (RawYsmModel.RawBone bone : bones) {
+        Vector3f scratch = new Vector3f();
+        for (int i = 0; i < bones.size(); i++) {
+            if (hiddenCurrent[i] || isStageRoot(i)) {
+                continue;
+            }
+            Matrix4f matrix = frameMatrices[i];
+            if (matrix == null) {
+                continue;
+            }
+            RawYsmModel.RawBone bone = bones.get(i);
             if (bone.cubes == null) {
                 continue;
             }
@@ -2483,16 +2561,145 @@ public final class ModelRuntime {
                         if (position == null) {
                             continue;
                         }
-                        min = Math.min(min, position[1]);
-                        max = Math.max(max, position[1]);
+                        scratch.set(position[0], position[1], position[2]);
+                        matrix.transformPosition(scratch);
+                        min = Math.min(min, scratch.y);
+                    }
+                }
+            }
+        }
+        return min < Float.MAX_VALUE ? min : modelFeetY();
+    }
+
+    /**
+     * **本帧姿态**下的模型高度（格），含背景板/舞台这类部件。
+     *
+     * <p>卡片按它换算缩放：作者的 {@code preview_animation} 会把背景板从 0 缩放到 1 放出来
+     * （AveMujica 的 {@code stage} 驱动 {@code Backgrounds}），静止姿态量不到这部分，
+     * 按静止高度算缩放会让带背景板的模型超出卡片。
+     *
+     * <p>与 {@link #posedFeetY()} 不同，这里**不排除**背景根 —— 背景板也是要显示的内容，
+     * 它的高度必须算进取景。
+     */
+    public float posedHeight() {
+        if (!frameValid || bones.isEmpty()) {
+            return modelHeight();
+        }
+        float min = Float.MAX_VALUE;
+        float max = -Float.MAX_VALUE;
+        Vector3f scratch = new Vector3f();
+        for (int i = 0; i < bones.size(); i++) {
+            if (hiddenCurrent[i]) {
+                continue;
+            }
+            Matrix4f matrix = frameMatrices[i];
+            if (matrix == null) {
+                continue;
+            }
+            RawYsmModel.RawBone bone = bones.get(i);
+            if (bone.cubes == null) {
+                continue;
+            }
+            for (RawYsmModel.RawCube cube : bone.cubes) {
+                if (cube.faces == null) {
+                    continue;
+                }
+                for (RawYsmModel.RawFace face : cube.faces) {
+                    if (face.positions == null) {
+                        continue;
+                    }
+                    for (float[] position : face.positions) {
+                        if (position == null) {
+                            continue;
+                        }
+                        scratch.set(position[0], position[1], position[2]);
+                        matrix.transformPosition(scratch);
+                        min = Math.min(min, scratch.y);
+                        max = Math.max(max, scratch.y);
                     }
                 }
             }
         }
         if (!(max > min)) {
-            return 0.0F;
+            return modelHeight();
         }
         return Math.min(Math.max(max - min, MIN_MODEL_HEIGHT), MAX_MODEL_HEIGHT);
+    }
+
+
+    /** 舞台/背景类根骨骼：名字里带 background/title/stage 的根，或它们的子树。 */
+    private boolean isStageRoot(int index) {
+        int cursor = index;
+        while (cursor >= 0) {
+            String name = bones.get(cursor).name;
+            if (name != null) {
+                String lower = name.toLowerCase(java.util.Locale.ROOT);
+                if (lower.contains("background") || lower.contains("title") || lower.contains("stage")) {
+                    return true;
+                }
+            }
+            cursor = parents[cursor];
+        }
+        return false;
+    }
+
+    /**
+     * 构建期算一次世界空间 Y 包围盒：逐骨把面片顶点乘上 rest 矩阵（已含父链）。
+     *
+     * <p>跳过默认隐藏的骨骼：{@code emit} 不画它们（{@code hiddenCurrent[i]}），
+     * 算进包围盒会把中心拽偏 —— 语料实测最多差 2.35 格（{@code 玮玮酱} 3.98 → 1.63），
+     * 卡片里就表现为整体偏上。
+     */
+    private void computeBounds() {
+        if (bones.isEmpty() || restMatrices == null) {
+            return;
+        }
+        float min = Float.MAX_VALUE;
+        float max = -Float.MAX_VALUE;
+        float feetMin = Float.MAX_VALUE;
+        Vector3f scratch = new Vector3f();
+        for (int i = 0; i < bones.size(); i++) {
+            Matrix4f matrix = restMatrices[i];
+            if (matrix == null) {
+                continue;
+            }
+            RawYsmModel.RawBone bone = bones.get(i);
+            if (bone.cubes == null) {
+                continue;
+            }
+            for (RawYsmModel.RawCube cube : bone.cubes) {
+                if (cube.faces == null) {
+                    continue;
+                }
+                for (RawYsmModel.RawFace face : cube.faces) {
+                    if (face.positions == null) {
+                        continue;
+                    }
+                    for (float[] position : face.positions) {
+                        if (position == null) {
+                            continue;
+                        }
+                        scratch.set(position[0], position[1], position[2]);
+                        matrix.transformPosition(scratch);
+                        feetMin = Math.min(feetMin, scratch.y);
+                        // 隐藏骨不算进「看得见的身体」包围盒，但算进脚底下界
+                        if (!hiddenDefault[i]) {
+                            min = Math.min(min, scratch.y);
+                            max = Math.max(max, scratch.y);
+                        }
+                    }
+                }
+            }
+        }
+        if (max > min) {
+            boundsMinY = min;
+            boundsMaxY = max;
+            boundsValid = true;
+        }
+        if (feetMin < Float.MAX_VALUE) {
+            feetMinY = feetMin;
+            feetValid = true;
+        }
     }
 
     /**
@@ -2505,9 +2712,26 @@ public final class ModelRuntime {
         return previewAnimation;
     }
 
-    /** 作者声明预览时不要转（{@code properties.disable_preview_rotation}）。 */
+    /**
+     * 作者声明预览时不要转（{@code properties.disable_preview_rotation}）。
+     *
+     * <p>有自定义 {@code preview_animation} 时**不生效**：YSM 的 {@code PreviewRenderHost:130-135}
+     * 判的是「声明了 disable 且没有自定义 preview」—— 作者自己摆的姿势自带朝向，
+     * 再套一层默认视角会把它转歪。
+     */
     public boolean disablePreviewRotation() {
-        return disablePreviewRotation;
+        return disablePreviewRotation && !hasAuthoredPreview();
+    }
+
+    /**
+     * 作者是否写了自定义 {@code preview_animation}（且模型里真有这条片段）。
+     *
+     * <p>只用来判 {@link #disablePreviewRotation()} 该不该让位 —— 卡片摆位本身不需要它：
+     * {@link #posedCenterY()} 取的是**本帧姿态**的包围盒，作者写在 preview 里的位移已经算进去了，
+     * 居中不会把它抵消掉。
+     */
+    public boolean hasAuthoredPreview() {
+        return !previewAnimation.isEmpty() && clip(previewAnimation) != null;
     }
 
     /** 卡片底图（画在模型之下）；作者没声明时返回 null。 */
@@ -2887,7 +3111,7 @@ public final class ModelRuntime {
                 sampleOverlay(activeExtra, i, extraTime, ageSeconds);
             }
         }
-        // 卡片预览的 focus 槽排在 hover 之后：YSM 的 queued 槽在 previous 槽之上
+        // 卡片预览的 focus 槽排在 hover 之后：YSM 的合并顺序是 cap → hover → focus，后写者胜
         if (cardFocus != null) {
             if (!Float.isFinite(cardFocusStart)) {
                 cardFocusStart = ageSeconds;
@@ -3441,9 +3665,20 @@ public final class ModelRuntime {
         if (avatar == null) {
             return firstOf(IDLE);
         }
-        // 卡片预览固定 idle：卡片要的是「模型本身」，不是玩家此刻的状态
+        // 卡片预览：主体态取作者声明的 preview_animation，没声明才退回 idle。
+        //
+        // 这是 YSM 的语义（{@code CatalogModelPreviewAnimationState:23-24}：preview 为空才用 idle；
+        // {@code GuiAnimationClosure:34-38} 把 preview 与 idle 一起放进闭包），
+        // 而且作者正是靠这条动画调位置 —— 官方 default 模型的 {@code gui} 片段写的是
+        // {@code MAllBody.position = [0,-22,0]}、{@code scale = 2}，就是「选择界面里怎么摆」。
+        //
+        // hover/focus 是**独立的覆盖层**，不是替换：YSM 里它们是两个独立控制器
+        // （{@code PlayerControllerCollection:68-71}），各自跑完由 {@code AnimationProcessor:96-149}
+        // 逐骨合并，后写者胜。整条替换会丢掉只在主体态里出现的骨
+        // （Trissy 的 gui 有 57 根、focus 只有 35 根，23 根只在 gui 里）。
         if (cardMode) {
-            return firstOf(IDLE);
+            RawYsmModel.RawAnimation preview = previewAnimation.isEmpty() ? null : clip(previewAnimation);
+            return preview != null ? preview : firstOf(IDLE);
         }
         RawYsmModel.RawAnimation clip;
         if (player != null) {
