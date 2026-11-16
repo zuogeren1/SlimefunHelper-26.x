@@ -2284,7 +2284,17 @@ public final class ModelRuntime {
     }
 
 
-    /** 叠加层只动它写到的通道：旋转/位移相加，缩放整体替换；没写到的通道保持基础姿态。 */
+    /**
+     * 叠加层只动它写到的通道，**赋值**而不是相加；没写到的通道保持基础姿态。
+     *
+     * <p>YSM 的跨控制器合并是逐骨覆盖：{@code AnimationProcessor:113-147} 对每个控制器
+     * {@code pollRotationPoint/pollPositionPoint/pollScalePoint} 的结果调
+     * {@code AnimationVec3#apply}，运行中的动画 {@code endingTransitionPercentProgress == 0}
+     * 走 {@code dst.set(this)}（{@code AnimationVec3:25-32}）。
+     * 所以 hover/focus 这类覆盖层写的是**绝对**姿态，相加会让位移翻倍
+     * （Trissy 的 focus 写 {@code AllBody pos=[-3,-7,7.25]}、gui 写 {@code [-1,-8,7.25]}，
+     * 叠加成 {@code [-4,-15,14.5]}，卡片里就是往左下偏）。
+     */
     private void sampleOverlay(RawYsmModel.RawAnimation clip, int boneIndex, float time, float lifeTime) {
         String boneName = bones.get(boneIndex).name;
         if (boneName == null) {
@@ -2297,15 +2307,15 @@ public final class ModelRuntime {
             int offset = boneIndex * 9;
             float[] rotation = sampleChannel(animation.rotation, time, lifeTime);
             if (rotation != null) {
-                poses[offset] += (float) -Math.toRadians(finite(rotation[0], 0.0F));
-                poses[offset + 1] += (float) -Math.toRadians(finite(rotation[1], 0.0F));
-                poses[offset + 2] += (float) Math.toRadians(finite(rotation[2], 0.0F));
+                poses[offset] = (float) -Math.toRadians(finite(rotation[0], 0.0F));
+                poses[offset + 1] = (float) -Math.toRadians(finite(rotation[1], 0.0F));
+                poses[offset + 2] = (float) Math.toRadians(finite(rotation[2], 0.0F));
             }
             float[] position = sampleChannel(animation.position, time, lifeTime);
             if (position != null) {
-                poses[offset + 3] += finite(position[0], 0.0F);
-                poses[offset + 4] += finite(position[1], 0.0F);
-                poses[offset + 5] += finite(position[2], 0.0F);
+                poses[offset + 3] = finite(position[0], 0.0F);
+                poses[offset + 4] = finite(position[1], 0.0F);
+                poses[offset + 5] = finite(position[2], 0.0F);
             }
             float[] scale = sampleChannel(animation.scale, time, lifeTime);
             if (scale != null) {
