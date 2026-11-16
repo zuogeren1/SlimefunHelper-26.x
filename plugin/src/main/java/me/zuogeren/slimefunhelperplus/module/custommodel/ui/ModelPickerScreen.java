@@ -186,7 +186,7 @@ public class ModelPickerScreen extends GenericScreen {
     private float cardFadeSeconds;
 
     public ModelPickerScreen() {
-        super(Component.literal("模型选择"), 0, 0);
+        super(Component.translatable("custom-model.picker.title"), 0, 0);
         rebuildView();
         retainPageCards();
     }
@@ -255,7 +255,7 @@ public class ModelPickerScreen extends GenericScreen {
                 Component.empty());
         this.searchBox.setBordered(false);
         this.searchBox.setMaxLength(48);
-        this.searchBox.setHint(Component.literal("搜索模型 / 作者 / 目录"));
+        this.searchBox.setHint(Component.translatable("custom-model.picker.search"));
         this.searchBox.setTextColor(pal.ink());
         this.searchBox.setValue(query);
         this.searchBox.setResponder(this::applyQuery);
@@ -383,7 +383,8 @@ public class ModelPickerScreen extends GenericScreen {
         Ef.wipeCut(ctx, tx, ty, TEX_W, TEX_H, pal.chip(), Ef.SIGNAL, wipeTex, Ef.CUT, Ef.Corner.BR);
         int ink = hotTex ? Ef.ON_SIGNAL : pal.ink2();
         Ef.fill(ctx, tx + 6, ty + 6, 8, 8, hotTex ? Ef.ON_SIGNAL : Ef.SIGNAL);
-        Ef.text(ctx, "贴图", tx + 18, ty + (TEX_H - Ef.lineH()) / 2, ink);
+        Ef.text(ctx, Component.translatable("custom-model.picker.texture").getString(),
+                tx + 18, ty + (TEX_H - Ef.lineH()) / 2, ink);
 
         int sx = px + SEARCH_X;
         int sy = py + SEARCH_Y;

@@ -95,7 +95,7 @@ public class ModelRouletteScreen extends GenericScreen {
     private List<int[]> lips = List.of();
 
     public ModelRouletteScreen() {
-        super(Component.literal("模型动画"), 0, 0);
+        super(Component.translatable("custom-model.roulette.title"), 0, 0);
         ModelRuntime runtime = CustomModelManager.runtime();
         if (runtime != null) {
             this.options.addAll(runtime.extras());
@@ -406,23 +406,26 @@ public class ModelRouletteScreen extends GenericScreen {
         // 标题用模型自己写的名字（metadata.name），没写才退回文件名
         String model = file.isEmpty() ? "" : ModelCatalog.displayName(file);
         int columnWidth = Math.max(60, this.width - PAD * 2);
-        Ef.text(ctx, Ef.ellipsis(model.isEmpty() ? "未加载模型" : model, columnWidth), PAD, 20, RouletteTheme.TEXT);
+        String title = model.isEmpty()
+                ? Component.translatable("custom-model.roulette.no-model").getString() : model;
+        Ef.text(ctx, Ef.ellipsis(title, columnWidth), PAD, 20, RouletteTheme.TEXT);
 
         // 右对齐遇上中文会量宽不准、压到屏幕外，改成左对齐第三行
-        Ef.text(ctx, Ef.ellipsis("当前：" + currentLabel(runtime), columnWidth), PAD, 32,
+        String current = Component.translatable("custom-model.roulette.current", currentLabel(runtime)).getString();
+        Ef.text(ctx, Ef.ellipsis(current, columnWidth), PAD, 32,
                 RouletteTheme.TEXT_ACTIVE);
     }
 
     private void paintFooter(VDrawContext ctx) {
-        String hint = level > 0
-                ? "滚轮翻页 · 左键切换 · 再点取消 · 中心或 Esc 返回 · 右键关闭"
-                : "滚轮翻页 · 左键切换 · 再点取消 · 右键关闭";
+        String hint = Component.translatable(level > 0
+                ? "custom-model.roulette.hint-nested" : "custom-model.roulette.hint").getString();
         hint = Ef.ellipsis(hint, this.width - PAD * 2);
         Ef.text(ctx, hint, (this.width - Ef.textWidth(hint)) / 2, this.height - 14, RouletteTheme.TEXT_DIM);
     }
 
     private void paintEmpty(VDrawContext ctx) {
-        String text = Ef.ellipsis("这个模型没有可选的动作或服装", this.width - PAD * 2);
+        String text = Ef.ellipsis(Component.translatable("custom-model.roulette.empty").getString(),
+                this.width - PAD * 2);
         Ef.text(ctx, text, (this.width - Ef.textWidth(text)) / 2, centerY - Ef.lineH() / 2,
                 RouletteTheme.TEXT_DIM);
     }

@@ -98,7 +98,7 @@ public class ActionPreviewScreen extends GenericScreen {
     private long hoverStart = System.currentTimeMillis();
 
     public ActionPreviewScreen() {
-        super(Component.literal("动作预览"), 0, 0);
+        super(Component.translatable("custom-model.preview.title"), 0, 0);
     }
 
     /** 不要求玩家实体存在：没有它只是少了 3D 预览，动作列表照常可用。 */
@@ -226,7 +226,8 @@ public class ActionPreviewScreen extends GenericScreen {
 
         String current = currentLabel(runtime);
         Ef.text(ctx, Ef.ellipsis(current, STAGE_W - 16), sx + 8, sy + STAGE_H - 26, pal.ink());
-        String stats = runtime == null ? "" : runtime.boneCount() + " 骨 │ " + runtime.extras().size() + " 动作";
+        String stats = runtime == null ? ""
+                : Component.translatable("custom-model.preview.stats", runtime.boneCount(), runtime.extras().size()).getString();
         Ef.text(ctx, stats, sx + STAGE_W - 8 - Ef.textWidth(stats), sy + STAGE_H - 26, pal.ink2());
         Ef.fill(ctx, sx + 8, sy + STAGE_H - 14, STAGE_W - 16, 3, 0xFF3A3A3A);
     }
@@ -294,7 +295,11 @@ public class ActionPreviewScreen extends GenericScreen {
         ModelRuntime.Category[] cats = {
                 ModelRuntime.Category.MAIN, ModelRuntime.Category.EXTRA, ModelRuntime.Category.VARIANT
         };
-        String[] labels = {"主体", "轮盘", "服装"};
+        String[] labels = {
+                Component.translatable("custom-model.preview.tab.main").getString(),
+                Component.translatable("custom-model.preview.tab.extra").getString(),
+                Component.translatable("custom-model.preview.tab.variant").getString()
+        };
         for (int i = 0; i < cats.length; i++) {
             int tx = px + LIST_X + i * (TAB_W + 2);
             int ty = py + TAB_Y;
@@ -316,7 +321,7 @@ public class ActionPreviewScreen extends GenericScreen {
     private void paintList(VDrawContext ctx, int px, int py) {
         List<ModelRuntime.ExtraOption> list = options();
         if (list.isEmpty()) {
-            String empty = "这个模型没有可选的动作。";
+            String empty = Component.translatable("custom-model.preview.empty").getString();
             Ef.text(ctx, empty, px + LIST_X + (LIST_W - Ef.textWidth(empty)) / 2, py + 120, pal.ink2());
             return;
         }

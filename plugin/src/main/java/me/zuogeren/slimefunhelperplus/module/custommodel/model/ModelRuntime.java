@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSound;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSoundCursorTable;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
@@ -1291,7 +1292,8 @@ public final class ModelRuntime {
             RawYsmModel.RawAnimation animation = entry.getValue();
             animation.name = entry.getKey();
             clips.putIfAbsent(entry.getKey(), animation);
-            options.add(new ExtraOption(entry.getKey(), "服装 " + variantIndex(entry.getKey()), true));
+            options.add(new ExtraOption(entry.getKey(),
+                    Component.translatable("custom-model.variant.label", variantIndex(entry.getKey())).getString(), true));
         }
         for (ExtraOption option : extras) {
             RawYsmModel.RawAnimation animation = findAnimation(model, option.key());
@@ -1305,36 +1307,16 @@ public final class ModelRuntime {
         return variants.isEmpty() ? "" : variants.get(0).getKey();
     }
 
-    /** 主体态动作的中文标签；没列到的直接用原名。 */
+    /**
+     * 主体态动作的显示名。
+     *
+     * <p>走语言文件（{@code custom-model.state.<name>}），没翻译的键会原样返回键名，
+     * 所以这里先判一下：拿到的还是键名就退回动作原名，避免界面上出现 {@code custom-model.state.xxx}。
+     */
     private static String mainStateLabel(String name) {
-        return switch (name) {
-            case "idle" -> "待机";
-            case "walk" -> "走路";
-            case "run" -> "跑步";
-            case "sneak", "sneaking" -> "潜行";
-            case "fly" -> "飞行";
-            case "elytra_fly" -> "鞘翅飞行";
-            case "swim" -> "游泳";
-            case "swim_stand" -> "水中站立";
-            case "ride" -> "骑乘";
-            case "boat" -> "坐船";
-            case "jump" -> "跳跃";
-            case "attacked" -> "受击";
-            case "death" -> "死亡";
-            case "riptide" -> "激流";
-            case "sleep" -> "睡觉";
-            case "climb" -> "攀爬";
-            case "climbing" -> "攀爬中";
-            case "ladder_up" -> "爬梯上";
-            case "ladder_down" -> "爬梯下";
-            case "ladder_stillness" -> "爬梯静止";
-            case "use_mainhand" -> "使用主手";
-            case "use_offhand" -> "使用副手";
-            case "swing_hand" -> "挥动主手";
-            case "swing_offhand" -> "挥动副手";
-            case "sit" -> "坐下";
-            default -> name;
-        };
+        String key = "custom-model.state." + name;
+        String translated = net.minecraft.network.chat.Component.translatable(key).getString();
+        return translated.equals(key) ? name : translated;
     }
 
     /**
