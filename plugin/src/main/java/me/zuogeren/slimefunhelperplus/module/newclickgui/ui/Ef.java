@@ -302,6 +302,24 @@ public final class Ef {
     }
 
     /**
+     * 把一张纹理铺满矩形（{@link #icon} 只支持正方形，卡片底图是 52×90）。
+     *
+     * <p>整张图拉伸到目标矩形：YSM 的 {@code gui_background} 就是按卡片尺寸画的，
+     * 作者给的图与卡片同比例，拉伸不会变形。
+     */
+    public static void image(VDrawContext ctx, Identifier texture, int x, int y, int w, int h) {
+        if (texture == null || w <= 0 || h <= 0) {
+            return;
+        }
+        // 用 drawTexturedQuad 而不是 drawGuiTexture：后者走精灵图集（getGuiSprite），
+        // 而模型内嵌的底图是运行时 DynamicTexture 注册的，不在图集里，查不到会画不出来。
+        // 参数是**坐标对**不是宽高：(x1, x2, y1, y2, z, u1, u2, v1, v2)。
+        // 混合由 GUI 的 pipeline 负责（26.2 的 RenderSystem 已经没有 enableBlend/disableBlend，
+        // 那是 1.21.6 之前的状态机 API），这里不需要手动开关。
+        ctx.drawTexturedQuad(texture, x, x + w, y, y + h, 0, 0.0F, 1.0F, 0.0F, 1.0F);
+    }
+
+    /**
      * 斜边描边遮罩：每种切角尺寸都有自己的带宽（{@code 16/c}），
      * 缩放后才是 1px——共用一张 1px 带的话，切角越小越糊。
      */

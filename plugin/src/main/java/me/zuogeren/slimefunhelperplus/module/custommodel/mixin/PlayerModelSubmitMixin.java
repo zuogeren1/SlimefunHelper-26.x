@@ -200,10 +200,12 @@ public abstract class PlayerModelSubmitMixin {
         // scale(-1,-1,1) 把 Y 向下的原版模型翻正；我们的几何在反序列化阶段已经是 Y 向上，
         // 再翻一次就是倒立。这里先翻回来抵消掉。
         poseStack.scale(-1.0F, -1.0F, 1.0F);
-        // 与世界里同一套缩放：玩家模型的 0.9375 与作者声明的整体缩放（YSM 默认 0.7）。
-        // 少了这两层，卡片里的模型会比世界里大一圈，选完进游戏观感对不上。
+        // 只补作者声明的整体缩放（YSM 默认 0.7），**不补** AvatarRenderer 的 0.9375。
+        //
+        // YSM 的选择界面走 {@code renderAnimatableEntity → IGeoRenderer.preRender}，
+        // 那里只有 {@code scale(widthScale, heightScale, widthScale)}，不经 {@code LivingEntityRenderer}，
+        // 所以没有 0.9375 这一层。卡片要跟 YSM 的观感对齐就不能多乘，否则小 6.25%。
         poseStack.scale(avatar.scale, avatar.scale, avatar.scale);
-        this.scale(avatar, poseStack);
         poseStack.scale(runtime.heightScale(), runtime.widthScale(), runtime.heightScale());
         RenderType mainType = runtime.hasTranslucentPixels()
                 ? RenderTypes.entityTranslucent(runtime.texture())

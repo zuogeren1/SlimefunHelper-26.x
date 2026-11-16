@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
+import me.zuogeren.slimefunhelperplus.module.custommodel.texture.ModelTexture;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSound;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSoundCursorTable;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
@@ -222,6 +223,9 @@ public final class ModelRuntime {
     private String previewAnimation = "";
     /** 作者声明「预览时不要转」（{@code properties.disable_preview_rotation}）。 */
     private boolean disablePreviewRotation;
+    /** 卡片底图/前景图（{@code properties.gui_background} / {@code gui_foreground}）；没声明时为 null。 */
+    private Identifier guiBackground;
+    private Identifier guiForeground;
     private final int rightHandBone;
     private final int leftHandBone;
     private RawYsmModel.RawAnimation lastClip;
@@ -715,6 +719,8 @@ public final class ModelRuntime {
         if (model.properties != null) {
             runtime.widthScale = model.properties.widthScale > 0.0F ? model.properties.widthScale : 1.0F;
             runtime.heightScale = model.properties.heightScale > 0.0F ? model.properties.heightScale : 1.0F;
+            runtime.guiBackground = findGuiImage(model.properties, model.properties.guiBackground, "background");
+            runtime.guiForeground = findGuiImage(model.properties, model.properties.guiForeground, "foreground");
         }
         int timelineCount = 0;
         for (RawYsmModel.RawAnimation clip : clips.values()) {
@@ -2502,6 +2508,47 @@ public final class ModelRuntime {
     /** 作者声明预览时不要转（{@code properties.disable_preview_rotation}）。 */
     public boolean disablePreviewRotation() {
         return disablePreviewRotation;
+    }
+
+    /** 卡片底图（画在模型之下）；作者没声明时返回 null。 */
+    public Identifier guiBackground() {
+        return guiBackground;
+    }
+
+    /** 卡片前景图（画在模型之上）；作者没声明时返回 null。 */
+    public Identifier guiForeground() {
+        return guiForeground;
+    }
+
+    /**
+     * 按 {@code gui_background} / {@code gui_foreground} 的路径找对应的内嵌图。
+     *
+     * <p>这两个字段存的是**路径**（如 {@code textures/gui/background.png}），
+     * 真正的字节在 {@code properties.backgroundImages} 里，按 {@code name} 对应。
+     * 匹配时只比文件名：作者写的路径前缀与内嵌名不一定一致（有的只存 {@code background.png}）。
+     */
+    private static Identifier findGuiImage(RawYsmModel.RawProperties properties, String path, String role) {
+        if (path == null || path.isEmpty() || properties.backgroundImages == null) {
+            return null;
+        }
+        // 三种命名都要认（SPM 的 EmbeddedModelPreview:76-77 也是这么判的）：
+        // ① 完整路径（YSM 自己按路径读文件）
+        // ② 文件名（有的包只存 background.png）
+        // ③ "gui_" + role（ModernYSM 的 YSMFolderDeserializer:250-266 把 name 设成角色 id）
+        String basename = path.substring(path.lastIndexOf('/') + 1);
+        String roleId = "gui_" + role;
+        for (RawYsmModel.RawImage image : properties.backgroundImages) {
+            if (image == null || image.name == null) {
+                continue;
+            }
+            String name = image.name;
+            String nameBase = name.substring(name.lastIndexOf('/') + 1);
+            if (name.equalsIgnoreCase(path) || nameBase.equalsIgnoreCase(basename)
+                    || name.equalsIgnoreCase(roleId)) {
+                return ModelTexture.registerGuiImage(image, role);
+            }
+        }
+        return null;
     }
 
     /** 定位组的骨骼数量（YSM 的 {@code locatorGroupSize}）；没有该组返回 0。 */

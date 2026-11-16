@@ -42,7 +42,7 @@ import org.joml.Vector3f;
 public class ModelPickerScreen extends GenericScreen {
 
     private static final int PANEL_W = 420;
-    private static final int PANEL_H = 235;
+    private static final int PANEL_H = 243;
     private static final int LEFT_W = 135;
     private static final int RIGHT_X = 138;
     private static final int RIGHT_W = 282;
@@ -75,8 +75,32 @@ public class ModelPickerScreen extends GenericScreen {
     private static final int SEARCH_W = 140;
     private static final int SEARCH_H = 16;
 
+    /**
+     * 卡片尺寸与 YSM / ModernYSM 完全一致（{@code ModelButton:95} 的 {@code super(x, y, 52, 90, ...)}）。
+     *
+     * <p>编号标签与名字**叠在**卡片上，不额外占高度 —— 这是 YSM 的做法
+     * （{@code CatalogModelButton:138-139} 的 {@code renderName}/{@code renderState} 都画在卡片矩形内）。
+     * 把名字堆在卡片下方会让卡片变成 52×121，比例与 YSM 差 40%，模型取景也就对不上。
+     */
     private static final int CARD_W = 52;
     private static final int CARD_H = 90;
+    /** 编号标签的高度（叠在卡片左上角）。 */
+    private static final int TAG_H = 11;
+    /** 名字区的高度（叠在卡片底部）。 */
+    private static final int NAME_H = 20;
+    /**
+     * 模型可见区 = 整张卡片。
+     *
+     * <p>3D 预览走 PiP：{@code GuiGraphicsExtractor#entity} 只登记一个 {@code GuiEntityRenderState}，
+     * 真正的出图在 {@code GuiRenderer#preparePictureInPicture} 里，它的 blit 追加到当前层元素表末尾，
+     * 因此**盖在同层所有 2D 之上**。
+     *
+     * <p>名字与编号靠 {@code pushLayer} 抬到更高层来压住它（{@code GuiRenderStateMixin.setLayerToDepth}
+     * 按 depth 插入 strata），而不是把模型区缩小让位 —— 后者会让模型整体小 20% 以上。
+     */
+    private static final int CARD_SLOT_H = CARD_H;
+    /** 卡片 2D 装饰（编号/名字）所在的层：比模型高一层，PiP 的 blit 就盖不住。 */
+    private static final int CHROME_LAYER = 1;
     private static final int CARD_GAP_X = 3;
     private static final int CARD_GAP_Y = 3;
     private static final int CARD_COLS = 5;
@@ -87,7 +111,7 @@ public class ModelPickerScreen extends GenericScreen {
 
     private static final int PG_W = 52;
     private static final int PG_H = 14;
-    private static final int PG_Y = 215;
+    private static final int PG_Y = 217;
     private static final int PREV_X = 198;
     private static final int NEXT_X = 308;
     private static final int PAGE_NUM_X = 244;
@@ -395,42 +419,85 @@ public class ModelPickerScreen extends GenericScreen {
             } else {
                 Ef.cutFill(ctx, cx, cy, CARD_W, CARD_H, cardBg, Ef.CUT, Ef.Corner.BR);
             }
-            // 编号标签：选中时整块强调色，一眼看出当前模型
-            String no = String.format(Locale.ROOT, "%02d", index + 1);
-            int tagW = Ef.textWidth(no) + 4;
-            Ef.cutFill(ctx, cx, cy, tagW, 11, isSelected ? Ef.SIGNAL : pal.tagBg(), 2, Ef.Corner.BR);
-            Ef.text(ctx, no, cx + 2, cy + 1, isSelected ? Ef.ON_SIGNAL : pal.tagFg());
-
-            int slotY = cy + 11;
-            int slotH = CARD_H - 11 - 20;
+            int slotY = cy;
+            int slotH = CARD_SLOT_H;
+            // 模型区的底色与底纹先铺：作者底图要盖在它们之上，否则底图会被这块底色吃掉。
             Ef.fill(ctx, cx, slotY, CARD_W, slotH, isSelected ? 0xFF3A3A3A : 0xFF2A2A2A);
             hatch(ctx, cx, slotY, CARD_W, slotH, 0x0AFFFFFF);
+            // 作者底图铺满**整张卡片**，且必须在编号标签/名字/分隔线之前画 ——
+            // YSM 的 renderImage 也不在 scissor 内（CatalogModelButton:195 用整卡矩形）。
+            // 放在槽位里会被裁掉上下沿，放在 2D 元素之后会盖住它们。
+            ModelRuntime cardRuntime = CustomModelManager.cardRuntime(CustomModelManager.cardStateId(file));
+            if (cardRuntime != null) {
+                Ef.image(ctx, cardRuntime.guiBackground(), cx, cy, CARD_W, CARD_H);
+            }
             // 3D 排在所有 2D 之后统一画：PiP 贴回时盖在 2D 之上，先画会被卡片自己的底纹盖掉
             cardSlots.add(new int[]{cx, slotY, slotH, hot ? 1 : 0, isSelected ? 1 : 0});
             cardFiles.add(file);
 
-            Ef.rule(ctx, cx, cy + CARD_H - 20, CARD_W, pal.rule());
-            List<String> lines = Ef.wrap(ModelCatalog.displayName(file), CARD_W - 6);
-            int nameY = cy + CARD_H - 18;
-            for (int line = 0; line < 2 && line < lines.size(); line++) {
-                String text = lines.get(line);
-                if (line == 1 && lines.size() > 2) {
-                    text = Ef.ellipsis(text + lines.get(2), CARD_W - 6);
-                }
-                Ef.text(ctx, text, cx + 3, nameY, pal.ink());
-                nameY += Ef.lineH();
-            }
-            if (isSelected) {
-                Ef.fill(ctx, cx, cy, 2, CARD_H, Ef.SIGNAL);
-            }
         }
         for (int i = 0; i < cardSlots.size(); i++) {
             int[] slot = cardSlots.get(i);
             // 进场：按序号错开，从下方滑到位。PiP 的贴回位置就是矩形，挪矩形即可，
             // 不需要给离屏纹理做 alpha —— 卡片尺寸下位移比淡入更「机械」，也更省。
             // 裁剪框留在原位，滑入过程才会被槽位下沿切掉，而不是整块跟着往下跑。
-            paintCardModel(ctx, cardFiles.get(i), slot[0], slot[1], slot[2],
+            String cardFile = cardFiles.get(i);
+            paintCardModel(ctx, cardFile, slot[0], slot[1], slot[2],
                     slot[3] != 0, slot[4] != 0, enterRise(i));
+            // 前景图画在模型之上、scissor 之外：作者用它做卡片边框/遮罩，
+            // 裁到槽位会把边框切掉（YSM 的 renderImage 也不在 scissor 内）。
+            ModelRuntime fgRuntime = CustomModelManager.cardRuntime(CustomModelManager.cardStateId(cardFile));
+            if (fgRuntime != null) {
+                Ef.image(ctx, fgRuntime.guiForeground(), slot[0], slot[1], CARD_W, CARD_H);
+            }
+            // 编号与名字排在模型之后：PiP 贴回时盖在所有 2D 之上，
+            // 先画会被模型压住（截图里名字直接压在模型上就是这个）。
+            paintCardChrome(ctx, cardFile, slot[0], slot[1], slot[4] != 0);
+        }
+    }
+
+    /**
+     * 卡片的 2D 装饰：编号标签、名字遮罩、名字、选中条。
+     *
+     * <p>整块抬到 {@link #CHROME_LAYER}：PiP 的 blit 追加在当前层末尾，同层永远压不住它；
+     * 抬一层之后编号底色与名字遮罩才不会被模型盖掉。
+     *
+     * <p>名字区带一层半透明遮罩：模型脚部会画到卡片下沿，没有遮罩时名字直接压在模型上，
+     * 深色模型上几乎看不清（YSM 的 {@code renderName} 也是先铺一层底再写字）。
+     */
+    private void paintCardChrome(VDrawContext ctx, String file, int cx, int cy, boolean isSelected) {
+        ctx.pushLayer(CHROME_LAYER);
+        try {
+            paintCardChromeInner(ctx, file, cx, cy, isSelected);
+        } finally {
+            ctx.popLayer();
+        }
+    }
+
+    private void paintCardChromeInner(VDrawContext ctx, String file, int cx, int cy, boolean isSelected) {
+        // 编号标签：选中时整块强调色，一眼看出当前模型
+        String no = String.format(Locale.ROOT, "%02d", view.indexOf(file) + 1);
+        int tagW = Ef.textWidth(no) + 4;
+        Ef.cutFill(ctx, cx, cy, tagW, TAG_H, isSelected ? Ef.SIGNAL : pal.tagBg(), 2, Ef.Corner.BR);
+        Ef.text(ctx, no, cx + 2, cy + 1, isSelected ? Ef.ON_SIGNAL : pal.tagFg());
+
+        // 名字遮罩：从卡片底部往上 20px，向下渐隐，让名字在任何模型上都读得清
+        int scrimTop = cy + CARD_H - NAME_H;
+        Ef.fill(ctx, cx, scrimTop, CARD_W, NAME_H, 0xC0101010);
+        Ef.rule(ctx, cx, scrimTop, CARD_W, pal.rule());
+
+        List<String> lines = Ef.wrap(ModelCatalog.displayName(file), CARD_W - 6);
+        int nameY = scrimTop + 2;
+        for (int line = 0; line < 2 && line < lines.size(); line++) {
+            String text = lines.get(line);
+            if (line == 1 && lines.size() > 2) {
+                text = Ef.ellipsis(text + lines.get(2), CARD_W - 6);
+            }
+            Ef.text(ctx, text, cx + 3, nameY, pal.ink());
+            nameY += Ef.lineH();
+        }
+        if (isSelected) {
+            Ef.fill(ctx, cx, cy, 2, CARD_H, Ef.SIGNAL);
         }
     }
 
@@ -499,28 +566,43 @@ public class ModelPickerScreen extends GenericScreen {
         // 动画换了立刻重采一次，别等下一个节拍（否则新动画要晚 50ms 才出现）
         boolean changed = !animation.equals(cardAnimations.put(file, animation));
         sampleCard(runtime, state, changed);
-        // 裁剪到卡片槽位：模型比槽位高，不裁会画到编号标签和名字上
+        // 裁剪到模型区（卡片扣掉名字条）：PiP 的 blit 盖在所有 2D 之上，
+        // 名字条只要与模型矩形重叠就一定会被压住，所以两者必须不重叠。
         graphics.enableScissor(cx, slotY, cx + CARD_W, slotY + slotH);
         try {
             // 只转 Y 不转 Z：几何在反序列化阶段已经烘成「Y 向上、脚在原点」，
             // 原版那套 rotZ(180) 是给 Y 向下的原版模型用的，套上来会把模型倒过来。
             // 模型原生朝 -Z，转 180° 才正对镜头；再压一点俯角，立体感来自这一下。
             //
-            // 缩放与平移都按模型高度换算：几何脚在原点，PiP 把模型画在纹理正中，
-            // 不往下挪半个身高就会顶在卡片上沿。固定值只对 1.8 格的默认骨架成立，
-            // 作者把骨架放大到十几格时卡片里只剩头顶那一截。
-            float modelHeight = runtime.modelHeight();
-            float height = modelHeight > 0.0F ? modelHeight : 1.8F;
-            // 目标：模型在卡片里占约 45 GUI 像素。有效高度 = 身高 × 0.9375 × 整体缩放，
-            // 1.8 格时 38 × 1.18 ≈ 45，所以系数是 68.6 / 身高。
-            float cardScale = Math.max(4.0F, Math.min(38.0F, 68.6F / height));
-            Vector3f translation = new Vector3f(0.0F, -height * 0.328F, 0.0F);
+            // 取景**完全照抄 YSM**：固定 scale 30、固定锚点，不做任何自适应。
+            //
+            // YSM 的 {@code PreviewRenderHost:72} 是 {@code renderModelInGui(26, 65, 30.0F, ...)}，
+            // 视口 52×90（{@code WIDTH/GUI_SCALE} × {@code HEIGHT/GUI_SCALE}）。
+            // 作者就是按这套固定取景在 {@code preview_animation} 里调位置和缩放的 ——
+            // 有的模型故意放大到只看得见躯干（Trissy 的 {@code Root scale=1.8}、
+            // 亚托莉/爱恩的 {@code scale=2.0}），那是作者的意图，不该被我们「修正」成完整可见。
+            //
+            // 按模型大小自适应会让这些模型被强行缩小，与 YSM 观感不符。
+            float cardScale = 30.0F;
+            // 锚点：**模型空间原点**落在视口 y=65 处（{@code HEIGHT/GUI_SCALE/2 + 20}）。
+            //
+            // YSM 的 {@code RenderUtil.renderModelInGuiStateful:349} 是
+            // {@code viewStack.translate(posX, posY, 1050)}，作用在模型空间原点上 ——
+            // y=65 锚的是原点，不是脚底。几何原点不在 Y=0 的模型（Trissy -0.40、fuxuan -1.62）
+            // 在 YSM 里同样会偏，那是作者自己的摆位，不补偿。
+            //
+            // PiP 把模型原点画在纹理正中（slotH/2），{@code guiY = slotH/2 + cardScale × t.y}
+            // （ortho 是 invertY，+Y 朝下），令 guiY = 65 → t.y = (65 - slotH/2) / 30。
+            float anchorY = (65.0F - slotH * 0.5F) / cardScale;
+            Vector3f translation = new Vector3f(0.0F, anchorY, 0.0F);
             // GuiEntityRenderer 内部已经做过 overrideCameraAngle.conjugate() 再 rotateY(180°)，
             // 这里再转一次 Y 就是转两圈等于没转（模型背对）。只补俯角。
             // 作者声明 disable_preview_rotation 时连俯角也不要：那是「这个模型必须正对着看」的意思。
             Quaternionf rotation = runtime.disablePreviewRotation()
                     ? new Quaternionf()
                     : new Quaternionf().rotateX(-10.0F * 0.017453292F);
+            // PiP 矩形就是模型区：纹理尺寸决定坐标空间，锚点按它算。
+            // 矩形与名字条不重叠，名字才不会被 PiP 的 blit 盖住。
             graphics.entity(state, cardScale, translation, rotation, null,
                     cx, slotY + rise, cx + CARD_W, slotY + slotH + rise);
         } finally {
@@ -582,14 +664,10 @@ public class ModelPickerScreen extends GenericScreen {
             // 刚移出的那一张：播一次淡出，播完停在末帧
             name = runtime.hasClip("hover_fadeout") ? "hover_fadeout" : "";
             once = true;
-        } else {
-            // 作者在 properties 里指定了预览动画就用它（YSM 的 PlayerModelScreen:464 同做法），
-            // 没指定才退回 idle —— 卡片的主体态本来就是 idle，这里只是换一条覆盖层。
-            String preview = runtime.previewAnimation();
-            if (!preview.isEmpty() && runtime.hasClip(preview)) {
-                name = preview;
-            }
         }
+        // preview_animation 不在这里：它是**主体态**（替换 idle），由 ModelRuntime#pickClip 在
+        // cardMode 下直接选中。当覆盖层叠在 idle 上会与 idle 抢同一批骨骼通道，
+        // 作者写在里面的位置/缩放（官方 default 的 gui 片段就是 MAllBody.position=[0,-22,0]）也就失效了。
         runtime.setCardAnimation(name, once);
         // focus 是独立槽：卡片没有键盘焦点，这里表示「就是当前选中的那个模型」
         runtime.setCardFocus(isSelected && runtime.hasClip("focus") ? "focus" : "");

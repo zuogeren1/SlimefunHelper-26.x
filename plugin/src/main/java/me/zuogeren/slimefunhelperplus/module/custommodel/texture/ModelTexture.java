@@ -23,6 +23,9 @@ public final class ModelTexture {
 
     private static final Map<String, Identifier> CACHE = new ConcurrentHashMap<>();
 
+    /** 卡片底图/前景图单独缓存：它们是卡片装饰，不随模型贴图的 {@link #releaseAll()} 释放。 */
+    private static final Map<String, Identifier> GUI_CACHE = new ConcurrentHashMap<>();
+
     /** 占位图边长：够看出「这张贴图没解出来」，又不占显存。 */
     private static final int PLACEHOLDER_SIZE = 16;
 
@@ -71,6 +74,26 @@ public final class ModelTexture {
         }
     }
 
+    /**
+     * 把模型内嵌的 GUI 底图/前景图注册成纹理。
+     *
+     * <p>与模型贴图分开缓存：底图是卡片装饰，换模型时不该跟着 {@link #releaseAll()} 一起释放
+     * （卡片翻页会反复用到同一批底图）。key 用「角色 + 名字」区分，避免底图与前景图撞车。
+     */
+    public static Identifier registerGuiImage(RawYsmModel.RawImage image, String role) {
+        if (image == null || image.data == null || image.data.length == 0) {
+            return null;
+        }
+        String key = "gui-" + role + "-" + (image.name == null ? "" : image.name)
+                + "-" + Integer.toHexString(Arrays.hashCode(image.data));
+        // 单独一张表：底图是卡片装饰，换模型时不该跟着 releaseAll 一起释放
+        // （翻页会反复用到同一批底图，释放了就得重新解码）。
+        return GUI_CACHE.computeIfAbsent(key, ignored -> {
+            NativeImage decoded = decodeImageBytes(image.data, image.width, image.height, image.format, key);
+            return decoded == null ? null : registerImage(decoded, key);
+        });
+    }
+
     /** 模型一张贴图都没有时用的占位图；同一个 Identifier 复用，避免每次加载都注册新纹理。 */
     public static Identifier placeholder() {
         Identifier cached = placeholder;
@@ -108,6 +131,42 @@ public final class ModelTexture {
      *
      * <p>解不出来时返回占位图而不是 null：调用方拿到 null 会连几何一起放弃。
      */
+    /**
+     * 解一张裸字节图（{@link RawYsmModel.RawImage} 用）。
+     *
+     * <p>与 {@link #decode} 同一套判定：{@code format == -1} 是裸 RGBA，其余按文件头认。
+     * 解不出来返回 {@code null}（底图缺失只是少一层装饰，不该用占位图糊上去）。
+     */
+    private static NativeImage decodeImageBytes(byte[] data, int width, int height, int format, String key) {
+        if (data == null || data.length == 0) {
+            return null;
+        }
+        if (format == -1 && width > 0 && height > 0 && data.length >= width * height * 4) {
+            NativeImage image = new NativeImage(NativeImage.Format.RGBA, width, height, false);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int offset = (y * width + x) * 4;
+                    int r = data[offset] & 0xFF;
+                    int g = data[offset + 1] & 0xFF;
+                    int b = data[offset + 2] & 0xFF;
+                    int a = data[offset + 3] & 0xFF;
+                    image.setPixelABGR(x, y, (a << 24) | (b << 16) | (g << 8) | r);
+                }
+            }
+            return image;
+        }
+        String magic = magicName(data);
+        if ("webp".equals(magic) || "avif".equals(magic)) {
+            return decodeWithImageStream(data, magic);
+        }
+        try {
+            return NativeImage.read(data);
+        } catch (Throwable throwable) {
+            Debug.info("[SFH+] GUI 图解码失败 key=" + key + " magic=" + magic + ": " + throwable);
+            return null;
+        }
+    }
+
     private static NativeImage decode(RawYsmModel.RawTexture texture, String key) {
         if (texture.data == null || texture.data.length == 0) {
             Debug.info("[SFH+] 贴图格式不支持，已用占位: format=" + texture.imageFormat
