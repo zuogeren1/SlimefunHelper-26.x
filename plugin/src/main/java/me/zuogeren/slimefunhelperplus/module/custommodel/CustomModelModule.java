@@ -30,9 +30,6 @@ public class CustomModelModule extends BaseModule {
 
     public final FlagRef enable = flagBuilder(root.addEnable()).defaultValue(false).build();
 
-    /** 显示没有参与基础动画的骨骼（舞台道具/额外角色）；默认关，个别模型需要展示时再开。 */
-    public final FlagRef showProps = flagBuilder(root.add("show-props")).defaultValue(false).build();
-
     /** 模型文件名（相对 {@code config/slimefun-plus/models}），P4 接 ClickGui 选择器。 */
     public final StringRef model = builder(root.add("model"), String.class)
             .defaultValue("")
@@ -47,16 +44,6 @@ public class CustomModelModule extends BaseModule {
      */
     public final FlagRef hideFirstPersonArm = flagBuilder(root.add("hide-first-person-arm"))
             .defaultValue(true)
-            .build();
-
-    /**
-     * 轮盘选择落盘：一个模型一条 {@code 模型文件|服装|动作}，多条用 {@code ;} 连起来（最近的在末尾）。
-     *
-     * <p>模型文件名与选择键都不含 {@code |} / {@code ;}（Windows 文件名不允许），所以不用转义。
-     * 界面上是一行普通文本，真正的写入方是轮盘点击与模型加载，用户不需要手改。
-     */
-    public final StringRef rouletteSelection = builder(root.add("roulette-selection"), String.class)
-            .defaultValue("")
             .build();
 
     /** 打开动画轮盘的热键；默认不绑，在模块配置页里设。 */
@@ -74,11 +61,15 @@ public class CustomModelModule extends BaseModule {
     public CustomModelModule() {
         super("CustomModel");
         bindFlag(enable);
-        showProps.addUpdateListener(value -> {
-            if (isActive()) {
-                CustomModelManager.reloadAsync(model.get());
-            }
-        });
+        // 模型文件从已有里选，不让人手打文件名：候选由 ModelCatalog 提供，扫描后自动更新
+        me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen
+                .registerStringChoices(root.add("model").asString(), () -> {
+                    java.util.List<String> names = ModelCatalog.names();
+                    java.util.List<String> choices = new java.util.ArrayList<>(names.size() + 1);
+                    choices.add("");
+                    choices.addAll(names);
+                    return choices;
+                });
     }
 
     @Override

@@ -1170,7 +1170,49 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 下拉里要列哪些取值：普通枚举项看整个 Ref，记录里的枚举项看那一格，可选值看它的内层。
      * {@code WrapEnum} 只是把枚举包了一层，取值表仍按里面的枚举类型列。
      */
+    /**
+     * 字符串型配置的候选值提供者：键是配置路径，值是「当前值 → 候选列表」。
+     *
+     * <p>枚举型配置自带 {@code getEnumConstants()}，但字符串型（比如模型文件名）的候选是运行时才知道的，
+     * 只能由模块自己注册。没注册的字符串仍然走文本框。
+     */
+    private static final java.util.Map<String, java.util.function.Supplier<java.util.List<String>>>
+            STRING_CHOICES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 给一个字符串型配置注册候选值；传 {@code null} 取消注册。 */
+    public static void registerStringChoices(String path,
+            java.util.function.Supplier<java.util.List<String>> choices) {
+        if (choices == null) {
+            STRING_CHOICES.remove(path);
+        } else {
+            STRING_CHOICES.put(path, choices);
+        }
+    }
+
+    /** 这个字符串配置有没有候选值；有就走下拉而不是文本框。 */
+    private static java.util.List<String> stringChoicesOf(WrapperConfigRef<?> ref) {
+        String path = pathOf(ref);
+        java.util.function.Supplier<java.util.List<String>> supplier = path == null ? null : STRING_CHOICES.get(path);
+        if (supplier == null) {
+            return java.util.List.of();
+        }
+        java.util.List<String> choices = supplier.get();
+        return choices == null ? java.util.List.of() : choices;
+    }
+
+    /** 配置项的完整路径（{@code a.b.c}），与 {@link #registerStringChoices} 的键一致。 */
+    private static String pathOf(WrapperConfigRef<?> ref) {
+        String[] parts = ref.path();
+        return parts == null || parts.length == 0 ? null : String.join(".", parts);
+    }
+
     private static Object[] optionsFor(WrapperConfigRef<?> ref, int part) {
+        if (part < 0) {
+            java.util.List<String> choices = stringChoicesOf(ref);
+            if (!choices.isEmpty()) {
+                return choices.toArray();
+            }
+        }
         Object value = enumValueOf(ref.ref().getValue(), part);
         return value instanceof Enum<?> e ? e.getDeclaringClass().getEnumConstants() : new Object[0];
     }
@@ -1480,6 +1522,15 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             paintColor(ctx, p, y, ref);
         } else if (raw instanceof EntrySet<?> set) {
             paintEntrySet(ctx, p, y, ref, set);
+        } else if (value instanceof StringRef text && !stringChoicesOf(ref).isEmpty()) {
+            // 有候选值的字符串走下拉：模型文件名这类「只能从已有里选」的配置不该让人手打
+            String shown = text.get();
+            String label = shown == null || shown.isEmpty() ? EMPTY_TEXT : shown;
+            String chip = Ef.ellipsis(label, Math.max(40, contentWidth / 3)) + "   ▾";
+            int textW = Ef.textWidth(chip);
+            int chipX = right - textW - 10;
+            Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, dropdown == ref ? p.ink() : p.chip(), Ef.CUT);
+            Ef.text(ctx, chip, chipX + 5, y + 5, dropdown == ref ? p.paper() : p.ink());
         } else if (value instanceof StringRef text) {
             paintTextValue(ctx, p, textValue, ref, text, mouseX, mouseY);
         } else {
@@ -2627,6 +2678,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return true;
         }
         if (ref instanceof StringRef) {
+            // 有候选值的走下拉，没有的才开文本框
+            if (!stringChoicesOf(wrapper).isEmpty()) {
+                openDropdown(wrapper, -1, rowY);
+                return true;
+            }
             return hitText(wrapper, mouseX, mouseY, button, rowY);
         }
         return true;
