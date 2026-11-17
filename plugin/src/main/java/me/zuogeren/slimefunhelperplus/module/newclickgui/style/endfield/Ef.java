@@ -573,17 +573,41 @@ public final class Ef {
     }
 
     /**
-     * 带样式的说明框：{@link Component} 里的颜色代码要按原样渲染。
+     * 带样式的说明框：框体仍按本界面的样子画，但每行按 {@link Component} 的样式渲染。
      *
-     * <p>自绘那版只认纯文本，把 {@code Component} 拍成 {@code getString()} 会把颜色代码一起丢掉——
-     * 格式化串的预览正是靠颜色代码才有意义，所以这一条走宿主的 tooltip 绘制。
+     * <p>不能走宿主的 {@code drawTooltip}：那是原版外观，与这套界面不是一套。
+     * 也不能把 {@code Component} 拍成 {@code getString()}：颜色代码会被一起丢掉，
+     * 而格式化串的预览正是靠颜色代码才有意义。
      */
-    public static void tooltip(
-            VDrawContext ctx, List<Component> lines, int mouseX, int mouseY) {
+    public static void tooltipStyled(
+            VDrawContext ctx, Palette palette, List<Component> lines, int mouseX, int mouseY,
+            int screenW, int screenH) {
         if (lines == null || lines.isEmpty()) {
             return;
         }
-        ctx.drawTooltip(lines, java.util.Optional.empty(), mouseX, mouseY);
+        TextDrawer drawer = font();
+        int rowH = lineH() + 2;
+        int width = 0;
+        for (Component line : lines) {
+            width = Math.max(width, drawer.getWidth(line.getVisualOrderText()));
+        }
+        width += 16;
+        int height = lines.size() * rowH + 10;
+        int x = Math.max(8, Math.min(screenW - width - 8, mouseX + 12));
+        int y = Math.max(8, Math.min(screenH - height - 8, mouseY + 12));
+
+        int panel = 0xF0000000 | (palette.panel() & 0x00FFFFFF);
+        fill(ctx, x, y, width, height, panel);
+        fill(ctx, x, y, 3, height, palette.signal());
+        fill(ctx, x, y, width, 1, palette.ink());
+        fill(ctx, x, y + height - 1, width, 1, palette.ink());
+        fill(ctx, x + width - 1, y, 1, height, palette.ink());
+        int ty = y + 5;
+        for (Component line : lines) {
+            // 颜色代码由 FormattedCharSequence 自己带，这里不再传颜色
+            ctx.drawText(drawer, line.getVisualOrderText(), x + 9, ty, palette.ink(), false);
+            ty += rowH;
+        }
     }
 
     // ------------------------------------------------------------------ 文字

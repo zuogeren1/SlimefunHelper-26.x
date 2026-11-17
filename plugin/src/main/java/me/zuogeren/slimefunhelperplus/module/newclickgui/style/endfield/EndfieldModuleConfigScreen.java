@@ -2412,7 +2412,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             // 与宿主同一份文案：说明 + 当前内容的实时预览。预览带颜色代码，必须按 Component 画
             List<Component> lines = editorHover.generateColorStringPreview();
             editorHover = null;
-            Ef.tooltip(ctx, lines, mouseX, mouseY);
+            Ef.tooltipStyled(ctx, p, lines, mouseX, mouseY, this.width, this.height);
             return;
         }
         // 被截断的文本优先：它回答的是「这一条到底是什么」，比配置说明更急
