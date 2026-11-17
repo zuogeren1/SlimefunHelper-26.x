@@ -1449,9 +1449,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int right = controlRight();
         Object[] rowParts = recordParts(ref.ref().getValue());
         int rowH = rowParts != null ? ROW_H * rowParts.length : ROW_H;
-        boolean hover = mouseY >= y && mouseY < y + rowH && mouseX >= contentLeft - 4 && mouseX <= right + 4;
+        // 浮层盖住的行不算悬停：下拉/名单面板打开时，鼠标下面是浮层，不是这一行
+        boolean covered = dropdown != null || listPanel != null;
+        boolean hover = !covered
+                && mouseY >= y && mouseY < y + rowH && mouseX >= contentLeft - 4 && mouseX <= right + 4;
         // 编辑文本时不出说明框：输入框是后加的 renderable，画在整块画布之上，说明框会被它压住
-        if (hover && dropdown == null && textTarget == null) {
+        if (hover && textTarget == null) {
             hovered = ref;
         }
         if (hover) {
@@ -2144,7 +2147,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void paintAction(VDrawContext ctx, Ef.Palette p, ActionRow row, int mouseX, int mouseY) {
         Action action = row.action;
         int right = contentLeft + contentWidth;
-        boolean hover = mouseY >= row.y
+        // 浮层（下拉、名单面板）盖在正文之上：鼠标落在它们身上时，底下的行既不该高亮，
+        // 也不该把自己的说明框顶出来 —— 那会让人以为浮层里那一条是这一行。
+        boolean covered = dropdown != null || listPanel != null;
+        boolean hover = !covered
+                && mouseY >= row.y
                 && mouseY < row.y + row.height
                 && mouseX >= contentLeft - 4
                 && mouseX <= right + 4;
