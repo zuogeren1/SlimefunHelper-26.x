@@ -27,6 +27,8 @@ import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.PrimitiveList;
+import me.matl114.hacks.utils.config.Vec2;
+import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.managers.config.NBTType;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.config.WrapEnum;
@@ -955,6 +957,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof StringEnum
                 || value.getValue() instanceof StringFormat
                 || value.getValue() instanceof PrimitiveList<?>
+                || value.getValue() instanceof WidgetPos
                 || value.getValue() instanceof Regex
                 || recordParts(value.getValue()) != null
                 || booleanParts(value.getValue()) != null;
@@ -1664,6 +1667,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             boolean open = dropdown == ref;
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        } else if (raw instanceof WidgetPos pos) {
+            paintWidgetPos(ctx, p, y, ref, pos, mouseX, mouseY);
         } else if (raw instanceof PrimitiveList<?> list) {
             // 列表类配置与名单同一套外观：一个「N 项 ▾」切角块，点开进面板
             paintCountChip(ctx, p, y, ref, list.list().size() + " 项");
@@ -2113,6 +2118,54 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             // 这个类型没有可用的编辑器：保持只读，但要把原因打出来，否则「点了没反应」无从查起
             me.matl114.utils.Debug.info("[SFH+] 列表编辑器打开失败: " + e);
         }
+    }
+
+    /**
+     * 位置配置：行尾一个 type 切换块，下面两行滑杆。
+     *
+     * <p>{@code type} 决定哪两个字段生效（0 = 百分比、1 = 绝对长度），
+     * 所以只画当前生效的那一对——四个字段全摆出来会让人以为都能调。
+     */
+    private void paintWidgetPos(
+            VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref, WidgetPos pos,
+            int mouseX, int mouseY) {
+        int right = controlRight();
+        boolean percent = pos.getType() == 0;
+        String mode = percent ? "百分比" : "绝对";
+        int modeW = Ef.textWidth(mode) + 10;
+        int modeX = right - modeW;
+        boolean hot = inBox(modeX, y + 3, modeW, 12, mouseX, mouseY);
+        Ef.cutFill(ctx, modeX, y + 3, modeW, 12, hot ? p.ink() : p.chip(), Ef.CUT);
+        Ef.text(ctx, mode, modeX + 5, y + 5, hot ? p.paper() : p.ink());
+
+        Vec2 pair = percent ? pos.toPercentage() : pos.toLength();
+        String[] names = percent ? new String[] {"X 比例", "Y 比例"} : new String[] {"X 长度", "Y 长度"};
+        double[] values = {pair.x(), pair.y()};
+        for (int i = 0; i < 2; i++) {
+            int rowY = y + i * ROW_H;
+            double[] range = bounds(ref, values[i], i);
+            paintSlider(ctx, p, rowY, right, formatNumber(values[i]), values[i], range[0], range[1],
+                    names[i], numberTarget == ref && numberPart == i);
+        }
+    }
+
+    /** 位置行的一击：行尾切 type，两行滑杆各管一格。 */
+    private boolean hitWidgetPos(
+            WrapperConfigRef<?> wrapper, WidgetPos pos, int mouseX, int mouseY, int button, int rowY) {
+        if (button != 0) {
+            return false;
+        }
+        int right = controlRight();
+        String mode = pos.getType() == 0 ? "百分比" : "绝对";
+        int modeW = Ef.textWidth(mode) + 10;
+        if (inBox(right - modeW, rowY + 3, modeW, 12, mouseX, mouseY)) {
+            setValue(wrapper.ref(), pos.withType((pos.getType() + 1) % 2));
+            return true;
+        }
+        int index = Math.max(0, Math.min(1, (mouseY - rowY) / ROW_H));
+        Vec2 pair = pos.getType() == 0 ? pos.toPercentage() : pos.toLength();
+        double current = index == 0 ? pair.x() : pair.y();
+        return hitNumber(wrapper, index, right, mouseX, button, rowY, formatNumber(current), current);
     }
 
     /** 列表行的一击：只有计数块接，点它把宿主的列表编辑器开到这一页上。 */
@@ -3105,6 +3158,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof PrimitiveList<?> list) {
             return hitPrimitiveList(wrapper, list, mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof WidgetPos pos) {
+            return hitWidgetPos(wrapper, pos, mouseX, mouseY, button, rowY);
         }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
