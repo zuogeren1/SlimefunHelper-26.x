@@ -15,6 +15,8 @@ import java.util.Locale;
 import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
+import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.basic.SubScreenWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
@@ -24,6 +26,7 @@ import me.matl114.gui.Constants;
 import me.matl114.hacks.utils.config.StringEnum;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
+import me.matl114.hacks.utils.config.PrimitiveList;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.config.WrapEnum;
 import me.matl114.managers.config.ConfigEnum;
@@ -275,6 +278,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 这一帧鼠标停在哪一条格式化串的颜色编辑器按钮上：说明框要带实时预览。 */
     private StringFormat editorHover;
 
+    /** 打开中的宿主编辑器浮层：列表类配置点开它，关掉时整块移除。 */
+    private SubScreenWidget hostEditor;
+
     /** 没有显式约束的数值，其推导区间只算一次，避免跨数量级时轨道跳档；复合数值按分量分开记。 */
     private final Map<String, double[]> derivedBounds = new HashMap<>();
 
@@ -514,6 +520,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         // 布局重来（开屏、改窗口大小）时行会挪位：浮层的锚点跟着失效，先收起来
         this.palette = null;
         this.listPanel = null;
+        closeHostEditor();
         // 输入框随旧控件树一起拆掉了：先把打的字提交掉，再作废目标（没在编辑时这一下什么都不做）
         closeTextEdit();
         if (tabKey != null) {
@@ -940,6 +947,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value instanceof StringRef
                 || value.getValue() instanceof StringEnum
                 || value.getValue() instanceof StringFormat
+                || value.getValue() instanceof PrimitiveList<?>
                 || value.getValue() instanceof Regex
                 || recordParts(value.getValue()) != null
                 || booleanParts(value.getValue()) != null;
@@ -1649,6 +1657,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             boolean open = dropdown == ref;
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        } else if (raw instanceof PrimitiveList<?> list) {
+            // 列表类配置与名单同一套外观：一个「N 项 ▾」切角块，点开进面板
+            paintCountChip(ctx, p, y, ref, list.list().size() + " 项");
         } else if (raw instanceof StringFormat format) {
             paintStringFormat(ctx, p, y, ref, format, mouseX, mouseY);
         } else if (raw instanceof Regex regex) {
@@ -2042,6 +2053,77 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         boolean open = listPanel == ref;
         Ef.cutFill(ctx, chip.x(), chip.y(), chip.w(), chip.h(), open ? p.ink() : p.chip(), Ef.CUT);
         Ef.text(ctx, entrySetChipText(set), chip.x() + 5, chip.y() + 2, open ? p.paper() : p.ink());
+    }
+
+    /**
+     * 列表类配置的计数块：与名单同一套外观，但点开的是宿主的列表编辑器。
+     *
+     * <p>元素带 {@code NBTType}，增删行要按元素类型重建，自绘一份等于重写宿主的列表编辑器；
+     * 这里只把「有几项」摆出来，点开交给宿主——外观上仍是一个切角块，不会露出宿主控件。
+     */
+    private void paintCountChip(VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref, String text) {
+        String label = text + "   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = controlRight() - width;
+        boolean open = listPanel == ref;
+        Ef.cutFill(ctx, x, y + 3, width, 12, open ? p.ink() : p.chip(), Ef.CUT);
+        Ef.text(ctx, label, x + 5, y + 5, open ? p.paper() : p.ink());
+    }
+
+    /**
+     * 把宿主的列表编辑器作为浮层开到这一行下方。
+     *
+     * <p>列表元素带 {@code NBTType}，增删行要按元素类型重建，自绘一份等于重写宿主的编辑器；
+     * 所以这里只借它的编辑能力，浮层位置与关闭时机仍由本屏控制——行里那个切角块才是入口，
+     * 不会出现「一半自绘一半宿主」的割裂。
+     */
+    private void openHostEditor(WrapperConfigRef<?> wrapper, int rowY) {
+        closeHostEditor();
+        int w = Math.min(320, Math.max(200, contentWidth / 2));
+        int h = 120;
+        int x = Math.max(winX + 4, controlRight() - w);
+        int y = rowY + ROW_H + 2;
+        if (y + h > winY + winH - 4) {
+            y = Math.max(winY + barH + 4, rowY - h - 2);
+        }
+        SubScreenWidget panel = SubScreenWidget.instance(x, y, w, h);
+        try {
+            DrawableWidget widget = handle(wrapper)
+                    .generateValueWidget(NewClickGui.elementFactory(), 0, 0, w, h);
+            if (widget != null) {
+                panel.addDrawableChild(widget);
+            }
+        } catch (Throwable ignored) {
+            // 这个类型没有可用的编辑器：保持只读，不弹空面板
+            return;
+        }
+        this.hostEditor = panel;
+        this.addRenderableWidget(panel);
+    }
+
+    /** 收起宿主编辑器浮层：换页、重排、再点一次同一块都走这里。 */
+    private void closeHostEditor() {
+        if (hostEditor != null) {
+            this.removeWidget(hostEditor);
+            hostEditor = null;
+        }
+    }
+
+    /** 列表行的一击：只有计数块接，点它把宿主的列表编辑器开到这一页上。 */
+    private boolean hitPrimitiveList(
+            WrapperConfigRef<?> wrapper, PrimitiveList<?> list, int mouseX, int mouseY, int button, int rowY) {
+        String label = list.list().size() + " 项   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = controlRight() - width;
+        if (button != 0 || !inBox(x, rowY + 3, width, 12, mouseX, mouseY)) {
+            return false;
+        }
+        if (hostEditor != null) {
+            closeHostEditor();
+            return true;
+        }
+        openHostEditor(wrapper, rowY);
+        return true;
     }
 
     private static String entrySetChipText(EntrySet<?> set) {
@@ -2999,6 +3081,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof StringFormat format) {
             return hitStringFormat(wrapper, format, mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof PrimitiveList<?> list) {
+            return hitPrimitiveList(wrapper, list, mouseX, mouseY, button, rowY);
         }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
