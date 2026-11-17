@@ -183,6 +183,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 页面自己的动作行：排在配置项之后，绘制与命中共用这份布局。 */
     private final List<ActionRow> actionRows = new ArrayList<>();
     private Action hoveredAction;
+    /**
+     * 悬停时被截断的完整文本：下拉选项与收起态的值框都会用省略号裁短，
+     * 裁短之后只有悬停才看得到全名。为空表示这一帧没有需要补全的文本。
+     */
+    private String truncatedHover;
 
     /** 正在等待按键的键位项。 */
     private WrapperConfigRef<?> keyTarget;
@@ -1339,6 +1344,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         editorRects.clear();
         hovered = null;
         hoveredAction = null;
+        truncatedHover = null;
 
         paintBar(ctx, p, mouseX, mouseY);
         paintBody(ctx, p, mouseX, mouseY);
@@ -1536,11 +1542,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             // 有候选值的字符串走下拉：模型文件名这类「只能从已有里选」的配置不该让人手打
             String shown = text.get();
             String label = shown == null || shown.isEmpty() ? EMPTY_TEXT : shown;
-            String chip = Ef.ellipsis(label, Math.max(40, contentWidth / 3)) + "   ▾";
+            String clipped = Ef.ellipsis(label, Math.max(40, contentWidth / 3));
+            String chip = clipped + "   ▾";
             int textW = Ef.textWidth(chip);
             int chipX = right - textW - 10;
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, dropdown == ref ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, chip, chipX + 5, y + 5, dropdown == ref ? p.paper() : p.ink());
+            // 收起态的值框同样会裁短：悬停时把全名补出来
+            if (!clipped.equals(label) && dropdown == null
+                    && mouseX >= chipX && mouseX <= chipX + textW + 10
+                    && mouseY >= y + 3 && mouseY <= y + 14) {
+                truncatedHover = label;
+            }
         } else if (value instanceof StringRef text) {
             paintTextValue(ctx, p, textValue, ref, text, mouseX, mouseY);
         } else {
@@ -2169,6 +2182,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final String DUMMY_TOOLTIP = "\u0000none";
 
     private void paintTooltip(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
+        // 被截断的文本优先：它回答的是「这一条到底是什么」，比配置说明更急
+        if (truncatedHover != null) {
+            Ef.tooltip(ctx, p, Ef.wrap(truncatedHover, 230), mouseX, mouseY, this.width, this.height);
+            return;
+        }
         if (hoveredAction != null) {
             String tip = hoveredAction.tip();
             if (tip != null && !tip.isEmpty()) {
@@ -2391,8 +2409,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             if (active) {
                 Ef.fill(ctx, dropX + 1, oy, 2, rowH, p.trace());
             }
-            Ef.text(ctx, Ef.ellipsis(enumLabel(options[index]), dropW - 14), dropX + 8, oy + 3,
-                    active ? p.ink() : p.ink2());
+            String label = enumLabel(options[index]);
+            String shown = Ef.ellipsis(label, dropW - 14);
+            // 被裁短的那一条在悬停时补出全名：模型文件名动辄三四十个字符，省略号后面才是区分点
+            if (hover && !shown.equals(label)) {
+                truncatedHover = label;
+            }
+            Ef.text(ctx, shown, dropX + 8, oy + 3, active ? p.ink() : p.ink2());
         }
         // 滚动条：只在真的滚得动时画，免得短列表也挂一条
         if (options.length > visible) {
