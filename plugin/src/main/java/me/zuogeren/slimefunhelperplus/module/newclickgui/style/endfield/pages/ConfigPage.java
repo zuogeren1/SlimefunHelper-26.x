@@ -9,7 +9,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
-import me.matl114.gui.FilterService;
 import me.matl114.gui.GenericScreen;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigEnum;
@@ -316,7 +315,7 @@ public class ConfigPage extends GenericScreen {
         List<Item> out = new ArrayList<>();
         for (Item item : items) {
             if (item.path().toLowerCase(Locale.ROOT).contains(needle)
-                    || FilterService.nameMatch(labelOf(item), needle)) {
+                    || HostControls.nameMatch(labelOf(item), needle)) {
                 out.add(item);
             }
         }

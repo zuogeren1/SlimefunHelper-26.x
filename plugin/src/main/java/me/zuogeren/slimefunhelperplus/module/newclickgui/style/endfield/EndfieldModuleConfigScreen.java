@@ -14,8 +14,6 @@ import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
-import me.matl114.gui.Constants;
-import me.matl114.gui.FilterService;
 import me.matl114.gui.GenericScreen;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
@@ -1527,7 +1525,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             if (hot) {
                 Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), Ef.CUT);
             }
-            Ef.icon(ctx, Constants.RESET_BUTTON_SPRITE, iconX + 1, y + 4, 9, hot ? p.ink() : p.ink2());
+            Ef.icon(ctx, HostControls.resetIcon(), iconX + 1, y + 4, 9, hot ? p.ink() : p.ink2());
         }
 
         Ref<?> value = ref.ref();
@@ -2212,7 +2210,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         for (Identifier id : ids) {
             String name = entryName(registry.getValue(id), id);
             if (id.toString().toLowerCase(Locale.ROOT).contains(needle)
-                    || FilterService.nameMatch(name, pinyinNeedle)) {
+                    || HostControls.nameMatch(name, pinyinNeedle)) {
                 out.add(id);
             }
         }

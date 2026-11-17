@@ -5,7 +5,6 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import me.matl114.gui.FilterService;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.api.ModuleGroup;
@@ -123,7 +122,7 @@ public class HotkeysPage extends EndfieldModuleConfigScreen {
         }
         String needle = q.toLowerCase(Locale.ROOT);
         boolean hit = ref.keyName().toLowerCase(Locale.ROOT).contains(needle)
-                || FilterService.nameMatch(rowLabel(ref), needle);
+                || HostControls.nameMatch(rowLabel(ref), needle);
         acceptCache.put(ref, hit);
         return hit;
     }

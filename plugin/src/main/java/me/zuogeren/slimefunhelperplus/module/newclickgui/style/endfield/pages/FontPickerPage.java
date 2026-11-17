@@ -3,7 +3,6 @@ package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import me.matl114.gui.FilterService;
 import me.matl114.gui.GenericScreen;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.modules.task.TextFont;
@@ -123,7 +122,7 @@ public class FontPickerPage extends GenericScreen {
         List<LocalFontTextDrawer.FontFile> out = new ArrayList<>();
         for (LocalFontTextDrawer.FontFile font : fonts()) {
             if (font.path().toString().toLowerCase(Locale.ROOT).contains(needle)
-                    || FilterService.nameMatch(font.displayName(), needle)) {
+                    || HostControls.nameMatch(font.displayName(), needle)) {
                 out.add(font);
             }
         }

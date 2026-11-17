@@ -1,9 +1,14 @@
 package me.zuogeren.slimefunhelperplus.hostgui;
 
 import java.util.function.Consumer;
+import me.matl114.gui.Constants;
+import me.matl114.gui.FilterService;
+import me.matl114.managers.config.Ref;
+import me.matl114.utils.config.AttrKeyValue;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 
 /**
  * 宿主控件的唯一入口：插件侧不直接 new 宿主的控件，一律走这里。
@@ -53,5 +58,30 @@ public final class HostControls {
         if (responder != null) {
             box.setResponder(responder);
         }
+    }
+
+    /**
+     * 拼音搜索：宿主那套支持全拼、首字母、带空格三种写法。
+     *
+     * <p>自己写一份会漏掉其中一种，而且用户已经习惯了那套匹配规则——搜索框的行为不该因为
+     * 换了界面就变。
+     */
+    public static boolean nameMatch(String text, String needle) {
+        return FilterService.nameMatch(text, needle);
+    }
+
+    /**
+     * 配置项的「对象 ↔ 文本」转换工厂。
+     *
+     * <p>各 Ref 类型自己知道怎么 stringify，这里只负责取到那个工厂；
+     * 插件侧不自己实现转换，否则配置写回会与宿主配置页产生两种语义。
+     */
+    public static AttrKeyValue<?> keyValue(Ref<?> ref, String keyName) {
+        return ref.createKeyValue(keyName);
+    }
+
+    /** 行尾重置按钮的图标。 */
+    public static Identifier resetIcon() {
+        return Constants.RESET_BUTTON_SPRITE;
     }
 }

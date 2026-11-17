@@ -8,7 +8,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import me.matl114.accessors.gui.ScreenAccess;
-import me.matl114.gui.Constants;
+import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.gui.GenericScreen;
 import me.matl114.hooks.BaritoneHooks;
 import me.matl114.utils.ChatUtils;
@@ -494,7 +494,7 @@ public class BaritonePage extends GenericScreen {
             Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), p.cut());
         }
         int fg = modified ? p.onTrace() : (hot ? p.ink() : p.ink2());
-        Ef.icon(ctx, Constants.RESET_BUTTON_SPRITE, iconX + 1, y + 4, 9, fg);
+        Ef.icon(ctx, HostControls.resetIcon(), iconX + 1, y + 4, 9, fg);
     }
 
     /** 开关块：实心墨块 = 开，虚线框 = 关，点一下切一次。 */
