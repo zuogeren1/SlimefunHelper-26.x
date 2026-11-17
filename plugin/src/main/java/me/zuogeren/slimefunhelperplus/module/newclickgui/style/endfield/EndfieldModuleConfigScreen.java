@@ -47,6 +47,8 @@ import net.minecraft.client.gui.components.EditBox;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.config.NumberClamp;
 import me.matl114.utils.config.AttrKeyValue;
+import me.matl114.utils.config.WrapperFactory;
+import me.matl114.utils.config.kv.WrapperAttrKeyValue;
 import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
@@ -62,6 +64,8 @@ import net.minecraft.core.Registry;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import me.matl114.utils.ItemStackUtils;
 import net.minecraft.world.item.alchemy.Potion;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.network.chat.Component;
@@ -2086,17 +2090,28 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return;
         }
         // 直接开宿主的列表编辑屏：它自带增删行与逐元素输入，
-        // 而 generateValueWidget 产出的是「打开列表编辑」的按钮，塞进浮层只会得到一个巨大的按钮
+        // 而 generateValueWidget 产出的是「打开列表编辑」的按钮，塞进浮层只会得到一个巨大的按钮。
+        //
+        // 宿主的编辑屏要的是 AttrKeyValue<List<W>>，而这一项是 AttrKeyValue<PrimitiveList<W>>：
+        // 必须包一层转换，否则它会把 List 直接写回 PrimitiveList 字段，运行时抛类型错。
         try {
+            AttrKeyValue<PrimitiveList<Object>> source =
+                    (AttrKeyValue<PrimitiveList<Object>>) (AttrKeyValue<?>) handle(wrapper);
+            NBTType<Object> elementType = (NBTType<Object>) list.elementType();
+            WrapperFactory<List<Object>, PrimitiveList<Object>> wrapperFactory = WrapperFactory.of(
+                    next -> new PrimitiveList<>(elementType, next, list.defaultPrimitive()),
+                    PrimitiveList::list);
+            AttrKeyValue<List<Object>> converted = new WrapperAttrKeyValue<>(source, wrapperFactory);
             NBTTypes.openListModifyScreen(
                     NewClickGui.elementFactory(),
-                    (AttrKeyValue<List<Object>>) (AttrKeyValue<?>) handle(wrapper),
+                    converted,
                     (NBTType<Object>) list.elementType(),
                     list::createNewElement,
                     300,
                     20);
-        } catch (Throwable ignored) {
-            // 这个类型没有可用的编辑器：保持只读
+        } catch (Throwable e) {
+            // 这个类型没有可用的编辑器：保持只读，但要把原因打出来，否则「点了没反应」无从查起
+            me.matl114.utils.Debug.info("[SFH+] 列表编辑器打开失败: " + e);
         }
     }
 
@@ -2403,8 +2418,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return type.getDescription().getString();
         }
         if (entry instanceof Item item) {
-            // 26.2 的 Item#getName 要一个 ItemStack：空栈取的就是物品自己的名字
-            return item.getName(ItemStack.EMPTY).getString();
+            // 26.2 的 Item#getName 读的是 ItemStack 上的 ITEM_NAME 组件：空栈没有这个组件，
+            // 直接传 EMPTY 会得到空串（名称列整列空白）。组件未绑定时也只能走翻译键。
+            return ItemStackUtils.itemComponentsBound()
+                    ? item.getName(new ItemStack(item)).getString()
+                    : Component.translatable(item.getDescriptionId()).getString();
         }
         if (entry instanceof Block block) {
             return block.getName().getString();
@@ -2413,7 +2431,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return effect.getDisplayName().getString();
         }
         if (entry instanceof Potion potion) {
-            return potion.name();
+            return Component.translatable(Items.POTION.getDescriptionId() + ".effect." + potion.name())
+                    .getString();
         }
         return id.getPath();
     }
