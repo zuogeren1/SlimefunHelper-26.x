@@ -17,11 +17,12 @@ import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.Constants;
 import me.matl114.gui.FilterService;
 import me.matl114.gui.GenericScreen;
-import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
 import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.StringEnum;
+import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.config.WrapEnum;
@@ -175,9 +176,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private int dropW;
 
     /** 非原生类型交给宿主控件：按 ref 缓存实例，位置每帧跟着行走。 */
-    private final Map<WrapperConfigRef<?>, DrawableWidget> editors = new IdentityHashMap<>();
     /** 本帧每个可见行留给宿主控件的矩形（绝对坐标）。 */
-    private final Map<WrapperConfigRef<?>, int[]> editorRects = new IdentityHashMap<>();
 
     /** 悬停中的行与它的说明缓存。 */
     private WrapperConfigRef<?> hovered;
@@ -520,7 +519,6 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         super.refreshWidgets();
         // 重新 init（例如从宿主界面返回）会把子控件全部清掉，但 editors 里还留着这些已经不在屏幕上的对象：
         // 不清掉它，tick 会以为这一行已经有编辑器，宿主控件再也建不回来
-        editors.clear();
         winW = Math.min(this.width - 8, Math.max(280, Math.round(this.width * 0.78F)));
         winH = Math.min(this.height - 8, Math.max(200, Math.round(this.height * 0.78F)));
         winX = (this.width - winW) / 2;
@@ -891,39 +889,15 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         } else if (listSearchBox == null) {
             startListSearch(panelBox);
         }
-        Iterator<Map.Entry<WrapperConfigRef<?>, DrawableWidget>> it = editors.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<WrapperConfigRef<?>, DrawableWidget> entry = it.next();
-            int[] rect = editorRects.get(entry.getKey());
-            if (rect == null) {
-                this.removeWidget(entry.getValue());
-                it.remove();
-            } else {
-                entry.getValue().setX(rect[0]);
-                entry.getValue().setY(rect[1]);
-            }
-        }
-        for (Map.Entry<WrapperConfigRef<?>, int[]> entry : editorRects.entrySet()) {
-            if (editors.containsKey(entry.getKey())) {
-                continue;
-            }
-            int[] rect = entry.getValue();
-            try {
-                DrawableWidget widget = handle(entry.getKey())
-                        .generateValueWidget(NewClickGui.elementFactory(), rect[0], rect[1], rect[2], rect[3]);
-                if (widget != null) {
-                    this.addRenderableWidget(widget);
-                    editors.put(entry.getKey(), widget);
-                }
-            } catch (Throwable ignored) {
-                // 这个类型没有可用的编辑器，保持只读
-            }
-        }
+        // 宿主控件不再嵌进本屏：没有专用控件的类型由 paintReadOnly 画成只读文本
     }
 
     /**
      * 本屏自己画的控件：开关 / 数值 / 枚举 / 键位 / 颜色 / 名单 / 文本，以及"一条记录里几个 double"（例如 {@code Vec2}）。
      * 后者也必须在列，否则行里画的是自己的滑杆、点击却让给宿主控件，两头都没接上。
+     *
+     * <p>不在列的类型一律画成只读文本（{@link #paintReadOnly}）：宿主那套编辑器是另一套外观，
+     * 混进同一张表里比暂时不可编辑更难看。
      */
     private boolean nativeControl(WrapperConfigRef<?> ref) {
         Ref<?> value = ref.ref();
@@ -938,6 +912,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof EntrySet<?>
                 || value.getValue() instanceof OptionalPrimitive<?>
                 || value instanceof StringRef
+                || value.getValue() instanceof StringEnum
                 || recordParts(value.getValue()) != null;
     }
 
@@ -1249,6 +1224,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             if (!choices.isEmpty()) {
                 return choices.toArray();
             }
+            if (ref.ref().getValue() instanceof StringEnum choice) {
+                return choice.values().toArray();
+            }
         }
         Object value = enumValueOf(ref.ref().getValue(), part);
         return value instanceof Enum<?> e ? e.getDeclaringClass().getEnumConstants() : new Object[0];
@@ -1363,7 +1341,6 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void paint(EfWidget self, VDrawContext ctx, int mouseX, int mouseY) {
         Ef.Palette p = pal();
         buildRows();
-        editorRects.clear();
         hovered = null;
         hoveredAction = null;
         truncatedHover = null;
@@ -1594,12 +1571,54 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
         } else if (value instanceof StringRef text) {
             paintTextValue(ctx, p, textValue, ref, text, mouseX, mouseY);
+        } else if (raw instanceof StringEnum choice) {
+            // 有限字符串候选：与枚举同一套下拉，值框显示当前项
+            String text = choice.value() + "   ▾";
+            int textW = Ef.textWidth(text);
+            int chipX = right - textW - 10;
+            boolean open = dropdown == ref;
+            Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
+            Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        } else if (raw instanceof StringFormat format) {
+            // 格式化串：只读预览，编辑走宿主的格式编辑器（它要校验参数表，自绘一份不划算）
+            paintReadOnly(ctx, p, y, right, format.formatString());
         } else {
-            // 其余类型由宿主自带的编辑器负责绘制：这里只登记矩形并留白
-            int boxW = Math.min(260, Math.max(120, contentWidth / 3));
-            editorRects.put(ref, new int[] {right - boxW, y + 2, boxW, ROW_H - 4});
-            Ef.fill(ctx, right - boxW, y + 3, boxW, ROW_H - 6, Ef.alpha(p.chip(), 0.35F));
+            // 没有专用控件的类型：按值形态画成只读文本，不再退回宿主控件。
+            // 一半自绘一半宿主会让同一张表里出现两种外观，宁可这一格暂时不可编辑。
+            paintReadOnly(ctx, p, y, right, raw);
         }
+    }
+
+    /**
+     * 没有专用控件的类型画成只读文本：右对齐、次要色、悬停出完整值。
+     *
+     * <p>这些类型（物品模板、音效、正则、坐标…）宿主各有自己的编辑器，但那是另一套外观；
+     * 同一张表里混两种控件比暂时不可编辑更难看，所以这里只显示、不接点击。
+     */
+    private void paintReadOnly(VDrawContext ctx, Ef.Palette p, int y, int right, Object raw) {
+        String text = readOnlyText(raw);
+        int maxW = Math.max(60, contentWidth / 2);
+        String shown = Ef.ellipsis(text, maxW);
+        Ef.text(ctx, shown, right - Ef.textWidth(shown), y + 5, p.ink2());
+        if (!shown.equals(text)) {
+            truncatedHover = text;
+        }
+    }
+
+    /** 只读值的文本形式：能读成一句就一句，读不出来就报类型名。 */
+    private static String readOnlyText(Object raw) {
+        if (raw == null) {
+            return "-";
+        }
+        if (raw instanceof Number || raw instanceof Boolean || raw instanceof CharSequence) {
+            return String.valueOf(raw);
+        }
+        if (raw instanceof Enum<?> e) {
+            return enumLabel(e);
+        }
+        String text = String.valueOf(raw);
+        // 记录与集合的 toString 常常是一长串字段名，读不出重点，退回类型名
+        return text.length() > 64 ? raw.getClass().getSimpleName() : text;
     }
 
     /**
@@ -2766,7 +2785,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
             return false;
         }
-        if (ref instanceof EnumRef<?>) {
+        if (ref instanceof EnumRef<?> || ref.getValue() instanceof StringEnum) {
             openDropdown(wrapper, -1, rowY);
             return true;
         }
@@ -2805,6 +2824,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     private void applyOption(WrapperConfigRef<?> wrapper, int part, Object option) {
+        if (wrapper.ref().getValue() instanceof StringEnum choice && option instanceof String next) {
+            setValue(wrapper.ref(), new StringEnum(next, choice.values()));
+            return;
+        }
         if (part == OPTIONAL_PART) {
             writeOptionalOption(wrapper.ref(), option);
         } else if (part < 0) {
