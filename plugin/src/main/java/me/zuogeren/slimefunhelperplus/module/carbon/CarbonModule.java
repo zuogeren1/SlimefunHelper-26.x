@@ -37,12 +37,10 @@ public class CarbonModule extends BaseModule {
     @Override
     public void onEnableModule() {
         CarbonRenderer.setEnabled(true);
-        log("Carbon 物品实例化已启用");
     }
 
     @Override
     public void onDisableModule() {
         CarbonRenderer.setEnabled(false);
-        log("Carbon 物品实例化已停用");
     }
 }

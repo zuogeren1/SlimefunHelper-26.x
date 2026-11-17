@@ -105,7 +105,6 @@ public class CustomModelModule extends BaseModule {
 
     @Override
     public void onEnableModule() {
-        log("自定义模型已启用");
         ModelCatalog.rescan();
         CustomModelManager.reloadAsync(model.get());
     }
@@ -113,7 +112,6 @@ public class CustomModelModule extends BaseModule {
     @Override
     public void onDisableModule() {
         CustomModelManager.clear();
-        log("自定义模型已停用");
     }
 
     private void onModelChanged(String value) {
