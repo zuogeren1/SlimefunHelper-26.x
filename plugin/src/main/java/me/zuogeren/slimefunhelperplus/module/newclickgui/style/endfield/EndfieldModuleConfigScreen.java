@@ -20,6 +20,7 @@ import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Regex;
+import me.matl114.gui.Constants;
 import me.matl114.hacks.utils.config.StringEnum;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
@@ -267,6 +268,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 每个配置项的文本读写句柄：createKeyValue 会挂监听，不能每帧重建。 */
     private final Map<WrapperConfigRef<?>, AttrKeyValue<?>> handles = new IdentityHashMap<>();
+
+    /** 这一帧鼠标停在哪一条格式化串的参数按钮上：说明框要列出它的占位符。 */
+    private StringFormat formatArgumentHover;
+
+    /** 这一帧鼠标停在哪一条格式化串的颜色编辑器按钮上：说明框要带实时预览。 */
+    private StringFormat editorHover;
 
     /** 没有显式约束的数值，其推导区间只算一次，避免跨数量级时轨道跳档；复合数值按分量分开记。 */
     private final Map<String, double[]> derivedBounds = new HashMap<>();
@@ -725,6 +732,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (raw instanceof Regex regex) {
             return regex.regex();
         }
+        if (raw instanceof StringFormat format) {
+            // toString 是对象身份，编辑框里要的是格式串本身
+            return format.formatString();
+        }
         return raw == null ? "" : raw.toString();
     }
 
@@ -776,6 +787,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             } catch (RuntimeException ignored) {
                 // 表达式还不完整，等打完
             }
+            return;
+        }
+        if (target.ref().getValue() instanceof StringFormat format) {
+            // 只换格式串，参数表与 colorString 原样保留：那是这一项的契约，不该被编辑值顺手改掉
+            setValue(target.ref(), format.withFormatString(next));
+            this.textOriginal = next;
             return;
         }
         setValue(target.ref(), next);
@@ -922,6 +939,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof OptionalPrimitive<?>
                 || value instanceof StringRef
                 || value.getValue() instanceof StringEnum
+                || value.getValue() instanceof StringFormat
                 || value.getValue() instanceof Regex
                 || recordParts(value.getValue()) != null
                 || booleanParts(value.getValue()) != null;
@@ -1393,6 +1411,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         hovered = null;
         hoveredAction = null;
         truncatedHover = null;
+        formatArgumentHover = null;
+        editorHover = null;
 
         paintBar(ctx, p, mouseX, mouseY);
         paintBody(ctx, p, mouseX, mouseY);
@@ -1630,8 +1650,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
         } else if (raw instanceof StringFormat format) {
-            // 格式化串：只读预览，编辑走宿主的格式编辑器（它要校验参数表，自绘一份不划算）
-            paintReadOnly(ctx, p, y, right, format.formatString());
+            paintStringFormat(ctx, p, y, ref, format, mouseX, mouseY);
         } else if (raw instanceof Regex regex) {
             // 正则与字符串同一套值框：写回时重新构造 Regex，非法表达式不落配置
             paintTextValue(ctx, p, textValue, ref, regex.regex(), mouseX, mouseY);
@@ -1672,6 +1691,93 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         String text = String.valueOf(raw);
         // 记录与集合的 toString 常常是一长串字段名，读不出重点，退回类型名
         return text.length() > 64 ? raw.getClass().getSimpleName() : text;
+    }
+
+    /**
+     * 格式化串：值框 + 右侧两个按钮。
+     *
+     * <p>两个按钮不是装饰：参数提示列出这一项能用的 {@code {占位符}}，颜色编辑器打开宿主的格式代码页。
+     * 少了它们，用户只能靠猜占位符名字，写错一个字母就是一条永远不生效的提示。
+     */
+    private void paintStringFormat(
+            VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref, StringFormat format,
+            int mouseX, int mouseY) {
+        StringFormatGeometry geo = stringFormatGeometry(y, format);
+        boolean editing = textTarget == ref;
+        if (editing) {
+            paintFieldFrame(ctx, p, geo.fieldX(), geo.fieldY(), geo.fieldW(), geo.fieldH(), true, false);
+            if (textBox != null) {
+                textBox.setTextColor(p.ink());
+            }
+        } else {
+            boolean hot = inBox(geo.fieldX(), geo.fieldY(), geo.fieldW(), geo.fieldH(), mouseX, mouseY);
+            if (hot) {
+                paintFieldFrame(ctx, p, geo.fieldX(), geo.fieldY(), geo.fieldW(), geo.fieldH(), false, true);
+            } else {
+                // 与文本行同一套静态态：只画一条虚线底边，悬停才现出整框
+                int lineY = geo.fieldY() + geo.fieldH() - 2;
+                for (int i = 0; i < geo.fieldW(); i += 3) {
+                    Ef.fill(ctx, geo.fieldX() + i, lineY, Math.min(2, geo.fieldW() - i), 1, p.rule());
+                }
+            }
+            String shown = Ef.ellipsis(format.formatString(), geo.fieldW() - FIELD_PAD * 2);
+            Ef.text(ctx, shown, geo.fieldX() + geo.fieldW() - FIELD_PAD - Ef.textWidth(shown),
+                    geo.fieldY() + FIELD_PAD, p.ink());
+        }
+        // 参数提示：只有声明了占位符才画，否则按钮点开是一张空表
+        if (geo.argX() >= 0) {
+            boolean hot = inBox(geo.argX(), geo.btnY(), geo.btnW(), geo.btnH(), mouseX, mouseY);
+            if (hot) {
+                Ef.cutFill(ctx, geo.argX(), geo.btnY(), geo.btnW(), geo.btnH(), p.chip(), Ef.CUT);
+            }
+            Ef.icon(ctx, Constants.FORMATTING_TEXTURE_SPRITE, geo.argX(), geo.btnY(), geo.btnW(),
+                    hot ? p.ink() : p.ink2());
+            if (hot) {
+                formatArgumentHover = format;
+            }
+        }
+        // 颜色代码编辑器：只有 colorString 的项才有意义
+        if (geo.editX() >= 0) {
+            boolean hot = inBox(geo.editX(), geo.btnY(), geo.btnW(), geo.btnH(), mouseX, mouseY);
+            if (hot) {
+                Ef.cutFill(ctx, geo.editX(), geo.btnY(), geo.btnW(), geo.btnH(), p.chip(), Ef.CUT);
+            }
+            Ef.icon(ctx, Constants.EDITOR_SPRITE, geo.editX(), geo.btnY(), geo.btnW(),
+                    hot ? p.ink() : p.ink2());
+            if (hot) {
+                editorHover = format;
+            }
+        }
+    }
+
+    /** 格式化串那一行的几何：值框让出右侧按钮，绘制与命中共用。 */
+    private record StringFormatGeometry(
+            int fieldX, int fieldY, int fieldW, int fieldH,
+            int argX, int editX, int btnY, int btnW, int btnH) {}
+
+    private StringFormatGeometry stringFormatGeometry(int y, StringFormat format) {
+        int right = controlRight();
+        int btn = 13;
+        int gap = 2;
+        // 按钮从右往左排，只给真正会画的那几个留位置：
+        // 固定按两个算的话，没有颜色编辑器的项右边会空出一格
+        int cursor = right;
+        int editX = -1;
+        int argX = -1;
+        if (format.colorString()) {
+            editX = cursor - btn;
+            cursor = editX - gap;
+        }
+        if (!format.formattingArgument().isEmpty()) {
+            argX = cursor - btn;
+            cursor = argX - gap;
+        }
+        // 值框右对齐到最后一个按钮左边，与文本行同一套几何：左对齐会横跨整行、把行名盖住
+        int fieldW = Math.max(120, Math.min(280, contentWidth / 2));
+        int fieldX = Math.max(contentLeft, cursor - fieldW);
+        return new StringFormatGeometry(
+                fieldX, y + FIELD_TOP, fieldW, FIELD_H,
+                argX, editX, y + 2, btn, btn);
     }
 
     /**
@@ -2292,6 +2398,23 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final String DUMMY_TOOLTIP = "\u0000none";
 
     private void paintTooltip(VDrawContext ctx, Ef.Palette p, int mouseX, int mouseY) {
+        if (formatArgumentHover != null) {
+            // 参数提示优先：它盖住的那一行本来也不该出别的说明
+            List<String> lines = new ArrayList<>();
+            for (Component tip : StringFormat.generateTooltipsForArgument(formatArgumentHover.formattingArgument())) {
+                lines.addAll(Ef.wrap(tip.getString(), 240));
+            }
+            formatArgumentHover = null;
+            Ef.tooltip(ctx, p, lines, mouseX, mouseY, this.width, this.height);
+            return;
+        }
+        if (editorHover != null) {
+            // 与宿主同一份文案：说明 + 当前内容的实时预览。预览带颜色代码，必须按 Component 画
+            List<Component> lines = editorHover.generateColorStringPreview();
+            editorHover = null;
+            Ef.tooltip(ctx, lines, mouseX, mouseY);
+            return;
+        }
         // 被截断的文本优先：它回答的是「这一条到底是什么」，比配置说明更急
         if (truncatedHover != null) {
             Ef.tooltip(ctx, p, Ef.wrap(truncatedHover, 230), mouseX, mouseY, this.width, this.height);
@@ -2874,6 +2997,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (ref.getValue() instanceof Regex) {
             return hitText(wrapper, mouseX, mouseY, button, rowY);
         }
+        if (ref.getValue() instanceof StringFormat format) {
+            return hitStringFormat(wrapper, format, mouseX, mouseY, button, rowY);
+        }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
             if (!stringChoicesOf(wrapper).isEmpty()) {
@@ -2887,6 +3013,25 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return hitText(wrapper, mouseX, mouseY, button, rowY);
         }
         return true;
+    }
+
+    /** 格式化串的命中：两个按钮各管一件事，其余位置开编辑。 */
+    private boolean hitStringFormat(
+            WrapperConfigRef<?> wrapper, StringFormat format, int mouseX, int mouseY, int button, int rowY) {
+        if (button != 0) {
+            return false;
+        }
+        StringFormatGeometry geo = stringFormatGeometry(rowY, format);
+        if (geo.argX() >= 0
+                && inBox(geo.argX(), geo.btnY(), geo.btnW(), geo.btnH(), mouseX, mouseY)) {
+            // 参数提示是纯展示：说明框由 paintStringFormat 记下的 hover 出，这里不做事
+            return true;
+        }
+        if (geo.editX() >= 0 && inBox(geo.editX(), geo.btnY(), geo.btnW(), geo.btnH(), mouseX, mouseY)) {
+            StringFormat.openWikiColorString();
+            return true;
+        }
+        return hitText(wrapper, mouseX, mouseY, button, rowY);
     }
 
     /** 记下这次下拉盖住的是哪一格：普通枚举项 {@code part = -1}，记录分量传它的下标。 */

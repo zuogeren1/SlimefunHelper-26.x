@@ -11,6 +11,7 @@ import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyle;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyles;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
 /**
@@ -569,6 +570,20 @@ public final class Ef {
             text(ctx, line, x + 9, ty, palette.ink());
             ty += rowH;
         }
+    }
+
+    /**
+     * 带样式的说明框：{@link Component} 里的颜色代码要按原样渲染。
+     *
+     * <p>自绘那版只认纯文本，把 {@code Component} 拍成 {@code getString()} 会把颜色代码一起丢掉——
+     * 格式化串的预览正是靠颜色代码才有意义，所以这一条走宿主的 tooltip 绘制。
+     */
+    public static void tooltip(
+            VDrawContext ctx, List<Component> lines, int mouseX, int mouseY) {
+        if (lines == null || lines.isEmpty()) {
+            return;
+        }
+        ctx.drawTooltip(lines, java.util.Optional.empty(), mouseX, mouseY);
     }
 
     // ------------------------------------------------------------------ 文字
