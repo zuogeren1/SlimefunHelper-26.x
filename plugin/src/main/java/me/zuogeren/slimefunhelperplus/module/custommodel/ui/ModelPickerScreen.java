@@ -152,6 +152,8 @@ public class ModelPickerScreen extends GenericScreen {
     /** 本帧要画的卡片槽位 {x, y, h, hot, selected} 与对应文件；3D 统一排在 2D 之后画。 */
     private final List<int[]> cardSlots = new ArrayList<>();
     private final List<String> cardFiles = new ArrayList<>();
+    /** 当前页的文件名，复用同一份避免每帧新建（{@link #ensurePageCards()} 每帧都要用）。 */
+    private final List<String> pageFiles = new ArrayList<>();
     /** 文件 → 上一次应用的卡片动画名。动画换了要立刻重采一次，别等下一个采样窗口。 */
     private final Map<String, String> cardAnimations = new HashMap<>();
     /**
@@ -311,6 +313,16 @@ public class ModelPickerScreen extends GenericScreen {
         Ef.fill(ctx, 0, 0, this.width, this.height, VEIL);
         // 卡片实例按帧预算逐个建：一页十个模型一次全建会把打开页面卡住好几秒。
         // 必须在 updateHover 之前重置 —— 悬停切换要查片段长度，那也要建实例。
+        // 换模型/换贴图会把卡片实例整批丢掉（贴图已释放）：按文件缓存的渲染状态要一起清，
+        // 新实例才会从干净状态重新采样。
+        if (CustomModelManager.consumeCardsDropped()) {
+            cardStates.clear();
+            cardAnimations.clear();
+        }
+        // 每帧补一次预建。{@code prebuildCards} 自己按「已建 / 已备 / 解析中 / 失败」去重，
+        // 全部就绪时只是一次十项查表；少了这一步，卡片被丢掉之后没人再发起预建，
+        // 会一直空到玩家翻页或改搜索词。
+        ensurePageCards();
         CustomModelManager.beginCardFrame();
         cardSampledThisFrame = false;
         updateHover(mouseX, mouseY);
@@ -946,6 +958,21 @@ public class ModelPickerScreen extends GenericScreen {
         // 翻页后上一页的实例没人用了：留着白占内存，而重建代价与首次加载相同
         retainPageCards();
         this.cardEnterStart = System.currentTimeMillis();
+    }
+
+    /**
+     * 把当前页的文件名交给后台预建。
+     *
+     * <p>每帧调用：{@code prebuildCards} 对已建好、已备好、正在解析、已失败的文件都会跳过，
+     * 所以全部就绪时它只是一次十项查表，不会重复起线程。
+     */
+    private void ensurePageCards() {
+        pageFiles.clear();
+        int base = page * PER_PAGE;
+        for (int i = 0; i < PER_PAGE && base + i < view.size(); i++) {
+            pageFiles.add(view.get(base + i));
+        }
+        CustomModelManager.prebuildCards(pageFiles);
     }
 
     /** 只保留当前页的卡片实例；顺带清掉它们的渲染状态，编号变了要重建。 */

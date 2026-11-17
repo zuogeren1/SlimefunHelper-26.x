@@ -23,6 +23,21 @@ public final class ModelTexture {
 
     private static final Map<String, Identifier> CACHE = new ConcurrentHashMap<>();
 
+    /** 后台线程解好的贴图：像素已就绪，只差在渲染线程建 GPU 纹理。 */
+    public record Prepared(String key, NativeImage image) {}
+
+    /**
+     * 卡片预览的模型贴图单独缓存。
+     *
+     * <p>不跟世界模型的 {@link #CACHE} 混：换模型会 {@link #releaseAll()} 掉世界那张，
+     * 卡片若共用同一份，每次切模型都得把一页十张重新解码上传 —— 那正是开页卡顿的来源。
+     * 卡片贴图只在选择页关闭时由 {@link #releaseCards()} 统一释放。
+     */
+    private static final Map<String, Identifier> CARD_CACHE = new ConcurrentHashMap<>();
+
+    /** 卡片贴图的 Identifier 前缀：与世界模型的 {@code custommodel/} 分开，两者才不会互相覆盖。 */
+    private static final String CARD_PATH = "custommodel/card/";
+
     /** 卡片底图/前景图单独缓存：它们是卡片装饰，不随模型贴图的 {@link #releaseAll()} 释放。 */
     private static final Map<String, Identifier> GUI_CACHE = new ConcurrentHashMap<>();
 
@@ -37,12 +52,70 @@ public final class ModelTexture {
         if (texture == null) {
             return null;
         }
+        String cacheKey = keyOf(texture);
+        return CACHE.computeIfAbsent(cacheKey, ignored -> load(texture, cacheKey));
+    }
+
+    /** 贴图的缓存键：优先用模型里记的 hash，没有就按字节算。 */
+    private static String keyOf(RawYsmModel.RawTexture texture) {
         String key = texture.hash;
         if (key == null || key.isBlank()) {
             key = Integer.toHexString(texture.data == null ? 0 : Arrays.hashCode(texture.data));
         }
-        final String cacheKey = key;
-        return CACHE.computeIfAbsent(cacheKey, ignored -> load(texture, cacheKey));
+        return key;
+    }
+
+    /**
+     * 后台线程预解码：只解像素，不碰 GPU。
+     *
+     * <p>解码是纯 CPU 活（{@link NativeImage} 只是堆上的像素缓冲），可以离开渲染线程；
+     * 建 {@link DynamicTexture} 才需要 GL。选择页一屏十张，把解码摊到后台能省掉开页那一下的卡顿。
+     */
+    public static Prepared prepare(RawYsmModel.RawTexture texture) {
+        if (texture == null) {
+            return null;
+        }
+        String key = keyOf(texture);
+        NativeImage image = decode(texture, key);
+        return image == null ? null : new Prepared(key, image);
+    }
+
+    /**
+     * 渲染线程：把预解码的像素上传成 GPU 纹理。
+     *
+     * <p>同一个 key 已经注册过时直接复用并释放这份像素 —— 卡片之间常共用同一张贴图。
+     */
+    public static Identifier registerPrepared(Prepared prepared) {
+        if (prepared == null || prepared.image() == null) {
+            return null;
+        }
+        Identifier existing = CARD_CACHE.get(prepared.key());
+        if (existing != null) {
+            prepared.image().close();
+            return existing;
+        }
+        Identifier id = registerImage(prepared.image(), prepared.key(), CARD_PATH);
+        if (id == null) {
+            prepared.image().close();
+            return null;
+        }
+        CARD_CACHE.put(prepared.key(), id);
+        return id;
+    }
+
+    /** 释放全部卡片贴图；选择页关闭时调用。 */
+    public static void releaseCards() {
+        for (String key : new java.util.ArrayList<>(CARD_CACHE.keySet())) {
+            Identifier id = CARD_CACHE.remove(key);
+            if (id == null) {
+                continue;
+            }
+            try {
+                Minecraft.getInstance().getTextureManager().release(id);
+            } catch (Throwable throwable) {
+                Debug.info("[SFH+] 卡片贴图释放失败 key=" + key + ": " + throwable);
+            }
+        }
     }
 
     /**
@@ -114,9 +187,20 @@ public final class ModelTexture {
     }
 
     private static Identifier registerImage(NativeImage image, String key) {
+        return registerImage(image, key, "custommodel/");
+    }
+
+    /**
+     * 注册一张纹理，{@code pathPrefix} 决定它在 {@code TextureManager} 里的位置。
+     *
+     * <p>卡片与世界模型必须用不同的前缀：同一个模型文件算出的 key 相同，共用 Identifier 时
+     * 后注册的会覆盖先注册的，而 {@link #releaseAll()} 又会把那个 Identifier 整个删掉 ——
+     * 卡片手里的引用随之失效，画出来就是紫黑棋盘格。
+     */
+    private static Identifier registerImage(NativeImage image, String key, String pathPrefix) {
         try {
             DynamicTexture dynamic = new DynamicTexture(() -> "sfh-model-" + key, image);
-            Identifier id = Identifier.fromNamespaceAndPath("slimefunhelperplus", "custommodel/" + key);
+            Identifier id = Identifier.fromNamespaceAndPath("slimefunhelperplus", pathPrefix + key);
             Minecraft.getInstance().getTextureManager().register(id, dynamic);
             return id;
         } catch (Throwable throwable) {

@@ -80,20 +80,38 @@ public final class CustomModelManager {
     private static final Map<String, Integer> cardIds = new HashMap<>();
     /** 卡片预览的渲染状态编号 → runtime。出图入口（实体提交 mixin）只拿得到渲染状态，靠它认领实例。 */
     private static final Map<Integer, ModelRuntime> cardByStateId = new HashMap<>();
-    /** 后台线程预解析好的模型（文件 → 原始模型）；渲染线程取用后即删，避免常驻两份。 */
-    private static final Map<String, RawYsmModel> cardParsed = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * 后台线程准备好的卡片：几何已建好、贴图已解码，只差在渲染线程上传成 GPU 纹理。
+     *
+     * <p>渲染线程取用后即删，避免常驻两份。
+     */
+    private static final Map<String, PreparedCard> cardPrepared = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 解析失败的卡片：记下来免得每帧重试同一个坏文件。 */
+    private static final Set<String> cardFailed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /**
+     * 卡片实例被整体丢弃过。
+     *
+     * <p>丢弃发生在选择页关闭与模块停用：卡片贴图有自己的缓存，换模型不会动它们，
+     * 所以这条路径只在「整页不再需要」时走。选择页靠这个标记清掉按文件缓存的渲染状态。
+     */
+    private static volatile boolean cardsDropped;
     /** 正在后台解析的文件：快速翻页时同一页会被反复请求，靠它去重，避免线程堆积。 */
     private static final Set<String> cardParsing = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** 后台线程备好的一张卡片：几何 + 已解码的贴图。 */
+    private record PreparedCard(ModelRuntime runtime, ModelTexture.Prepared texture) {}
+
     /** 卡片预览用的合成实体编号：负数，不会与真实实体撞号。 */
     private static final int CARD_STATE_BASE = -100000;
     private static int cardIdSeq;
     /**
-     * 一帧最多建几个卡片实例。
+     * 一帧最多上传几张卡片的贴图。
      *
-     * <p>解密 + 反序列化已经由 {@link #prebuildCards} 挪到后台线程，渲染线程只剩贴图注册与几何构建，
-     * 单张代价小得多，所以一页十张可以在一帧内建完 —— 翻页时不会再出现「卡片逐帧补齐」的空窗。
+     * <p>解密、反序列化、建几何、解码贴图都已经由 {@link #prebuildCards} 挪到后台线程，
+     * 渲染线程只剩建 GPU 纹理并上传像素。单张代价不大，但贴图尺寸由作者决定（有的模型
+     * 是 1024²），十张挤在一帧仍会掉帧，所以摊到几帧里做 —— 一页十张约 5 帧补齐，
+     * 观感上是一次快速级联，不是卡顿。
      */
-    private static final int CARD_BUILD_PER_FRAME = 10;
+    private static final int CARD_BUILD_PER_FRAME = 2;
     private static int cardBuildBudget;
 
     private static final String NO_EXTRA = "__none__";
@@ -177,11 +195,12 @@ public final class CustomModelManager {
         if (cardRuntimes.containsKey(file)) {
             return cardIds.get(file);
         }
-        if (cardBuildBudget <= 0) {
+        // 没准备好就不占预算：预算只该花在真正要上传的那几张上
+        if (cardBuildBudget <= 0 || !cardPrepared.containsKey(file)) {
             return CARD_STATE_BASE - 1;
         }
         cardBuildBudget--;
-        ModelRuntime built = buildCardRuntime(file);
+        ModelRuntime built = takePreparedCard(file);
         if (built == null) {
             return CARD_STATE_BASE - 1;
         }
@@ -209,11 +228,11 @@ public final class CustomModelManager {
     }
 
     /**
-     * 预建一页卡片实例：后台线程解密 + 反序列化，渲染线程注册贴图并建几何。
+     * 预建一页卡片实例：后台线程把整张卡片准备到「只差上传」。
      *
      * <p>逐帧建一个（{@link #CARD_BUILD_PER_FRAME}）会让翻页后一页卡片要十帧才补齐，
-     * 期间卡片是空底纹。这里把「解析」这一步挪到后台线程，渲染线程只做必须在那里的
-     * 贴图注册与几何构建，一页十张在翻页那一帧就能出图。
+     * 期间卡片是空底纹。这里把解密、反序列化、建几何、解码贴图全部挪到后台线程，
+     * 渲染线程只做必须在那里的 GPU 纹理上传，一页十张在翻页那一帧就能出图。
      *
      * <p>解析结果按文件缓存，同一页反复翻回来不会重复解密。
      */
@@ -224,7 +243,7 @@ public final class CustomModelManager {
         List<String> pending = new ArrayList<>();
         for (String file : files) {
             if (file == null || file.isEmpty() || cardRuntimes.containsKey(file)
-                    || cardParsed.containsKey(file)) {
+                    || cardPrepared.containsKey(file) || cardFailed.contains(file)) {
                 continue;
             }
             // 已经在解析的跳过：连续翻页会把同一页反复丢进来，不去重就是一堆线程各解析一遍
@@ -238,13 +257,20 @@ public final class CustomModelManager {
         Thread thread = new Thread(() -> {
             for (String file : pending) {
                 try {
-                    RawYsmModel model = parseCardModel(file);
-                    if (model != null) {
-                        // 只碰 cardParsed（ConcurrentHashMap）：cardRuntimes 归渲染线程所有，
-                        // 后台线程读它属于跨线程访问非线程安全容器。重复解析由 putIfAbsent 兜住。
-                        cardParsed.putIfAbsent(file, model);
+                    PreparedCard prepared = prepareCard(file);
+                    if (prepared != null) {
+                        // 只碰 cardPrepared（ConcurrentHashMap）：cardRuntimes 归渲染线程所有，
+                        // 后台线程读它属于跨线程访问非线程安全容器。重复准备由 putIfAbsent 兜住，
+                        // 输掉的那份像素要自己关掉，否则每次翻页都漏一张 NativeImage。
+                        PreparedCard existing = cardPrepared.putIfAbsent(file, prepared);
+                        if (existing != null && prepared.texture() != null) {
+                            prepared.texture().image().close();
+                        }
+                    } else {
+                        cardFailed.add(file);
                     }
                 } catch (Throwable throwable) {
+                    cardFailed.add(file);
                     Debug.info("[SFH+] 卡片预解析失败 " + file + ": " + throwable);
                 } finally {
                     cardParsing.remove(file);
@@ -267,10 +293,10 @@ public final class CustomModelManager {
     /**
      * 丢掉全部卡片实例。
      *
-     * <p>换模型会 {@code ModelTexture.releaseAll()}，卡片实例手里的 Identifier 随之失效；
-     * 不丢掉的话卡片会一直画成 missing texture。丢掉之后选择页下一帧按需重建。
+     * <p>卡片贴图走 {@link ModelTexture#releaseCards()} 自己的缓存，换模型不会让它们失效；
+     * 这里只在「整页不再需要」时调用 —— 选择页关闭、模块停用。
      *
-     * <p>选择页关闭时也走这里：一页十个模型的几何不小，关掉页面就该还回去。
+     * <p>一页十个模型的几何不小，关掉页面就该还回去。
      */
     public static void dropCards() {
         for (ModelRuntime runtime : cardRuntimes.values()) {
@@ -279,8 +305,30 @@ public final class CustomModelManager {
         cardRuntimes.clear();
         cardByStateId.clear();
         cardIds.clear();
-        cardParsed.clear();
+        for (PreparedCard prepared : cardPrepared.values()) {
+            if (prepared.texture() != null) {
+                prepared.texture().image().close();
+            }
+        }
+        cardPrepared.clear();
+        cardFailed.clear();
         cardParsing.clear();
+        // 卡片贴图有自己的缓存，世界模型换图不会动它们；这里才是它们该被释放的地方
+        ModelTexture.releaseCards();
+        cardsDropped = true;
+    }
+
+    /**
+     * 取走「卡片被丢弃过」的标记。
+     *
+     * <p>选择页每帧问一次：为真就重新预建当前页。取走而不是只读，是为了让重建只发生一次。
+     */
+    public static boolean consumeCardsDropped() {
+        if (!cardsDropped) {
+            return false;
+        }
+        cardsDropped = false;
+        return true;
     }
 
     /**
@@ -292,7 +340,15 @@ public final class CustomModelManager {
         cardBuildBudget = CARD_BUILD_PER_FRAME;
         // 预解析缓存先裁：即使当前页还没建出实例（cardRuntimes 为空）也要裁，
         // 否则翻走的那一页模型会一直留在内存里
-        cardParsed.keySet().retainAll(keep);
+        for (String file : new ArrayList<>(cardPrepared.keySet())) {
+            if (!keep.contains(file)) {
+                PreparedCard dropped = cardPrepared.remove(file);
+                if (dropped != null && dropped.texture() != null) {
+                    dropped.texture().image().close();
+                }
+            }
+        }
+        cardFailed.retainAll(keep);
         if (cardRuntimes.isEmpty()) {
             return;
         }
@@ -316,34 +372,52 @@ public final class CustomModelManager {
     }
 
     /**
-     * 建一个卡片实例：解密、反序列化、注册贴图、建几何。
+     * 后台线程把一张卡片准备到「只差上传」：解密、反序列化、建几何、解码贴图。
      *
      * <p>与 {@link #reload} 走同一套解析，但不碰世界实例的任何字段 —— 卡片是只读展示，
      * 换页不该影响玩家身上那个模型。
+     *
+     * <p>这几步都是纯 CPU 活，放在渲染线程上做就是开页那一下的卡顿来源。剩下的
+     * {@link ModelTexture#registerPrepared} 必须回渲染线程（建 GPU 纹理要 GL）。
      */
-    private static ModelRuntime buildCardRuntime(String file) {
-        try {
-            // 预解析过的直接用：解密 + 反序列化是重活，已经挪到后台线程做过了
-            RawYsmModel model = cardParsed.remove(file);
-            if (model == null) {
-                model = parseCardModel(file);
-            }
-            ModelCatalog.putDisplayName(file, model.metadata == null ? null : model.metadata.name);
-            rememberMetadata(file, model.metadata);
-            Map<String, RawYsmModel.RawTexture> textures = collectTextures(model);
-            Identifier textureId = ModelTexture.register(textures.get(pickDefaultTextureName(model, textures)));
-            if (textureId == null) {
-                textureId = ModelTexture.placeholder();
-            }
-            ModelRuntime built = ModelRuntime.buildCard(model, textureId, HIDE_UNREFERENCED);
-            if (built != null) {
-                built.setVariant(built.defaultVariantKey());
-            }
-            return built;
-        } catch (Throwable throwable) {
-            Debug.info("[SFH+] 卡片预览加载失败 " + file + ": " + throwable);
+    private static PreparedCard prepareCard(String file) throws Exception {
+        RawYsmModel model = parseCardModel(file);
+        if (model == null) {
             return null;
         }
+        ModelCatalog.putDisplayName(file, model.metadata == null ? null : model.metadata.name);
+        rememberMetadata(file, model.metadata);
+        Map<String, RawYsmModel.RawTexture> textures = collectTextures(model);
+        ModelTexture.Prepared texture = ModelTexture.prepare(textures.get(pickDefaultTextureName(model, textures)));
+        // 贴图留空：占位图也要注册 GPU 纹理，后台线程碰不得；由 takePreparedCard 在渲染线程绑上
+        ModelRuntime built = ModelRuntime.buildCard(model, null, HIDE_UNREFERENCED);
+        if (built == null) {
+            if (texture != null) {
+                texture.image().close();
+            }
+            return null;
+        }
+        built.setVariant(built.defaultVariantKey());
+        return new PreparedCard(built, texture);
+    }
+
+    /**
+     * 渲染线程：把后台备好的卡片登记进来。
+     *
+     * <p>没准备好时返回 {@code null}，卡片这一帧画占位底纹 —— 调用方不会因此卡住。
+     */
+    private static ModelRuntime takePreparedCard(String file) {
+        PreparedCard prepared = cardPrepared.remove(file);
+        if (prepared == null) {
+            return null;
+        }
+        Identifier textureId = ModelTexture.registerPrepared(prepared.texture());
+        if (textureId == null) {
+            textureId = ModelTexture.placeholder();
+        }
+        ModelRuntime built = prepared.runtime();
+        built.bindTexture(textureId);
+        return built;
     }
 
     /** 已解析模型的 {作者, tips}；没加载过这个模型时返回 {@code null}。 */
@@ -482,8 +556,7 @@ public final class CustomModelManager {
         // 先释放旧模型的贴图再注册新的：反过来的话 releaseAll 会把刚注册的那张一起释放掉，
         // 渲染时拿到的是已释放的 Identifier，整模型变成 missing texture。
         ModelTexture.releaseAll();
-        // 卡片实例持有同一批贴图，释放后必须一起丢掉，否则卡片画成 missing texture
-        dropCards();
+        // 卡片贴图在 CARD_CACHE 里，不受 releaseAll 影响，换模型不必重建卡片
         Identifier textureId = ModelTexture.register(textures.get(defaultName));
         if (textureId == null) {
             // 贴图注册失败（GPU 未就绪等）不该连几何一起丢：占位图至少让模型能画出来
@@ -778,8 +851,6 @@ public final class CustomModelManager {
         ModelRuntime previous = runtime;
         ModelRuntime previousArm = armRuntime;
         ModelTexture.release(activeTexture);
-        // 卡片实例持有同一批贴图，释放后必须一起丢掉，否则卡片画成 missing texture
-        dropCards();
         runtime = rebuilt;
         armRuntime = ModelRuntime.buildArm(model, textureId);
         if (previous != null) {

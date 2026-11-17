@@ -206,7 +206,7 @@ public final class ModelRuntime {
     private final Map<String, RawYsmModel.RawAnimation> extraClips;
     private final List<ExtraOption> extraOptions;
     private final String defaultExtraKey;
-    private final Identifier texture;
+    private Identifier texture;
     /**
      * 左右手各自的 {@code *Sword} 锚点子树里有没有几何。
      *
@@ -221,7 +221,14 @@ public final class ModelRuntime {
     private String previewAnimation = "";
     /** 作者声明「预览时不要转」（{@code properties.disable_preview_rotation}）。 */
     private boolean disablePreviewRotation;
-    /** 卡片底图/前景图（{@code properties.gui_background} / {@code gui_foreground}）；没声明时为 null。 */
+    /**
+     * 卡片底图/前景图（{@code properties.gui_background} / {@code gui_foreground}）。
+     *
+     * <p>存的是**内嵌图**而不是注册好的 {@link Identifier}：注册要建 GPU 纹理，只能在渲染线程做，
+     * 而卡片实例是在后台线程建的。第一次取用时才注册，之后缓存。
+     */
+    private RawYsmModel.RawImage guiBackgroundImage;
+    private RawYsmModel.RawImage guiForegroundImage;
     private Identifier guiBackground;
     private Identifier guiForeground;
     private final int rightHandBone;
@@ -745,8 +752,8 @@ public final class ModelRuntime {
         if (model.properties != null) {
             runtime.widthScale = model.properties.widthScale > 0.0F ? model.properties.widthScale : 1.0F;
             runtime.heightScale = model.properties.heightScale > 0.0F ? model.properties.heightScale : 1.0F;
-            runtime.guiBackground = findGuiImage(model.properties, model.properties.guiBackground, "background");
-            runtime.guiForeground = findGuiImage(model.properties, model.properties.guiForeground, "foreground");
+            runtime.guiBackgroundImage = findGuiImage(model.properties, model.properties.guiBackground, "background");
+            runtime.guiForegroundImage = findGuiImage(model.properties, model.properties.guiForeground, "foreground");
         }
         int timelineCount = 0;
         for (RawYsmModel.RawAnimation clip : clips.values()) {
@@ -2400,6 +2407,18 @@ public final class ModelRuntime {
     }
 
     /**
+     * 绑定贴图。
+     *
+     * <p>卡片实例的几何在后台线程建好，那时贴图还没上传（{@code DynamicTexture} 只能在渲染线程建），
+     * 所以先留空、上传完再绑上来。
+     */
+    public void bindTexture(Identifier id) {
+        this.texture = id;
+        // 贴图换了，半透明判定要重扫：建实例时贴图还没上传，那次的结果是「按不透明处理」
+        this.translucentPixels = null;
+    }
+
+    /**
      * 该模型是否自己承担鞘翅平飞时的实体俯仰（因此这一层要抵消掉原版的俯仰与朝向）。
      *
      * <p>判据取 YSM 官方渲染器：{@code GeoReplacedEntityRenderer#setupRotations} 直接 super，
@@ -2532,13 +2551,19 @@ public final class ModelRuntime {
         return !previewAnimation.isEmpty() && clip(previewAnimation) != null;
     }
 
-    /** 卡片底图（画在模型之下）；作者没声明时返回 null。 */
+    /** 卡片底图（画在模型之下）；作者没声明时返回 null。必须在渲染线程调用。 */
     public Identifier guiBackground() {
+        if (guiBackground == null && guiBackgroundImage != null) {
+            guiBackground = ModelTexture.registerGuiImage(guiBackgroundImage, "background");
+        }
         return guiBackground;
     }
 
-    /** 卡片前景图（画在模型之上）；作者没声明时返回 null。 */
+    /** 卡片前景图（画在模型之上）；作者没声明时返回 null。必须在渲染线程调用。 */
     public Identifier guiForeground() {
+        if (guiForeground == null && guiForegroundImage != null) {
+            guiForeground = ModelTexture.registerGuiImage(guiForegroundImage, "foreground");
+        }
         return guiForeground;
     }
 
@@ -2549,7 +2574,7 @@ public final class ModelRuntime {
      * 真正的字节在 {@code properties.backgroundImages} 里，按 {@code name} 对应。
      * 匹配时只比文件名：作者写的路径前缀与内嵌名不一定一致（有的只存 {@code background.png}）。
      */
-    private static Identifier findGuiImage(RawYsmModel.RawProperties properties, String path, String role) {
+    private static RawYsmModel.RawImage findGuiImage(RawYsmModel.RawProperties properties, String path, String role) {
         if (path == null || path.isEmpty() || properties.backgroundImages == null) {
             return null;
         }
@@ -2567,7 +2592,7 @@ public final class ModelRuntime {
             String nameBase = name.substring(name.lastIndexOf('/') + 1);
             if (name.equalsIgnoreCase(path) || nameBase.equalsIgnoreCase(basename)
                     || name.equalsIgnoreCase(roleId)) {
-                return ModelTexture.registerGuiImage(image, role);
+                return image;
             }
         }
         return null;
@@ -2666,6 +2691,11 @@ public final class ModelRuntime {
         Boolean cached = translucentPixels;
         if (cached != null) {
             return cached;
+        }
+        if (texture == null) {
+            // 卡片实例在后台线程建好时贴图还没上传，这时扫不出结果；先按不透明处理，
+            // 但**不能缓存** —— 绑上贴图之后要重新扫。
+            return false;
         }
         boolean result = scanTranslucent(texture);
         translucentPixels = result;
