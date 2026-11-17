@@ -16,7 +16,6 @@ import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
-import me.matl114.gui.basic.SubScreenWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
@@ -26,7 +25,9 @@ import me.matl114.gui.Constants;
 import me.matl114.hacks.utils.config.StringEnum;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
+import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.PrimitiveList;
+import me.matl114.managers.config.NBTType;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.config.WrapEnum;
 import me.matl114.managers.config.ConfigEnum;
@@ -58,6 +59,11 @@ import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages.En
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.core.Registry;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.alchemy.Potion;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.Identifier;
@@ -278,8 +284,6 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 这一帧鼠标停在哪一条格式化串的颜色编辑器按钮上：说明框要带实时预览。 */
     private StringFormat editorHover;
 
-    /** 打开中的宿主编辑器浮层：列表类配置点开它，关掉时整块移除。 */
-    private SubScreenWidget hostEditor;
 
     /** 没有显式约束的数值，其推导区间只算一次，避免跨数量级时轨道跳档；复合数值按分量分开记。 */
     private final Map<String, double[]> derivedBounds = new HashMap<>();
@@ -520,7 +524,6 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         // 布局重来（开屏、改窗口大小）时行会挪位：浮层的锚点跟着失效，先收起来
         this.palette = null;
         this.listPanel = null;
-        closeHostEditor();
         // 输入框随旧控件树一起拆掉了：先把打的字提交掉，再作废目标（没在编辑时这一下什么都不做）
         closeTextEdit();
         if (tabKey != null) {
@@ -2078,34 +2081,22 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 不会出现「一半自绘一半宿主」的割裂。
      */
     private void openHostEditor(WrapperConfigRef<?> wrapper, int rowY) {
-        closeHostEditor();
-        int w = Math.min(320, Math.max(200, contentWidth / 2));
-        int h = 120;
-        int x = Math.max(winX + 4, controlRight() - w);
-        int y = rowY + ROW_H + 2;
-        if (y + h > winY + winH - 4) {
-            y = Math.max(winY + barH + 4, rowY - h - 2);
-        }
-        SubScreenWidget panel = SubScreenWidget.instance(x, y, w, h);
-        try {
-            DrawableWidget widget = handle(wrapper)
-                    .generateValueWidget(NewClickGui.elementFactory(), 0, 0, w, h);
-            if (widget != null) {
-                panel.addDrawableChild(widget);
-            }
-        } catch (Throwable ignored) {
-            // 这个类型没有可用的编辑器：保持只读，不弹空面板
+        Object raw = wrapper.ref().getValue();
+        if (!(raw instanceof PrimitiveList<?> list)) {
             return;
         }
-        this.hostEditor = panel;
-        this.addRenderableWidget(panel);
-    }
-
-    /** 收起宿主编辑器浮层：换页、重排、再点一次同一块都走这里。 */
-    private void closeHostEditor() {
-        if (hostEditor != null) {
-            this.removeWidget(hostEditor);
-            hostEditor = null;
+        // 直接开宿主的列表编辑屏：它自带增删行与逐元素输入，
+        // 而 generateValueWidget 产出的是「打开列表编辑」的按钮，塞进浮层只会得到一个巨大的按钮
+        try {
+            NBTTypes.openListModifyScreen(
+                    NewClickGui.elementFactory(),
+                    (AttrKeyValue<List<Object>>) (AttrKeyValue<?>) handle(wrapper),
+                    (NBTType<Object>) list.elementType(),
+                    list::createNewElement,
+                    300,
+                    20);
+        } catch (Throwable ignored) {
+            // 这个类型没有可用的编辑器：保持只读
         }
     }
 
@@ -2117,10 +2108,6 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int x = controlRight() - width;
         if (button != 0 || !inBox(x, rowY + 3, width, 12, mouseX, mouseY)) {
             return false;
-        }
-        if (hostEditor != null) {
-            closeHostEditor();
-            return true;
         }
         openHostEditor(wrapper, rowY);
         return true;
@@ -2410,8 +2397,23 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 候选的显示名：实体用内置名（「僵尸」），其它注册表退回 id 的路径段。 */
     private static String entryName(Object entry, Identifier id) {
+        // 注册表里的条目大多自带显示名，只有拿不到时才退回 id 的路径段：
+        // 退回 id 的那一列在中文界面里全是 acacia_boat 这种，读不出是什么
         if (entry instanceof EntityType<?> type) {
             return type.getDescription().getString();
+        }
+        if (entry instanceof Item item) {
+            // 26.2 的 Item#getName 要一个 ItemStack：空栈取的就是物品自己的名字
+            return item.getName(ItemStack.EMPTY).getString();
+        }
+        if (entry instanceof Block block) {
+            return block.getName().getString();
+        }
+        if (entry instanceof MobEffect effect) {
+            return effect.getDisplayName().getString();
+        }
+        if (entry instanceof Potion potion) {
+            return potion.name();
         }
         return id.getPath();
     }
