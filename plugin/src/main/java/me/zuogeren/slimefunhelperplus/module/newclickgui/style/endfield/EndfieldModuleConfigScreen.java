@@ -21,6 +21,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
 import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.config.StringEnum;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
@@ -729,6 +730,15 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return System.identityHashCode(target) + ":" + rowY;
     }
 
+    /** 文本编辑框里该显示什么：字符串配置就是它自己，正则取表达式原文。 */
+    private static String textOf(WrapperConfigRef<?> target) {
+        Object raw = target == null ? null : target.ref().getValue();
+        if (raw instanceof Regex regex) {
+            return regex.regex();
+        }
+        return raw == null ? "" : raw.toString();
+    }
+
     /**
      * 把配置值写进输入框，并把 responder 重新绑到目标项上。
      *
@@ -737,8 +747,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 草稿只记下来、不动配置，提交那一步才写回，所以打到一半的字不会存盘。
      */
     private void applyTextBoxText(EditBox box, WrapperConfigRef<?> target) {
-        Object raw = target == null ? null : target.ref().getValue();
-        String text = raw == null ? "" : raw.toString();
+        String text = textOf(target);
         this.textOriginal = text;
         this.textDraft = text;
         box.setResponder(null);
@@ -767,10 +776,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return;
         }
         String next = draft.trim();
-        if (!next.equals(textOriginal)) {
-            setValue(target.ref(), next);
-            this.textOriginal = next;
+        if (next.equals(textOriginal)) {
+            return;
         }
+        if (target.ref().getValue() instanceof Regex) {
+            // 非法表达式不落配置：打到一半的括号不该把这一项变成永远匹配不上的正则
+            try {
+                setValue(target.ref(), new Regex(next));
+                this.textOriginal = next;
+            } catch (RuntimeException ignored) {
+                // 表达式还不完整，等打完
+            }
+            return;
+        }
+        setValue(target.ref(), next);
+        this.textOriginal = next;
     }
 
     /**
@@ -913,7 +933,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof OptionalPrimitive<?>
                 || value instanceof StringRef
                 || value.getValue() instanceof StringEnum
-                || recordParts(value.getValue()) != null;
+                || value.getValue() instanceof Regex
+                || recordParts(value.getValue()) != null
+                || booleanParts(value.getValue()) != null;
     }
 
     // ------------------------------------------------------------------ 数据
@@ -1102,6 +1124,45 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return null;
         }
         return out;
+    }
+
+    /**
+     * 一条记录里的几格开关：全是布尔才算，混着别的类型就交回只读。
+     *
+     * <p>与 {@link #recordParts} 分开认：开关和滑杆的行高一样，但画法与命中都不同，
+     * 合成一个数组会让「这一格是数值还是开关」在每处都要再判一次。
+     */
+    private static boolean[] booleanParts(Object value) {
+        if (value == null || !value.getClass().isRecord()) {
+            return null;
+        }
+        RecordComponent[] parts = value.getClass().getRecordComponents();
+        if (parts.length < 2 || parts.length > 4) {
+            return null;
+        }
+        boolean[] out = new boolean[parts.length];
+        try {
+            for (int i = 0; i < parts.length; i++) {
+                Object part = parts[i].getAccessor().invoke(value);
+                if (!(part instanceof Boolean flag)) {
+                    return null;
+                }
+                out[i] = flag;
+            }
+        } catch (Throwable e) {
+            return null;
+        }
+        return out;
+    }
+
+    /** 这一行占几格：记录按分量数铺开，其余类型都是一格。绘制与布局必须取同一个数。 */
+    private static int rowParts(Object value) {
+        Object[] parts = recordParts(value);
+        if (parts != null) {
+            return parts.length;
+        }
+        boolean[] bools = booleanParts(value);
+        return bools != null ? bools.length : 1;
     }
 
     /** 换掉记录里的一格；数值会先按那一格的声明类型还原（int / float / long…），枚举原样放回。 */
@@ -1312,8 +1373,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 rows.add(new Row(y, SECTION_H, ref, section, true));
                 y += SECTION_H;
             }
-            Object[] parts = recordParts(ref.ref().getValue());
-            int height = parts != null ? ROW_H * parts.length : ROW_H;
+            int height = ROW_H * rowParts(ref.ref().getValue());
             rows.add(new Row(y, height, ref, section, false));
             y += height;
         }
@@ -1446,8 +1506,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void paintRow(
             VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref, int mouseX, int mouseY) {
         int right = controlRight();
-        Object[] rowParts = recordParts(ref.ref().getValue());
-        int rowH = rowParts != null ? ROW_H * rowParts.length : ROW_H;
+        int rowH = ROW_H * rowParts(ref.ref().getValue());
         // 浮层盖住的行不算悬停：下拉/名单面板打开时，鼠标下面是浮层，不是这一行
         boolean covered = dropdown != null || listPanel != null;
         boolean hover = !covered
@@ -1461,7 +1520,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             Ef.fill(ctx, contentLeft - 4, y, 3, rowH, p.trace());
         }
         // 文本行的值区占住行右半段，行名按它让出的宽度截断，长路径压不到行名上
-        Box textValue = ref.ref() instanceof StringRef ? textValueBox(y) : null;
+        Box textValue = ref.ref() instanceof StringRef || ref.ref().getValue() instanceof Regex
+                ? textValueBox(y)
+                : null;
         int labelW = textValue != null
                 ? Math.max(40, textValue.x() - contentLeft - 10)
                 : (slotRow(ref.ref().getValue()) ? Math.max(24, labelWidth() - 28) : labelWidth());
@@ -1481,18 +1542,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ref<?> value = ref.ref();
         Object raw = value.getValue();
         Object[] parts = recordParts(raw);
+        boolean[] bools = booleanParts(raw);
 
         if (value instanceof FlagRef flag) {
-            int sw = 20;
-            int sh = 9;
-            int sy = y + (ROW_H - sh) / 2;
-            if (flag.get()) {
-                Ef.fill(ctx, right - sw, sy, sw, sh, p.ink());
-                Ef.fill(ctx, right - 9, sy + 2, 5, 5, p.paper());
-            } else {
-                Ef.dashedOutline(ctx, right - sw, sy, sw, sh, p.ink2());
-                Ef.fill(ctx, right - sw + 2, sy + 2, 5, 5, p.ink2());
-            }
+            paintSwitch(ctx, p, y, right, flag.get());
         } else if (isNumeric(value)) {
             double numeric = numericOf(value);
             double[] range = bounds(ref, numeric, -1);
@@ -1536,6 +1589,14 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                     paintPartEnum(ctx, p, partY, right, names[i], enumLabel(part), open);
                 }
             }
+        } else if (bools != null) {
+            // 一条记录里的几格开关：每格占一行，行名用字段名，开关贴着行尾
+            String[] names = componentNames(raw);
+            for (int i = 0; i < bools.length; i++) {
+                int partY = y + i * ROW_H;
+                paintPartName(ctx, p, partY, right - 28, names[i]);
+                paintSwitch(ctx, p, partY, right, bools[i]);
+            }
         } else if (raw instanceof WrapColor) {
             paintColor(ctx, p, y, ref);
         } else if (raw instanceof EntrySet<?> set) {
@@ -1570,7 +1631,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 }
             }
         } else if (value instanceof StringRef text) {
-            paintTextValue(ctx, p, textValue, ref, text, mouseX, mouseY);
+            paintTextValue(ctx, p, textValue, ref, text.get(), mouseX, mouseY);
         } else if (raw instanceof StringEnum choice) {
             // 有限字符串候选：与枚举同一套下拉，值框显示当前项
             String text = choice.value() + "   ▾";
@@ -1582,6 +1643,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         } else if (raw instanceof StringFormat format) {
             // 格式化串：只读预览，编辑走宿主的格式编辑器（它要校验参数表，自绘一份不划算）
             paintReadOnly(ctx, p, y, right, format.formatString());
+        } else if (raw instanceof Regex regex) {
+            // 正则与字符串同一套值框：写回时重新构造 Regex，非法表达式不落配置
+            paintTextValue(ctx, p, textValue, ref, regex.regex(), mouseX, mouseY);
         } else {
             // 没有专用控件的类型：按值形态画成只读文本，不再退回宿主控件。
             // 一半自绘一半宿主会让同一张表里出现两种外观，宁可这一格暂时不可编辑。
@@ -1592,7 +1656,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /**
      * 没有专用控件的类型画成只读文本：右对齐、次要色、悬停出完整值。
      *
-     * <p>这些类型（物品模板、音效、正则、坐标…）宿主各有自己的编辑器，但那是另一套外观；
+     * <p>这些类型（物品模板、音效、GUI 设置、列表映射…）宿主各有自己的编辑器，但那是另一套外观；
      * 同一张表里混两种控件比暂时不可编辑更难看，所以这里只显示、不接点击。
      */
     private void paintReadOnly(VDrawContext ctx, Ef.Palette p, int y, int right, Object raw) {
@@ -1668,7 +1732,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 悬停也就不会让值左右挪。编辑期间字由输入框自己画，这里只给框，两边取同一份几何。
      */
     private void paintTextValue(
-            VDrawContext ctx, Ef.Palette p, Box box, WrapperConfigRef<?> ref, StringRef value,
+            VDrawContext ctx, Ef.Palette p, Box box, WrapperConfigRef<?> ref, String current,
             int mouseX, int mouseY) {
         if (textTarget == ref) {
             paintFieldFrame(ctx, p, box.x(), box.y(), box.w(), box.h(), true, false);
@@ -1688,9 +1752,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 Ef.fill(ctx, box.x() + i, lineY, Math.min(2, box.w() - i), 1, p.rule());
             }
         }
-        String raw = value.get();
-        boolean empty = raw == null || raw.isEmpty();
-        String shown = Ef.ellipsis(empty ? EMPTY_TEXT : raw, box.w() - FIELD_PAD * 2);
+        boolean empty = current == null || current.isEmpty();
+        String shown = Ef.ellipsis(empty ? EMPTY_TEXT : current, box.w() - FIELD_PAD * 2);
         Ef.text(ctx, shown, box.x() + box.w() - FIELD_PAD - Ef.textWidth(shown), box.y() + FIELD_PAD,
                 empty ? p.ink2() : p.ink());
     }
@@ -2376,6 +2439,20 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         paintPartName(ctx, p, y, chipX - 12, name);
     }
 
+    /** 开关：开是实心块加一个纸色缺口，关是虚线框加一个小方块，与行尾的可选值开关同一套画法。 */
+    private void paintSwitch(VDrawContext ctx, Ef.Palette p, int y, int right, boolean on) {
+        int sw = 20;
+        int sh = 9;
+        int sy = y + (ROW_H - sh) / 2;
+        if (on) {
+            Ef.fill(ctx, right - sw, sy, sw, sh, p.ink());
+            Ef.fill(ctx, right - 9, sy + 2, 5, 5, p.paper());
+        } else {
+            Ef.dashedOutline(ctx, right - sw, sy, sw, sh, p.ink2());
+            Ef.fill(ctx, right - sw + 2, sy + 2, 5, 5, p.ink2());
+        }
+    }
+
     private static boolean isNumeric(Ref<?> value) {
         return value instanceof IntRef
                 || value instanceof LongRef
@@ -2785,6 +2862,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
             return false;
         }
+        boolean[] bools = booleanParts(ref.getValue());
+        if (bools != null) {
+            // 开关只吃行尾那一段：与单值开关同一块命中区，留白里的点击不算
+            if (button != 0 || mouseX < right - 24 || mouseX > right) {
+                return false;
+            }
+            int index = Math.max(0, Math.min(bools.length - 1, (mouseY - rowY) / ROW_H));
+            setValue(ref, withPart(ref.getValue(), index, !bools[index]));
+            return true;
+        }
         if (ref instanceof EnumRef<?> || ref.getValue() instanceof StringEnum) {
             openDropdown(wrapper, -1, rowY);
             return true;
@@ -2797,6 +2884,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 keyTarget = wrapper;
             }
             return true;
+        }
+        if (ref.getValue() instanceof Regex) {
+            return hitText(wrapper, mouseX, mouseY, button, rowY);
         }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
