@@ -15,6 +15,8 @@ import me.matl114.managers.config.Config;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
+import me.matl114.managers.config.KeyBindRef;
+import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.config.PluginConfig;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -42,6 +44,15 @@ public class LocatorTrackModule extends BaseModule {
     public final ModulePath root = makePath(CONFIG, "locator-bar");
 
     public final FlagRef enable = flagBuilder(root.addEnable()).defaultValue(true).build();
+
+    /**
+     * 开关热键，同时把模块登记进宿主的模块条目表。
+     *
+     * <p>{@code /sfh toggle <名字>} 与它的补全都只认 {@code getModuleEntries()}，
+     * 而那张表只由 {@code moduleEntry(...)} 填；只 {@code bindFlag} 的模块在命令里不存在。
+     */
+    public final KeyBindRef hotkey = moduleEntry(root.addHotkey(), new MultiKeyBind(), root.addEnable())
+            .build();
 
     /** 反推总开关；关掉就清空观测，列表里那些 "~[x, z]" 行随之消失。 */
     public final FlagRef locatorTrack =

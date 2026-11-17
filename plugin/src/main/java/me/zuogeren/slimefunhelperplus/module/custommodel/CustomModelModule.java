@@ -32,6 +32,15 @@ public class CustomModelModule extends BaseModule {
     public final FlagRef enable = flagBuilder(root.addEnable()).defaultValue(false).build();
 
     /**
+     * 开关热键，同时把模块登记进宿主的模块条目表。
+     *
+     * <p>{@code /sfh toggle <名字>} 与它的补全都只认 {@code getModuleEntries()}，
+     * 而那张表只由 {@code moduleEntry(...)} 填；只 {@code bindFlag} 的模块在命令里不存在。
+     */
+    public final KeyBindRef hotkey = moduleEntry(root.addHotkey(), new MultiKeyBind(), root.addEnable())
+            .build();
+
+    /**
      * 模型文件名（相对 {@code config/slimefun-plus/models}）。
      *
      * <p>宿主 ClickGui 对 {@code StringRef} 一律画文本框，只有 {@code EnumAttrKeyValue} 走下拉；
