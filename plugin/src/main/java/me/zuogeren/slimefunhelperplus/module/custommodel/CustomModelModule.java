@@ -8,6 +8,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.config.PluginConfig;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ui.ModelPickerScreen;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ui.ModelRouletteScreen;
@@ -51,6 +52,27 @@ public class CustomModelModule extends BaseModule {
     public final FlagRef hideFirstPersonArm = flagBuilder(root.add("hide-first-person-arm"))
             .defaultValue(true)
             .build();
+
+    /**
+     * 诊断日志开关。
+     *
+     * <p>默认关：模型加载、贴图注册、动画采样这些路径每次都会打一行，正常游玩时只是噪音。
+     * 排查「模型没出来 / 贴图不对 / 动作不播」时打开。
+     */
+    public final FlagRef debug = flagBuilder(root.add("debug")).defaultValue(false).build();
+
+    /**
+     * 模块内的诊断输出统一走这里。
+     *
+     * <p>开关关着时直接丢弃；调用点都是加载/注册这类冷路径，字符串拼接的开销可以忽略。
+     */
+    public static void logDebug(String message) {
+        CustomModelModule module = INSTANCE;
+        // 构造期 INSTANCE 已由 BaseModule 反射写入，但字段初始化还没跑完，debug 可能仍是 null
+        if (module != null && module.debug != null && module.debug.get()) {
+            Debug.info(message);
+        }
+    }
 
     /** 打开动画轮盘的热键；默认不绑，在模块配置页里设。 */
     public final KeyBindRef rouletteKey = hotkey(root.add("roulette-key"))

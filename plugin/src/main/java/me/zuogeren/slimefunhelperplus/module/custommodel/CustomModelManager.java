@@ -10,7 +10,6 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.crypto.YsmCrypt;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.YSMBinaryDeserializer;
@@ -271,7 +270,7 @@ public final class CustomModelManager {
                     }
                 } catch (Throwable throwable) {
                     cardFailed.add(file);
-                    Debug.info("[SFH+] 卡片预解析失败 " + file + ": " + throwable);
+                    CustomModelModule.logDebug("[SFH+] 卡片预解析失败 " + file + ": " + throwable);
                 } finally {
                     cardParsing.remove(file);
                 }
@@ -456,7 +455,7 @@ public final class CustomModelManager {
         }
         selectedVariant = current.activeVariantKey();
         selectedExtra = current.activeExtraKey();
-        Debug.info("[SFH+] 轮盘选择: 服装=" + (selectedVariant.isEmpty() ? "默认" : selectedVariant)
+        CustomModelModule.logDebug("[SFH+] 轮盘选择: 服装=" + (selectedVariant.isEmpty() ? "默认" : selectedVariant)
                 + " 动作=" + (selectedExtra.isEmpty() ? "无" : selectedExtra));
     }
 
@@ -542,7 +541,7 @@ public final class CustomModelManager {
                 activeTexture = "";
                 loadedModel = null;
             }
-            Debug.info("[SFH+] 模型加载异常 " + fileName + ": " + throwable);
+            CustomModelModule.logDebug("[SFH+] 模型加载异常 " + fileName + ": " + throwable);
         }
     }
 
@@ -591,10 +590,10 @@ public final class CustomModelManager {
             stalePreview.release();
         }
         if (loaded == null) {
-            Debug.info("[SFH+] 模型加载失败（几何为空或贴图不可用）: " + fileName);
+            CustomModelModule.logDebug("[SFH+] 模型加载失败（几何为空或贴图不可用）: " + fileName);
         } else {
             applyExtraSelection(loaded);
-            Debug.info("[SFH+] 模型已加载 " + fileName + " bones=" + loaded.boneCount()
+            CustomModelModule.logDebug("[SFH+] 模型已加载 " + fileName + " bones=" + loaded.boneCount()
                     + " arm=" + (armRuntime == null ? "-" : armRuntime.boneCount())
                     + " variant=" + (loaded.activeVariantKey().isEmpty() ? "-" : loaded.activeVariantKey())
                     + " extra=" + (loaded.activeExtraKey().isEmpty() ? "-" : loaded.activeExtraKey())
@@ -839,12 +838,12 @@ public final class CustomModelManager {
         }
         Identifier textureId = ModelTexture.register(textures.get(name));
         if (textureId == null) {
-            Debug.info("[SFH+] 贴图切换失败（无法注册）: " + name);
+            CustomModelModule.logDebug("[SFH+] 贴图切换失败（无法注册）: " + name);
             return;
         }
         ModelRuntime rebuilt = ModelRuntime.build(model, textureId, HIDE_UNREFERENCED);
         if (rebuilt == null) {
-            Debug.info("[SFH+] 贴图切换失败（几何为空）: " + name);
+            CustomModelModule.logDebug("[SFH+] 贴图切换失败（几何为空）: " + name);
             return;
         }
         // 旧 runtime 持有音效句柄，换图后要显式释放；旧贴图同理（新贴图已注册好，此时释放不会误伤）
@@ -862,6 +861,6 @@ public final class CustomModelManager {
         activeTexture = name;
         // 重建出来的 runtime 是全新的，服装/动作选择要按这个模型重新接上
         applyExtraSelection(rebuilt);
-        Debug.info("[SFH+] 贴图已切换: " + name + " texture=" + textureId);
+        CustomModelModule.logDebug("[SFH+] 贴图已切换: " + name + " texture=" + textureId);
     }
 }

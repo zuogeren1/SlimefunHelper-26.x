@@ -5,7 +5,7 @@ import java.awt.image.BufferedImage;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import me.matl114.utils.Debug;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
@@ -113,7 +113,7 @@ public final class ModelTexture {
             try {
                 Minecraft.getInstance().getTextureManager().release(id);
             } catch (Throwable throwable) {
-                Debug.info("[SFH+] 卡片贴图释放失败 key=" + key + ": " + throwable);
+                CustomModelModule.logDebug("[SFH+] 卡片贴图释放失败 key=" + key + ": " + throwable);
             }
         }
     }
@@ -143,7 +143,7 @@ public final class ModelTexture {
         try {
             Minecraft.getInstance().getTextureManager().release(id);
         } catch (Throwable throwable) {
-            Debug.info("[SFH+] 贴图释放失败 key=" + key + ": " + throwable);
+            CustomModelModule.logDebug("[SFH+] 贴图释放失败 key=" + key + ": " + throwable);
         }
     }
 
@@ -204,7 +204,7 @@ public final class ModelTexture {
             Minecraft.getInstance().getTextureManager().register(id, dynamic);
             return id;
         } catch (Throwable throwable) {
-            Debug.info("[SFH+] 贴图注册失败 key=" + key + ": " + throwable);
+            CustomModelModule.logDebug("[SFH+] 贴图注册失败 key=" + key + ": " + throwable);
             return null;
         }
     }
@@ -246,14 +246,14 @@ public final class ModelTexture {
         try {
             return NativeImage.read(data);
         } catch (Throwable throwable) {
-            Debug.info("[SFH+] GUI 图解码失败 key=" + key + " magic=" + magic + ": " + throwable);
+            CustomModelModule.logDebug("[SFH+] GUI 图解码失败 key=" + key + " magic=" + magic + ": " + throwable);
             return null;
         }
     }
 
     private static NativeImage decode(RawYsmModel.RawTexture texture, String key) {
         if (texture.data == null || texture.data.length == 0) {
-            Debug.info("[SFH+] 贴图格式不支持，已用占位: format=" + texture.imageFormat
+            CustomModelModule.logDebug("[SFH+] 贴图格式不支持，已用占位: format=" + texture.imageFormat
                     + " size=" + texture.width + "x" + texture.height + " magic=empty key=" + key);
             return placeholderImage();
         }
@@ -282,7 +282,7 @@ public final class ModelTexture {
                 }
             }
         }
-        Debug.info("[SFH+] 贴图格式不支持，已用占位: format=" + texture.imageFormat
+        CustomModelModule.logDebug("[SFH+] 贴图格式不支持，已用占位: format=" + texture.imageFormat
                 + " size=" + texture.width + "x" + texture.height
                 + " magic=" + magic + " key=" + key);
         return placeholderImage();
@@ -312,7 +312,7 @@ public final class ModelTexture {
             }
             return result;
         } catch (Throwable throwable) {
-            Debug.info("[SFH+] " + magic + " 解码失败: " + throwable);
+            CustomModelModule.logDebug("[SFH+] " + magic + " 解码失败: " + throwable);
             return null;
         }
     }

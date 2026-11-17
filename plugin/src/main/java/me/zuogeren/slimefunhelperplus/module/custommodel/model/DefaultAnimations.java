@@ -5,7 +5,7 @@ import java.io.InputStream;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import me.matl114.utils.Debug;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.YsmAnimationParsing;
 
@@ -49,24 +49,24 @@ final class DefaultAnimations {
                     loaded.put(entry.getKey(), entry.getValue());
                 }
             } catch (RuntimeException error) {
-                Debug.info("[SFH+] 默认动画解析失败 " + file + ": " + error);
+                CustomModelModule.logDebug("[SFH+] 默认动画解析失败 " + file + ": " + error);
             }
         }
         cache = Collections.unmodifiableMap(loaded);
         // 一次性：实机只靠这一行确认兜底表到底有没有进包
-        Debug.info("[SFH+] defaultClips=" + cache.size() + " files=" + parsed);
+        CustomModelModule.logDebug("[SFH+] defaultClips=" + cache.size() + " files=" + parsed);
         return cache;
     }
 
     private static byte[] read(String path) {
         try (InputStream stream = DefaultAnimations.class.getResourceAsStream(path)) {
             if (stream == null) {
-                Debug.info("[SFH+] 默认动画资源缺失 " + path);
+                CustomModelModule.logDebug("[SFH+] 默认动画资源缺失 " + path);
                 return null;
             }
             return stream.readAllBytes();
         } catch (IOException error) {
-            Debug.info("[SFH+] 默认动画读取失败 " + path + ": " + error);
+            CustomModelModule.logDebug("[SFH+] 默认动画读取失败 " + path + ": " + error);
             return null;
         }
     }

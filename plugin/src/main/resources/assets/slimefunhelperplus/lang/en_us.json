@@ -45,6 +45,8 @@
   "custom-model.model.tooltips": "File name relative to config/slimefunhelper-plus/models; you can also pick one on the model selection screen",
   "custom-model.hide-first-person-arm": "Use model arm in first person",
   "custom-model.hide-first-person-arm.tooltips": "Replace the vanilla skin arm with the model's own arm; falls back to vanilla when the model has none",
+  "custom-model.debug": "Debug logging",
+  "custom-model.debug.tooltips": "Write model loading, texture registration and animation sampling diagnostics to the log; turn on only when troubleshooting",
   "custom-model.roulette-key": "Open animation roulette key",
   "custom-model.roulette-key.tooltips": "Click, then press a key to bind; right-click clears",
   "custom-model.model-picker-key": "Open model selection key",

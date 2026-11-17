@@ -13,9 +13,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import me.matl114.utils.Debug;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSound;
 import me.zuogeren.slimefunhelperplus.module.custommodel.audio.ModelSoundCursorTable;
 import me.zuogeren.slimefunhelperplus.module.custommodel.format.ysm.RawYsmModel;
@@ -696,7 +696,7 @@ public final class ModelRuntime {
                 glowCount++;
             }
         }
-        Debug.info("[SFH+] geo bones=" + count + " roots=" + roots + " unresolvedParents=" + unresolved
+        CustomModelModule.logDebug("[SFH+] geo bones=" + count + " roots=" + roots + " unresolvedParents=" + unresolved
                 + " clips=" + clips.size() + " hidden=" + hiddenCount + " extras=" + extraOptions.size()
                 + " hands=" + rightHand + "/" + leftHand + " glow=" + glowCount);
         ModelRuntime runtime = new ModelRuntime(bones, byName, clips, parents, matrices, normals, hidden, propRoot,
@@ -761,9 +761,9 @@ public final class ModelRuntime {
                 timelineCount += clip.timelineEvents.size();
             }
         }
-        Debug.info("[SFH+] parallelBase=" + runtime.preParallelBaseN() + " parallelOnly="
+        CustomModelModule.logDebug("[SFH+] parallelBase=" + runtime.preParallelBaseN() + " parallelOnly="
                 + runtime.parallelOnlyN() + " timelineEvents=" + timelineCount);
-        Debug.info("[SFH+] controllers=" + runtime.controllers.size() + "[" + slots.toString().trim()
+        CustomModelModule.logDebug("[SFH+] controllers=" + runtime.controllers.size() + "[" + slots.toString().trim()
                 + "] parallelClips=" + parallelCount + "[" + parallelClips.toString().trim() + "]");
         int timelineClips = 0;
         for (RawYsmModel.RawAnimation animation : clips.values()) {
@@ -771,7 +771,7 @@ public final class ModelRuntime {
                 timelineClips++;
             }
         }
-        Debug.info("[SFH+] layers pre=" + base.size() + " parallel=" + parallel.size()
+        CustomModelModule.logDebug("[SFH+] layers pre=" + base.size() + " parallel=" + parallel.size()
                 + " timelineClips=" + timelineClips);
         return runtime;
     }
@@ -2725,7 +2725,7 @@ public final class ModelRuntime {
                 }
             }
         } catch (RuntimeException failure) {
-            Debug.info("[SFH+] 贴图 alpha 扫描失败，按不透明处理: " + texture + " " + failure);
+            CustomModelModule.logDebug("[SFH+] 贴图 alpha 扫描失败，按不透明处理: " + texture + " " + failure);
         }
         return false;
     }
@@ -3021,7 +3021,7 @@ public final class ModelRuntime {
         if (!logged) {
             logged = true;
             Matrix4f first = frameMatrices.length == 0 ? null : frameMatrices[0];
-            Debug.info("[SFH+] anim clip=" + clipName(clip) + " len=" + clip.length + " loop=" + clip.loopMode
+            CustomModelModule.logDebug("[SFH+] anim clip=" + clipName(clip) + " len=" + clip.length + " loop=" + clip.loopMode
                     + " t=" + time + " bones=" + bones.size()
                     + " m0=" + (first == null ? "null" : first.m30() + "," + first.m31() + "," + first.m32()));
         }

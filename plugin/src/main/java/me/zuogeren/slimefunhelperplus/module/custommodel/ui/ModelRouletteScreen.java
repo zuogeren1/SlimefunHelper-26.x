@@ -8,9 +8,9 @@ import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.utils.ClientUtils;
-import me.matl114.utils.Debug;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
@@ -186,7 +186,7 @@ public class ModelRouletteScreen extends GenericScreen {
     @Override
     protected void refreshWidgets() {
         super.refreshWidgets();
-        Debug.info("[SFH+] 轮盘界面 " + this.width + "x" + this.height + " 项=" + options.size()
+        CustomModelModule.logDebug("[SFH+] 轮盘界面 " + this.width + "x" + this.height + " 项=" + options.size()
                 + " scale=" + scale);
         EfWidget.of(0, 0, this.width, this.height, this::paint)
                 .click(this::click)

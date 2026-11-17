@@ -4,7 +4,6 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import java.util.concurrent.atomic.AtomicBoolean;
-import me.matl114.utils.Debug;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ItemClassifier;
@@ -168,7 +167,7 @@ public abstract class PlayerModelSubmitMixin {
             }
             poseStack.popPose();
             if (LOGGED.compareAndSet(false, true)) {
-                Debug.info("[SFH+] custom model rendered: " + CustomModelManager.loadedFile()
+                CustomModelModule.logDebug("[SFH+] custom model rendered: " + CustomModelManager.loadedFile()
                         + " texture=" + runtime.texture());
             }
         } else {
@@ -181,7 +180,7 @@ public abstract class PlayerModelSubmitMixin {
                         (pose, buffer) -> emitBox(pose, tinted(buffer, tint, overlay), light));
             }
             if (LOGGED.compareAndSet(false, true)) {
-                Debug.info("[SFH+] custom model debug box rendered, texture=" + texture);
+                CustomModelModule.logDebug("[SFH+] custom model debug box rendered, texture=" + texture);
             }
         }
         callbackInfo.cancel();

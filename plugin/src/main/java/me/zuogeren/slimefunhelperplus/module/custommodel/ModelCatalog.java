@@ -7,7 +7,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import me.matl114.utils.Debug;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
@@ -79,18 +78,18 @@ public final class ModelCatalog {
         try {
             Files.createDirectories(dir);
         } catch (Exception exception) {
-            Debug.info("[SFH+] 无法创建模型目录: " + exception);
+            CustomModelModule.logDebug("[SFH+] 无法创建模型目录: " + exception);
         }
         try (var stream = Files.walk(dir, 4)) {
             stream.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".ysm"))
                     .forEach(path -> found.add(dir.relativize(path).toString().replace('\\', '/')));
         } catch (Exception exception) {
-            Debug.info("[SFH+] 扫描模型目录失败: " + exception);
+            CustomModelModule.logDebug("[SFH+] 扫描模型目录失败: " + exception);
         }
         found.sort(String.CASE_INSENSITIVE_ORDER);
         names = List.copyOf(found);
-        Debug.info("[SFH+] 模型目录扫描: " + names.size() + " 个 (" + dir + ")");
+        CustomModelModule.logDebug("[SFH+] 模型目录扫描: " + names.size() + " 个 (" + dir + ")");
     }
 
     /** 按目录顺序取下一个；没有结果时先重扫一次。 */

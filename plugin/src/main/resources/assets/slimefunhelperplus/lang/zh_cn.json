@@ -45,6 +45,8 @@
   "custom-model.model.tooltips": "相对 config/slimefunhelper-plus/models 的文件名；也可以在模型选择页里点选",
   "custom-model.hide-first-person-arm": "第一人称用模型手臂",
   "custom-model.hide-first-person-arm.tooltips": "用模型自带的手臂替换原版皮肤手臂；模型没带手臂时自动放行原版",
+  "custom-model.debug": "调试日志",
+  "custom-model.debug.tooltips": "把模型加载、贴图注册、动画采样的诊断信息写进日志；排查问题时再打开",
   "custom-model.roulette-key": "打开动画轮盘的按键",
   "custom-model.roulette-key.tooltips": "点一下再按新键即可绑定；右键清除",
   "custom-model.model-picker-key": "打开模型选择页的按键",

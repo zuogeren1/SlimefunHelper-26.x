@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.SourceDataLine;
-import me.matl114.utils.Debug;
+import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.resources.sounds.SoundInstance;
@@ -78,7 +78,7 @@ public final class ModelSoundPlayer {
                 try {
                     run(owner, ogg, volume);
                 } catch (Throwable error) {
-                    Debug.info("[SFH+] model-sound: 播放失败：" + error);
+                    CustomModelModule.logDebug("[SFH+] model-sound: 播放失败：" + error);
                 } finally {
                     pending.decrementAndGet();
                 }
