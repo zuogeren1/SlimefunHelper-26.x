@@ -88,6 +88,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int FIELD_PAD = 4;
     /** 字段框在行内下移的像素：行高 18 放 15 的框，上下各留一点，框不贴着行间的细线。 */
     private static final int FIELD_TOP = 1;
+    /** 值框右侧箭头占的宽度：点这一段开候选列表，点其余位置开编辑。 */
+    private static final int ARROW_W = 14;
     /** 聚焦环的粗细，以及它离边框内侧的距离（CSS 的 outline-offset: -1px）。 */
     private static final int FIELD_RING = 2;
     private static final int FIELD_RING_INSET = 0;
@@ -1542,20 +1544,33 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         } else if (raw instanceof EntrySet<?> set) {
             paintEntrySet(ctx, p, y, ref, set);
         } else if (value instanceof StringRef text && !stringChoicesOf(ref).isEmpty()) {
-            // 有候选值的字符串走下拉：模型文件名这类「只能从已有里选」的配置不该让人手打
-            String shown = text.get();
-            String label = shown == null || shown.isEmpty() ? EMPTY_TEXT : shown;
-            String clipped = Ef.ellipsis(label, Math.max(40, contentWidth / 3));
-            String chip = clipped + "   ▾";
-            int textW = Ef.textWidth(chip);
-            int chipX = right - textW - 10;
-            Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, dropdown == ref ? p.ink() : p.chip(), Ef.CUT);
-            Ef.text(ctx, chip, chipX + 5, y + 5, dropdown == ref ? p.paper() : p.ink());
-            // 收起态的值框同样会裁短：悬停时把全名补出来
-            if (!clipped.equals(label) && dropdown == null
-                    && mouseX >= chipX && mouseX <= chipX + textW + 10
-                    && mouseY >= y + 3 && mouseY <= y + 14) {
-                truncatedHover = label;
+            // 有候选值的字符串：值框本身可编辑，右侧箭头开候选列表。
+            // 只给下拉会让人填不进扫描不到的路径（绝对路径、还没放进 models 的文件）。
+            Box field = textValueBox(y);
+            boolean open = dropdown == ref;
+            if (textTarget == ref) {
+                paintFieldFrame(ctx, p, field.x(), field.y(), field.w(), field.h(), true, false);
+                if (textBox != null) {
+                    // 输入框默认的白字在浅色主题的 panel 底上看不见
+                    textBox.setTextColor(p.ink());
+                }
+            } else {
+                boolean hot = inBox(field.x(), field.y(), field.w(), field.h(), mouseX, mouseY);
+                paintFieldFrame(ctx, p, field.x(), field.y(), field.w(), field.h(), open, hot);
+                String shown = text.get();
+                boolean empty = shown == null || shown.isEmpty();
+                String label = empty ? EMPTY_TEXT : shown;
+                String clipped = Ef.ellipsis(label, field.w() - FIELD_PAD * 2 - ARROW_W);
+                Ef.text(ctx, clipped, field.x() + FIELD_PAD, field.y() + FIELD_PAD,
+                        empty ? p.ink2() : p.ink());
+                // 箭头画在值框右端：它才是「开候选」的那一块，其余位置都是编辑
+                String arrow = "▾";
+                Ef.text(ctx, arrow, field.x() + field.w() - ARROW_W + (ARROW_W - Ef.textWidth(arrow)) / 2,
+                        field.y() + FIELD_PAD, open ? p.ink() : p.ink2());
+                // 值框会裁短：悬停时把全名补出来
+                if (!clipped.equals(label) && hot) {
+                    truncatedHover = label;
+                }
             }
         } else if (value instanceof StringRef text) {
             paintTextValue(ctx, p, textValue, ref, text, mouseX, mouseY);
@@ -2745,10 +2760,14 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return true;
         }
         if (ref instanceof StringRef) {
-            // 有候选值的走下拉，没有的才开文本框
+            // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
             if (!stringChoicesOf(wrapper).isEmpty()) {
-                openDropdown(wrapper, -1, rowY);
-                return true;
+                Box field = textValueBox(rowY);
+                if (inBox(field.x(), field.y(), field.w(), field.h(), mouseX, mouseY)
+                        && mouseX >= field.x() + field.w() - ARROW_W) {
+                    openDropdown(wrapper, -1, rowY);
+                    return true;
+                }
             }
             return hitText(wrapper, mouseX, mouseY, button, rowY);
         }
