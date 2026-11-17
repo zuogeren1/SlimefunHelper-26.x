@@ -26,7 +26,9 @@ import me.matl114.hacks.utils.config.StringEnum;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.NBTTypes;
+import me.matl114.hacks.utils.config.Primitive;
 import me.matl114.hacks.utils.config.PrimitiveList;
+import me.matl114.hacks.utils.config.PrimitiveMap;
 import me.matl114.hacks.utils.config.Vec2;
 import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.managers.config.NBTType;
@@ -958,6 +960,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof StringFormat
                 || value.getValue() instanceof PrimitiveList<?>
                 || value.getValue() instanceof WidgetPos
+                || value.getValue() instanceof PrimitiveMap<?, ?>
                 || value.getValue() instanceof Regex
                 || recordParts(value.getValue()) != null
                 || booleanParts(value.getValue()) != null;
@@ -1667,6 +1670,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             boolean open = dropdown == ref;
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        } else if (raw instanceof PrimitiveMap<?, ?> map) {
+            paintCountChip(ctx, p, y, ref, map.toPrimitiveMap().size() + " 项");
         } else if (raw instanceof WidgetPos pos) {
             paintWidgetPos(ctx, p, y, ref, pos, mouseX, mouseY);
         } else if (raw instanceof PrimitiveList<?> list) {
@@ -2091,6 +2096,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      */
     private void openHostEditor(WrapperConfigRef<?> wrapper, int rowY) {
         Object raw = wrapper.ref().getValue();
+        if (raw instanceof PrimitiveMap<?, ?> map) {
+            openMapEditor(wrapper, map);
+            return;
+        }
         if (!(raw instanceof PrimitiveList<?> list)) {
             return;
         }
@@ -2166,6 +2175,42 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Vec2 pair = pos.getType() == 0 ? pos.toPercentage() : pos.toLength();
         double current = index == 0 ? pair.x() : pair.y();
         return hitNumber(wrapper, index, right, mouseX, button, rowY, formatNumber(current), current);
+    }
+
+    /**
+     * 键值表：与列表同一套入口，只是宿主的编辑器换成键值对那一版。
+     *
+     * <p>同样要包一层 {@code WrapperAttrKeyValue}：宿主编辑屏写回的是 {@code Map}，
+     * 而这一项存的是 {@code PrimitiveMap}，不转换会在 accept 时抛类型错。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openMapEditor(WrapperConfigRef<?> wrapper, PrimitiveMap<?, ?> map) {
+        try {
+            // 键值表的编辑器由 NBTType 自己生成：手写 createArrayMapLike 的泛型参数既啰嗦又容易错，
+            // 这里直接借它产出的控件，再塞进一个独立屏——与列表那条路同一个思路
+            AttrKeyValue<Object> source = (AttrKeyValue<Object>) (AttrKeyValue<?>) handle(wrapper);
+            DrawableWidget editor = source.generateValueWidget(
+                    NewClickGui.elementFactory(), 0, 0, 300, 20);
+            if (editor == null) {
+                return;
+            }
+            ScreenAccess.of(new HostEditorScreen(editor, 300, 20)).openFromCurrent();
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 键值表编辑器打开失败: " + e);
+        }
+    }
+
+    /** 键值表行的一击：与列表同一块命中区。 */
+    private boolean hitPrimitiveMap(
+            WrapperConfigRef<?> wrapper, PrimitiveMap<?, ?> map, int mouseX, int mouseY, int button, int rowY) {
+        String label = map.toPrimitiveMap().size() + " 项   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = controlRight() - width;
+        if (button != 0 || !inBox(x, rowY + 3, width, 12, mouseX, mouseY)) {
+            return false;
+        }
+        openHostEditor(wrapper, rowY);
+        return true;
     }
 
     /** 列表行的一击：只有计数块接，点它把宿主的列表编辑器开到这一页上。 */
@@ -3161,6 +3206,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof WidgetPos pos) {
             return hitWidgetPos(wrapper, pos, mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof PrimitiveMap<?, ?> map) {
+            return hitPrimitiveMap(wrapper, map, mouseX, mouseY, button, rowY);
         }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
