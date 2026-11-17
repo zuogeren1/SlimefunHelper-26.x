@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
+package me.zuogeren.slimefunhelperplus.module.custommodel.ui;
 
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.versioned.api.VDrawContext;

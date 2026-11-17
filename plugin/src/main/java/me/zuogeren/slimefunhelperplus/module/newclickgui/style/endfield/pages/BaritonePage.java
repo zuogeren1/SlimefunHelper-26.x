@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -15,12 +15,14 @@ import me.matl114.utils.ChatUtils;
 import me.matl114.utils.config.ValueAccessor;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldClickGuiScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldTabBar;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.FieldEditor;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyle;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyles;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EfWidget;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldClickGuiScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldTabBar;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.FieldEditor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -53,7 +55,7 @@ public class BaritonePage extends GenericScreen {
     /** 设置项翻译键前缀，与宿主旧界面同一个约定。 */
     private static final String KEY_PREFIX = "widget.click-gui.baritone.";
 
-    private final EndfieldSettings settings;
+    private final Settings settings;
 
     /** Baritone 是否可用：不可用时整页只写一句说明，不画空白表单。 */
     private final boolean available;
@@ -105,7 +107,7 @@ public class BaritonePage extends GenericScreen {
     /** 一帧内布局出来的一行：序号是它在设置表里的位置，y 已经是屏幕绝对坐标。 */
     private record Row(int index, int y, Entry entry) {}
 
-    public BaritonePage(EndfieldSettings settings) {
+    public BaritonePage(Settings settings) {
         super(Component.empty(), 0, 0);
         this.settings = settings;
         this.available = isApiSupported();
@@ -487,9 +489,9 @@ public class BaritonePage extends GenericScreen {
         // 值跑出厂值的那一行，图标铺当前位置色：一眼能看出哪一行动过
         boolean modified = !Objects.equals(valueOf(row.entry()), def);
         if (modified) {
-            Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.trace(), Ef.CUT);
+            Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.trace(), p.cut());
         } else if (hot) {
-            Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), Ef.CUT);
+            Ef.cutFill(ctx, iconX - 1, y + 3, 12, 12, p.chip(), p.cut());
         }
         int fg = modified ? p.onTrace() : (hot ? p.ink() : p.ink2());
         Ef.icon(ctx, Constants.RESET_BUTTON_SPRITE, iconX + 1, y + 4, 9, fg);
@@ -547,7 +549,7 @@ public class BaritonePage extends GenericScreen {
         String chip = Ef.ellipsis(text, Math.max(60, contentWidth / 3)) + "   ▾";
         int width = Ef.textWidth(chip);
         int left = controlRight() - width - 10;
-        Ef.cutFill(ctx, left, y + 3, width + 10, 11, opened ? p.ink() : p.chip(), Ef.CUT);
+        Ef.cutFill(ctx, left, y + 3, width + 10, 11, opened ? p.ink() : p.chip(), p.cut());
         Ef.text(ctx, chip, left + 5, y + 5, opened ? p.paper() : p.ink());
     }
 
@@ -573,7 +575,7 @@ public class BaritonePage extends GenericScreen {
         int height = options.length * rowH + 4;
         int top = dropTop(height);
         Ef.fill(ctx, dropX, top, dropW, height, p.panel());
-        Ef.cutOutline(ctx, dropX, top, dropW, height, p.ink(), Ef.CUT);
+        Ef.cutOutline(ctx, dropX, top, dropW, height, p.ink(), p.cut());
 
         Object current = valueOf(dropdown);
         for (int i = 0; i < options.length; i++) {
@@ -685,9 +687,8 @@ public class BaritonePage extends GenericScreen {
                 return true;
             }
             if (hit != null && !"Baritone".equals(hit)) {
-                Screen next = "Module".equals(hit)
-                        ? new EndfieldClickGuiScreen(settings)
-                        : EndfieldPages.create(hit, settings);
+                GuiStyle style = GuiStyles.getOrDefault(NewClickGui.style());
+                Screen next = "Module".equals(hit) ? style.openMain(settings) : style.openPage(hit, settings);
                 if (next != null) {
                     ScreenAccess.of(this).switchToScreen(next);
                 }

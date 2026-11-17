@@ -32,6 +32,8 @@
   "new-click-gui.animations.tooltips": "Turn off to skip transitions: no fade, no wipe, no waiting",
   "new-click-gui.font-optimize": "Font layout optimization",
   "new-click-gui.font-optimize.tooltips": "Measure whole prefixes and follow the font's line height: tracked titles stop drifting a pixel per letter, and long names stay inside the row; turn off to use the old per-character layout",
+  "new-click-gui.style": "Interface style",
+  "new-click-gui.style.tooltips": "Switches the whole look at once: accent, cut corners and wide Latin together; light and dark still toggle separately in the top-right of this GUI",
   "widget.click-gui.module-group-name.SlimeFunHelper+": "SlimeFunHelper+",
   "widget.click-gui.module-name.Render.FriendWine": "Friend's Wine",
   "widget.click-gui.module-name.Render.FriendWine.tooltips": "Meme: every living entity wobbles like jelly and spins in place",

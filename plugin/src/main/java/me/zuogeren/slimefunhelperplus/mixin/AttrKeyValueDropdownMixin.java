@@ -6,7 +6,7 @@ import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.utils.config.KeyValue;
 import me.zuogeren.slimefunhelperplus.hostgui.AttrKeyValueDropdownWidget;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;

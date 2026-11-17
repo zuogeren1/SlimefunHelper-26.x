@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield;
 
 import java.util.List;
 import me.matl114.versioned.api.VDrawContext;
@@ -30,7 +30,6 @@ public final class EndfieldTabBar {
     private static final int TAB_H = 15;
     private static final int TAB_STEP = 17;
     private static final int BAR_MIN = 22;
-    private static final float WIDE = 1.2F;
 
     private final long openStart;
     private int barH = BAR_MIN;
@@ -94,15 +93,16 @@ public final class EndfieldTabBar {
     public void paint(
             VDrawContext ctx, int x, int y, int winW, String activeKey, boolean light, int mouseX, int mouseY) {
         layout(winW, light);
+        Ef.Palette p = Ef.palette(light);
         int h = barH;
-        Ef.fill(ctx, x, y, winW, h, Ef.BAR_BG);
-        paintTriBar(ctx, x, y, winW);
+        Ef.fill(ctx, x, y, winW, h, p.barBg());
+        paintTriBar(ctx, p, x, y, winW);
 
-        Ef.cutFill(ctx, x + 6, y + 5, 12, 12, Ef.SIGNAL, Ef.CUT);
-        Ef.text(ctx, "S", x + 9, y + 7, Ef.ON_SIGNAL);
+        Ef.cutFill(ctx, x + 6, y + 5, 12, 12, p.signal(), p.cut());
+        Ef.text(ctx, "S", x + 9, y + 7, p.onSignal());
         if (winW >= 520) {
-            Ef.trackedWide(ctx, "CLICKGUI", x + 24, y + 7, Ef.BAR_INK, 1, WIDE);
-            Ef.fill(ctx, x + 24 + Ef.trackedWideWidth("CLICKGUI", 1, WIDE) + 8, y + 5, 1, 12, Ef.BAR_RULE);
+            Ef.trackedWide(ctx, "CLICKGUI", x + 24, y + 7, p.barInk(), 1, p.wide());
+            Ef.fill(ctx, x + 24 + Ef.trackedWideWidth("CLICKGUI", 1, p.wide()) + 8, y + 5, 1, 12, p.barRule());
         }
 
         String hot = null;
@@ -124,15 +124,15 @@ public final class EndfieldTabBar {
             int tx = x + slotX[i];
             int ty = y + slotY[i];
             if (active) {
-                Ef.cutFill(ctx, tx, ty, slotW[i], TAB_H, Ef.SIGNAL, Ef.CUT);
-                Ef.text(ctx, TABS[i][0], tx + 5, ty + 3, Ef.ON_SIGNAL);
+                Ef.cutFill(ctx, tx, ty, slotW[i], TAB_H, p.signal(), p.cut());
+                Ef.text(ctx, TABS[i][0], tx + 5, ty + 3, p.onSignal());
                 continue;
             }
             boolean over = key.equals(hoverKey);
-            Ef.text(ctx, TABS[i][0], tx + 5, ty + 3, over ? Ef.BAR_INK : Ef.BAR_INK2);
+            Ef.text(ctx, TABS[i][0], tx + 5, ty + 3, over ? p.barInk() : p.barInk2());
             if (over) {
                 float t = Ef.mech(Ef.progress(hoverStart, 280.0F));
-                Ef.fill(ctx, tx, ty + TAB_H, Math.round(slotW[i] * t), 2, Ef.SIGNAL);
+                Ef.fill(ctx, tx, ty + TAB_H, Math.round(slotW[i] * t), 2, p.signal());
             }
         }
 
@@ -140,10 +140,10 @@ public final class EndfieldTabBar {
             return;
         }
         String esc = "Esc 关闭";
-        Ef.text(ctx, esc, x + winW - 8 - Ef.textWidth(esc), y + 7, Ef.BAR_INK2);
+        Ef.text(ctx, esc, x + winW - 8 - Ef.textWidth(esc), y + 7, p.barInk2());
         int themeX = x + themeX(winW, light);
-        Ef.fill(ctx, themeX - 6, y + 6, 1, 10, Ef.BAR_RULE);
-        Ef.text(ctx, light ? "深色" : "浅色", themeX, y + 7, Ef.BAR_INK);
+        Ef.fill(ctx, themeX - 6, y + 6, 1, 10, p.barRule());
+        Ef.text(ctx, light ? "深色" : "浅色", themeX, y + 7, p.barInk());
     }
 
     /** 命中分类返回它的键；命中右侧深浅切换返回 {@link #THEME}；都不是返回 null。 */
@@ -171,20 +171,20 @@ public final class EndfieldTabBar {
     }
 
     /** 三色条扫过：切到这一屏时从左往右画出来。 */
-    private void paintTriBar(VDrawContext ctx, int x, int y, int winW) {
+    private void paintTriBar(VDrawContext ctx, Ef.Palette p, int x, int y, int winW) {
         int drawn = Math.round(winW * Ef.ease(Ef.progress(openStart, 600.0F)));
         int third = Math.max(1, winW / 3);
         int a = Math.min(third, drawn);
         if (a > 0) {
-            Ef.fill(ctx, x, y, a, 3, Ef.TRI_A);
+            Ef.fill(ctx, x, y, a, 3, p.triA());
         }
         int b = Math.min(third, drawn - third);
         if (b > 0) {
-            Ef.fill(ctx, x + third, y, b, 3, Ef.SIGNAL);
+            Ef.fill(ctx, x + third, y, b, 3, p.signal());
         }
         int c = drawn - third * 2;
         if (c > 0) {
-            Ef.fill(ctx, x + third * 2, y, c, 3, Ef.TRI_C);
+            Ef.fill(ctx, x + third * 2, y, c, 3, p.triC());
         }
     }
 }

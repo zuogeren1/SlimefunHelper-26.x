@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,7 +23,9 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.ChatUtils;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyles;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages.EndfieldPages;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -56,9 +58,8 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     /** 记录行悬停时整行右移的距离。 */
     private static final int ROW_SHIFT = 6;
     /** 眉标与字标的横向拉伸：界面字体没有宽度轴，靠这一步做宽体拉丁。 */
-    private static final float WIDE = 1.2F;
 
-    private final EndfieldSettings settings;
+    private final Settings settings;
     private List<String> groupNames;
     private final Map<String, Integer> scrollTop = new HashMap<>();
     private final Map<String, List<BaseModule>> moduleCache = new HashMap<>();
@@ -95,7 +96,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     /** 这一帧鼠标停在哪个记录行上，用来出说明框。 */
     private BaseModule hoveredModule;
 
-    public EndfieldClickGuiScreen(EndfieldSettings settings) {
+    public EndfieldClickGuiScreen(Settings settings) {
         super(Component.empty(), 0, 0);
         this.settings = settings;
         List<String> groups = groupNames();
@@ -237,7 +238,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
 
     private void openHostPage(String key) {
         // 先走插件自己的新页面；还没做的分类再退回宿主那一页
-        Screen ours = EndfieldPages.create(key, settings);
+        Screen ours = GuiStyles.getOrDefault(NewClickGui.style()).openPage(key, settings);
         if (ours != null) {
             ScreenAccess.of(ours).openFromCurrent();
             return;
@@ -474,7 +475,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
 
     /** 切到另一个分类：同一个窗口里换内容，不是再叠一层屏。 */
     private void switchToPage(String key) {
-        Screen next = EndfieldPages.create(key, settings);
+        Screen next = GuiStyles.getOrDefault(NewClickGui.style()).openPage(key, settings);
         if (next != null) {
             ScreenAccess.of(this).switchToScreen(next);
             return;
@@ -494,7 +495,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         Ef.fill(ctx, 0, 0, w, h, p.paper());
         Ef.fill(ctx, w - 1, 0, 1, h, p.rule());
 
-        Ef.trackedWide(ctx, "// GROUPS", 8, 8, p.ink2(), 1, WIDE);
+        Ef.trackedWide(ctx, "// GROUPS", 8, 8, p.ink2(), 1, p.wide());
         Ef.text(ctx, "分组", 8, 17, p.ink());
         String total = realGroupNames().size() + " 组";
         Ef.text(ctx, total, 8, 29, p.ink2());
@@ -506,9 +507,9 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             }
             boolean current = name.equals(group);
             boolean hover = mx >= 6 && mx <= w - 8 && my >= y && my < y + CHIP_H;
-            int bg = current ? Ef.SIGNAL : (hover ? Ef.mix(p.chip(), p.ink(), 0.12f) : p.chip());
-            int fg = current ? Ef.ON_SIGNAL : p.ink();
-            int cut = Ef.CUT_WIDE;
+            int bg = current ? p.signal() : (hover ? Ef.mix(p.chip(), p.ink(), 0.12f) : p.chip());
+            int fg = current ? p.onSignal() : p.ink();
+            int cut = p.cutWide();
             int chipW = w - 14;
             Ef.cutFill(ctx, 6, y, chipW, CHIP_H, bg, cut);
 
@@ -517,7 +518,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             String count = enabledOf(modules) + "/" + modules.size();
             // 切角会啃掉右下角，文字右边缘必须退出切角宽度，否则末位数字会画到背景上
             int countX = 6 + chipW - cut - 3 - Ef.textWidth(count);
-            Ef.text(ctx, count, countX, y + 4, current ? Ef.ON_SIGNAL : p.ink2());
+            Ef.text(ctx, count, countX, y + 4, current ? p.onSignal() : p.ink2());
             y += CHIP_H + CHIP_GAP;
         }
     }
@@ -629,7 +630,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         int boxX = searchX(w);
         boolean focused = searchBox != null && searchBox.isFocused();
         Ef.fill(ctx, boxX, 2, boxW, 13, p.panel());
-        Ef.cutOutline(ctx, boxX, 2, boxW, 13, focused ? p.ink() : p.rule(), Ef.CUT);
+        Ef.cutOutline(ctx, boxX, 2, boxW, 13, focused ? p.ink() : p.rule(), p.cut());
         if (focused) {
             // 聚焦时下边换 2px 的当前位置线，颜色跟主题走（浅色是墨、深色是强调色）
             Ef.fill(ctx, boxX + 1, 12, boxW - 2, 2, p.trace());
@@ -640,7 +641,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         }
 
         String caption = ALL_MODULES.equals(group) ? "ALL" : group.toUpperCase(Locale.ROOT);
-        Ef.trackedWide(ctx, "// " + caption, 10, 8, p.ink2(), 1, WIDE);
+        Ef.trackedWide(ctx, "// " + caption, 10, 8, p.ink2(), 1, p.wide());
         Ef.text(ctx, displayGroupName(group), 10, 17, p.ink());
 
         String meta = enabledOf(all) + " / " + all.size() + " 启用";
@@ -701,8 +702,8 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         int rule = Ef.alpha(p.rule(), alpha);
         int tagBg = Ef.alpha(p.tagBg(), alpha);
         int tagFg = Ef.alpha(p.tagFg(), alpha);
-        int signal = Ef.alpha(Ef.SIGNAL, alpha);
-        int onSignal = Ef.alpha(Ef.ON_SIGNAL, alpha);
+        int signal = Ef.alpha(p.signal(), alpha);
+        int onSignal = Ef.alpha(p.onSignal(), alpha);
 
         ctx.getMatrices().pushMatrix();
         ctx.getMatrices().translate(hover ? ROW_SHIFT : 0, shift);
@@ -712,7 +713,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             int tx = 10;
             String no = String.format(Locale.ROOT, "No.%03d", index + 1);
             int tagW = Math.max(30, Ef.textWidth(no) + 9);
-            Ef.cutFill(ctx, tx, tagY, tagW, tagH, isSelected ? signal : tagBg, Ef.CUT);
+            Ef.cutFill(ctx, tx, tagY, tagW, tagH, isSelected ? signal : tagBg, p.cut());
             Ef.text(ctx, no, tx + 3, tagY + 1, isSelected ? onSignal : tagFg);
 
             // 行尾那块：有总开关就是「启用/停用」，没有总开关就写这一页有多少项设置
@@ -740,7 +741,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             FlagRef flag = module.getBindFlag();
             if (flag == null) {
                 int bg = chipHover ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip();
-                Ef.cutFill(ctx, chipX, chipY, chipW, chipH, Ef.alpha(bg, alpha), Ef.CUT);
+                Ef.cutFill(ctx, chipX, chipY, chipW, chipH, Ef.alpha(bg, alpha), p.cut());
                 Ef.text(ctx, chip, chipX + 4, chipY + 1, ink2);
             } else if (flag.get()) {
                 int bg = chipHover ? Ef.mix(ink, signal, 0.22F) : ink;
@@ -823,7 +824,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         }
         hoverDetail = over;
         // 看板按"朝向中间那块"切角：这块在右侧，所以切左下
-        Ef.cutFill(ctx, px, py, pw, ph, p.panel(), Ef.CUT_PANEL, Ef.Corner.BL);
+        Ef.cutFill(ctx, px, py, pw, ph, p.panel(), p.cutPanel(), Ef.Corner.BL);
         float tabT = over ? Ef.mech(Ef.progress(hoverDetailStart, 400.0F)) : 0.0F;
         int lead = Math.max(8, pw / 7);
         Ef.fill(ctx, px, py, lead + Math.round((pw - lead) * tabT), 3, p.ink());
@@ -832,7 +833,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         int innerW = pw - 16;
         int lh = Ef.lineH();
         int cy = py + 10;
-        Ef.trackedWide(ctx, "// MODULE", cx, cy, p.ink2(), 1, WIDE);
+        Ef.trackedWide(ctx, "// MODULE", cx, cy, p.ink2(), 1, p.wide());
         cy += lh + 3;
         if (selected == null) {
             Ef.text(ctx, "左侧选一个模块。", cx, cy, p.ink2());
@@ -841,7 +842,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
 
         Ef.text(ctx, Ef.ellipsis(moduleLabel(selected), innerW), cx, cy, p.ink());
         cy += lh;
-        Ef.trackedWide(ctx, selected.getName().toUpperCase(Locale.ROOT), cx, cy, p.ink2(), 1, WIDE);
+        Ef.trackedWide(ctx, selected.getName().toUpperCase(Locale.ROOT), cx, cy, p.ink2(), 1, p.wide());
         cy += lh + 3;
 
         int stateH = lh + 2;
@@ -850,7 +851,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             // 没有总开关的模块不显示启停，改写成这一页有多少项设置
             String kind = settingsLabel(selected);
             int kindW = Ef.textWidth(kind) + 8;
-            Ef.cutFill(ctx, cx, cy, kindW, stateH, p.chip(), Ef.CUT);
+            Ef.cutFill(ctx, cx, cy, kindW, stateH, p.chip(), p.cut());
             Ef.text(ctx, kind, cx + 4, cy + 1, p.ink2());
         } else {
             boolean on = bindFlag.get();
@@ -915,7 +916,7 @@ public class EndfieldClickGuiScreen extends GenericScreen {
             hoverButton = overBtn;
             float wipe = overBtn ? Ef.mech(Ef.progress(hoverButtonStart, 280.0F)) : 0.0F;
             // 主要按钮：静止墨底，悬停时强调色从左擦入，字在色块经过时翻成墨色
-            Ef.wipeCut(ctx, btnX, btnY, btnW, btnH, p.ink(), Ef.SIGNAL, wipe, Ef.CUT_WIDE, Ef.Corner.BR);
+            Ef.wipeCut(ctx, btnX, btnY, btnW, btnH, p.ink(), p.signal(), wipe, p.cutWide(), Ef.Corner.BR);
             int front = Math.round(btnW * wipe);
             Ef.text(ctx, "打开配置", btnX + 6, btnY + (btnH - lh) / 2 + 1, front > 6 ? p.ink() : p.paper());
         } finally {
@@ -942,7 +943,8 @@ public class EndfieldClickGuiScreen extends GenericScreen {
     private void openConfig(BaseModule module) {
         // openFromCurrent 会把当前屏设成 parent，宿主在 onClose 里把 setScreen 重定向回 parent，
         // 所以"返回"不用自己管。
-        ScreenAccess.of(new EndfieldModuleConfigScreen(module, settings)).openFromCurrent();
+        ScreenAccess.of(GuiStyles.getOrDefault(NewClickGui.style()).openModuleConfig(module, settings))
+                .openFromCurrent();
     }
 
     // ------------------------------------------------------------------ 状态条

@@ -15,8 +15,8 @@ import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ui.Ef;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ui.EfWidget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
@@ -329,9 +329,9 @@ public class ModelPickerScreen extends GenericScreen {
         int px = panelX;
         int py = panelY;
         // 面板与右栏都切同一个角：只切外层的话，右栏那块矩形会把切角重新填满
-        Ef.cutFill(ctx, px, py, PANEL_W, PANEL_H, pal.paper(), Ef.CUT_PANEL, Ef.Corner.BR);
+        Ef.cutFill(ctx, px, py, PANEL_W, PANEL_H, pal.paper(), pal.cutPanel(), Ef.Corner.BR);
         Ef.fill(ctx, px, py, LEFT_W, PANEL_H, pal.panel());
-        Ef.cutFill(ctx, px + RIGHT_X, py, RIGHT_W, PANEL_H, pal.panel(), Ef.CUT_PANEL, Ef.Corner.BR);
+        Ef.cutFill(ctx, px + RIGHT_X, py, RIGHT_W, PANEL_H, pal.panel(), pal.cutPanel(), Ef.Corner.BR);
         paintPreview(ctx, px, py);
         paintToolbar(ctx, px, py);
         paintCards(ctx, px, py);
@@ -355,8 +355,8 @@ public class ModelPickerScreen extends GenericScreen {
         float wipe = hot ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
         int gx = px + GEAR_X;
         int gy = py + GEAR_Y;
-        Ef.wipeCut(ctx, gx, gy, GEAR_SIZE, GEAR_SIZE, pal.chip(), Ef.SIGNAL, wipe, Ef.CUT, Ef.Corner.BR);
-        gearGlyph(ctx, gx, gy, GEAR_SIZE, hot ? Ef.ON_SIGNAL : pal.ink2());
+        Ef.wipeCut(ctx, gx, gy, GEAR_SIZE, GEAR_SIZE, pal.chip(), pal.signal(), wipe, pal.cut(), Ef.Corner.BR);
+        gearGlyph(ctx, gx, gy, GEAR_SIZE, hot ? pal.onSignal() : pal.ink2());
 
         String file = selectedFile();
         String name = file.isEmpty() ? "未选择模型" : ModelCatalog.displayName(file);
@@ -392,16 +392,16 @@ public class ModelPickerScreen extends GenericScreen {
         float wipeTex = hotTex ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
         int tx = px + TEX_X;
         int ty = py + TEX_Y;
-        Ef.wipeCut(ctx, tx, ty, TEX_W, TEX_H, pal.chip(), Ef.SIGNAL, wipeTex, Ef.CUT, Ef.Corner.BR);
-        int ink = hotTex ? Ef.ON_SIGNAL : pal.ink2();
-        Ef.fill(ctx, tx + 6, ty + 6, 8, 8, hotTex ? Ef.ON_SIGNAL : Ef.SIGNAL);
+        Ef.wipeCut(ctx, tx, ty, TEX_W, TEX_H, pal.chip(), pal.signal(), wipeTex, pal.cut(), Ef.Corner.BR);
+        int ink = hotTex ? pal.onSignal() : pal.ink2();
+        Ef.fill(ctx, tx + 6, ty + 6, 8, 8, hotTex ? pal.onSignal() : pal.signal());
         Ef.text(ctx, Component.translatable("custom-model.picker.texture").getString(),
                 tx + 18, ty + (TEX_H - Ef.lineH()) / 2, ink);
 
         int sx = px + SEARCH_X;
         int sy = py + SEARCH_Y;
         // 框体自己画，字交给 EditBox：占位提示也由它画，这里不再补一遍
-        Ef.cutFill(ctx, sx, sy, SEARCH_W, SEARCH_H, pal.chip(), Ef.CUT, Ef.Corner.BR);
+        Ef.cutFill(ctx, sx, sy, SEARCH_W, SEARCH_H, pal.chip(), pal.cut(), Ef.Corner.BR);
     }
 
     private void paintCards(VDrawContext ctx, int px, int py) {
@@ -430,10 +430,10 @@ public class ModelPickerScreen extends GenericScreen {
             float wipe = hot ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
             int cardBg = isSelected || hot ? 0xFF333333 : pal.chip();
             if (hot && !isSelected) {
-                Ef.wipeCut(ctx, cx, cy, CARD_W, CARD_H, cardBg, Ef.alpha(Ef.SIGNAL, 0.16F), wipe,
-                        Ef.CUT, Ef.Corner.BR);
+                Ef.wipeCut(ctx, cx, cy, CARD_W, CARD_H, cardBg, Ef.alpha(pal.signal(), 0.16F), wipe,
+                        pal.cut(), Ef.Corner.BR);
             } else {
-                Ef.cutFill(ctx, cx, cy, CARD_W, CARD_H, cardBg, Ef.CUT, Ef.Corner.BR);
+                Ef.cutFill(ctx, cx, cy, CARD_W, CARD_H, cardBg, pal.cut(), Ef.Corner.BR);
             }
             int slotY = cy;
             int slotH = CARD_SLOT_H;
@@ -494,8 +494,8 @@ public class ModelPickerScreen extends GenericScreen {
         // 编号标签：选中时整块强调色，一眼看出当前模型
         String no = String.format(Locale.ROOT, "%02d", view.indexOf(file) + 1);
         int tagW = Ef.textWidth(no) + 4;
-        Ef.cutFill(ctx, cx, cy, tagW, TAG_H, isSelected ? Ef.SIGNAL : pal.tagBg(), 2, Ef.Corner.BR);
-        Ef.text(ctx, no, cx + 2, cy + 1, isSelected ? Ef.ON_SIGNAL : pal.tagFg());
+        Ef.cutFill(ctx, cx, cy, tagW, TAG_H, isSelected ? pal.signal() : pal.tagBg(), 2, Ef.Corner.BR);
+        Ef.text(ctx, no, cx + 2, cy + 1, isSelected ? pal.onSignal() : pal.tagFg());
 
         // 名字遮罩：从卡片底部往上 20px，向下渐隐，让名字在任何模型上都读得清
         int scrimTop = cy + CARD_H - NAME_H;
@@ -513,7 +513,7 @@ public class ModelPickerScreen extends GenericScreen {
             nameY += Ef.lineH();
         }
         if (isSelected) {
-            Ef.fill(ctx, cx, cy, 2, CARD_H, Ef.SIGNAL);
+            Ef.fill(ctx, cx, cy, 2, CARD_H, pal.signal());
         }
     }
 
@@ -703,11 +703,11 @@ public class ModelPickerScreen extends GenericScreen {
     private void paintPagerButton(VDrawContext ctx, int x, int y, String label, boolean enabled, boolean hot) {
         float wipe = hot && enabled ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
         if (enabled && hot) {
-            Ef.wipeCut(ctx, x, y, PG_W, PG_H, pal.chip(), Ef.SIGNAL, wipe, Ef.CUT, Ef.Corner.BR);
+            Ef.wipeCut(ctx, x, y, PG_W, PG_H, pal.chip(), pal.signal(), wipe, pal.cut(), Ef.Corner.BR);
         } else {
-            Ef.cutFill(ctx, x, y, PG_W, PG_H, pal.chip(), Ef.CUT, Ef.Corner.BR);
+            Ef.cutFill(ctx, x, y, PG_W, PG_H, pal.chip(), pal.cut(), Ef.Corner.BR);
         }
-        int ink = !enabled ? 0xFF5C5C5C : (hot ? Ef.ON_SIGNAL : pal.ink());
+        int ink = !enabled ? 0xFF5C5C5C : (hot ? pal.onSignal() : pal.ink());
         Ef.text(ctx, label, x + (PG_W - Ef.textWidth(label)) / 2, y + (PG_H - Ef.lineH()) / 2, ink);
     }
 

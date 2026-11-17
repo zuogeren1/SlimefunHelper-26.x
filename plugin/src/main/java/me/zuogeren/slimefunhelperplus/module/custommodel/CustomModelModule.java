@@ -108,7 +108,7 @@ public class CustomModelModule extends BaseModule {
         super("CustomModel");
         bindFlag(enable);
         // newclickgui 的下拉读这张表；宿主 ClickGui 走 StringChoiceRef 的 keyValue，不需要注册
-        me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen
+        me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen
                 .registerStringChoices(root.add("model").asString(), CustomModelModule::modelChoices);
     }
 

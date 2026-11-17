@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield;
 
 import java.awt.Color;
 import java.util.ArrayList;
@@ -48,7 +48,8 @@ import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages.EndfieldPages;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages.EndfieldPages;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.core.Registry;
@@ -145,7 +146,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 命令栏实际高度（分类换行时会变高）。 */
     private int barH = BAR_H;
 
-    protected final EndfieldSettings settings;
+    protected final Settings settings;
 
     private int winX;
     private int winY;
@@ -296,7 +297,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 动作行的位置与它对应的动作。 */
     private record ActionRow(int y, int height, Action action) {}
 
-    public EndfieldModuleConfigScreen(BaseModule module, EndfieldSettings settings) {
+    public EndfieldModuleConfigScreen(BaseModule module, Settings settings) {
         this(
                 module.getName().toUpperCase(Locale.ROOT),
                 EndfieldClickGuiScreen.moduleLabel(module),
@@ -317,7 +318,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             String title,
             BaseModule module,
             java.util.function.Supplier<List<WrapperConfigRef<?>>> source,
-            EndfieldSettings settings) {
+            Settings settings) {
         this(latin, title, module, source, settings, null);
     }
 
@@ -330,7 +331,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             String title,
             BaseModule module,
             java.util.function.Supplier<List<WrapperConfigRef<?>>> source,
-            EndfieldSettings settings,
+            Settings settings,
             String tabKey) {
         super(Component.empty(), 0, 0);
         this.latin = latin;

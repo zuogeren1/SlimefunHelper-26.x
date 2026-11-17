@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.List;
 import java.util.Locale;
@@ -6,9 +6,9 @@ import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.TextFont;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 
 /** 「字体」页：宿主文字模块（{@code MainTasks#getTextFont}）的字体相关设置。 */
 public class FontPage extends EndfieldModuleConfigScreen {
@@ -16,7 +16,7 @@ public class FontPage extends EndfieldModuleConfigScreen {
         return MainTasks.getTextFont().getEditableConfig();
     }
 
-    public FontPage(EndfieldSettings settings) {
+    public FontPage(Settings settings) {
         super("FONT", "字体", null, FontPage::refs, settings, "Font");
     }
 

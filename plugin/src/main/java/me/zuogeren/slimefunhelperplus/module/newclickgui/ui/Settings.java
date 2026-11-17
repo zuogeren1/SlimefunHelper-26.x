@@ -11,14 +11,14 @@ import me.matl114.managers.config.StringRef;
  * <p>刻意不走宿主的 {@code Configs.MISC_CONFIG}：那份配置只属于 ClickGui，
  * 新界面不该在宿主的面板里长出一格。开关键在模块的 {@code openKey} 里，同样存这份文件。
  */
-public final class EndfieldSettings {
+public final class Settings {
     private static final String ROOT = "new-click-gui";
     private static final String LIGHT = "light-theme";
     private static final String LAST_GROUP = "last-group";
 
     private final Config config;
 
-    public EndfieldSettings(Config config) {
+    public Settings(Config config) {
         this.config = config;
     }
 

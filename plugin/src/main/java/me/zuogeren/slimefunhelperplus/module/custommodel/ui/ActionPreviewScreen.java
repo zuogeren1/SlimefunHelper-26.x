@@ -9,8 +9,8 @@ import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ui.Ef;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ui.EfWidget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -196,9 +196,9 @@ public class ActionPreviewScreen extends GenericScreen {
         updateHover(mouseX, mouseY);
         int px = panelX;
         int py = panelY;
-        Ef.cutFill(ctx, px, py, PANEL_W, PANEL_H, pal.paper(), Ef.CUT_PANEL, Ef.Corner.BR);
+        Ef.cutFill(ctx, px, py, PANEL_W, PANEL_H, pal.paper(), pal.cutPanel(), Ef.Corner.BR);
         Ef.fill(ctx, px, py, LEFT_W, PANEL_H, pal.panel());
-        Ef.cutFill(ctx, px + RIGHT_X, py, RIGHT_W, PANEL_H, pal.panel(), Ef.CUT_PANEL, Ef.Corner.BR);
+        Ef.cutFill(ctx, px + RIGHT_X, py, RIGHT_W, PANEL_H, pal.panel(), pal.cutPanel(), Ef.Corner.BR);
         paintStage(ctx, px, py);
         paintNav(ctx, px, py);
         paintTabs(ctx, px, py);
@@ -221,7 +221,7 @@ public class ActionPreviewScreen extends GenericScreen {
 
         ModelRuntime runtime = CustomModelManager.runtime();
         String badge = runtime == null ? "-" : "单次";
-        Ef.fill(ctx, sx + STAGE_W - 8 - 3, sy + 10, 3, 3, Ef.SIGNAL);
+        Ef.fill(ctx, sx + STAGE_W - 8 - 3, sy + 10, 3, 3, pal.signal());
         Ef.text(ctx, badge, sx + STAGE_W - 8 - 3 - 4 - Ef.textWidth(badge), sy + 7, pal.ink2());
 
         String current = currentLabel(runtime);
@@ -266,21 +266,21 @@ public class ActionPreviewScreen extends GenericScreen {
 
         boolean hot = hovered == HOVER_BACK;
         float wipe = hot ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
-        Ef.wipeCut(ctx, px + BACK_X, py + BACK_Y, BACK_W, BACK_H, pal.chip(), Ef.SIGNAL, wipe,
-                Ef.CUT_WIDE, Ef.Corner.BR);
+        Ef.wipeCut(ctx, px + BACK_X, py + BACK_Y, BACK_W, BACK_H, pal.chip(), pal.signal(), wipe,
+                pal.cutWide(), Ef.Corner.BR);
         String label = "< 返回";
         Ef.text(ctx, label, px + BACK_X + (BACK_W - Ef.textWidth(label)) / 2,
-                py + BACK_Y + (BACK_H - Ef.lineH()) / 2, hot ? Ef.ON_SIGNAL : pal.ink());
+                py + BACK_Y + (BACK_H - Ef.lineH()) / 2, hot ? pal.onSignal() : pal.ink());
     }
 
     private void paintNavButton(VDrawContext ctx, int x, int y, String glyph, boolean enabled, boolean hot) {
         float wipe = hot && enabled ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
         if (enabled && hot) {
-            Ef.wipeCut(ctx, x, y, NAV_SIZE, NAV_SIZE, pal.chip(), Ef.SIGNAL, wipe, Ef.CUT, Ef.Corner.BR);
+            Ef.wipeCut(ctx, x, y, NAV_SIZE, NAV_SIZE, pal.chip(), pal.signal(), wipe, pal.cut(), Ef.Corner.BR);
         } else {
-            Ef.cutFill(ctx, x, y, NAV_SIZE, NAV_SIZE, pal.chip(), Ef.CUT, Ef.Corner.BR);
+            Ef.cutFill(ctx, x, y, NAV_SIZE, NAV_SIZE, pal.chip(), pal.cut(), Ef.Corner.BR);
         }
-        int ink = !enabled ? 0xFF5C5C5C : (hot ? Ef.ON_SIGNAL : pal.ink());
+        int ink = !enabled ? 0xFF5C5C5C : (hot ? pal.onSignal() : pal.ink());
         Ef.text(ctx, glyph, x + (NAV_SIZE - Ef.textWidth(glyph)) / 2,
                 y + (NAV_SIZE - Ef.lineH()) / 2, ink);
     }
@@ -306,13 +306,13 @@ public class ActionPreviewScreen extends GenericScreen {
             boolean active = category == cats[i];
             boolean hot = hovered == HOVER_TAB + i;
             if (active) {
-                Ef.cutFill(ctx, tx, ty, TAB_W, TAB_H, Ef.SIGNAL, 2, Ef.Corner.BR);
+                Ef.cutFill(ctx, tx, ty, TAB_W, TAB_H, pal.signal(), 2, Ef.Corner.BR);
             } else if (hot) {
                 Ef.cutFill(ctx, tx, ty, TAB_W, TAB_H, pal.chip(), 2, Ef.Corner.BR);
             } else {
                 Ef.cutFill(ctx, tx, ty, TAB_W, TAB_H, pal.panel(), 2, Ef.Corner.BR);
             }
-            int ink = active ? Ef.ON_SIGNAL : (hot ? pal.ink() : pal.ink2());
+            int ink = active ? pal.onSignal() : (hot ? pal.ink() : pal.ink2());
             Ef.text(ctx, labels[i], tx + (TAB_W - Ef.textWidth(labels[i])) / 2,
                     ty + (TAB_H - Ef.lineH()) / 2, ink);
         }
@@ -339,14 +339,14 @@ public class ActionPreviewScreen extends GenericScreen {
             boolean hot = hovered == HOVER_ROW + i;
             float wipe = hot ? Ef.mech(Ef.progress(hoverStart, WIPE_MS)) : 0.0F;
             if (active) {
-                Ef.cutFill(ctx, rx, ry, LIST_W, ROW_H, Ef.SIGNAL, Ef.CUT, Ef.Corner.BR);
+                Ef.cutFill(ctx, rx, ry, LIST_W, ROW_H, pal.signal(), pal.cut(), Ef.Corner.BR);
             } else if (hot) {
-                Ef.wipeCut(ctx, rx, ry, LIST_W, ROW_H, pal.chip(), Ef.alpha(Ef.SIGNAL, 0.18F), wipe,
-                        Ef.CUT, Ef.Corner.BR);
+                Ef.wipeCut(ctx, rx, ry, LIST_W, ROW_H, pal.chip(), Ef.alpha(pal.signal(), 0.18F), wipe,
+                        pal.cut(), Ef.Corner.BR);
             } else {
-                Ef.cutFill(ctx, rx, ry, LIST_W, ROW_H, pal.chip(), Ef.CUT, Ef.Corner.BR);
+                Ef.cutFill(ctx, rx, ry, LIST_W, ROW_H, pal.chip(), pal.cut(), Ef.Corner.BR);
             }
-            int ink = active ? Ef.ON_SIGNAL : (hot ? pal.ink() : pal.ink2());
+            int ink = active ? pal.onSignal() : (hot ? pal.ink() : pal.ink2());
             String no = String.format(Locale.ROOT, "%02d", index + 1);
             Ef.text(ctx, no, rx + 5, ry + (ROW_H - Ef.lineH()) / 2, active ? 0x99161616 : 0xFF6A6A6A);
             String label = Ef.ellipsis(option.label(), LIST_W - 34);
@@ -354,7 +354,7 @@ public class ActionPreviewScreen extends GenericScreen {
             if (option.variant()) {
                 // 服装预设是静态覆盖层，没有时长；用一个小方块和动作区分开
                 Ef.fill(ctx, rx + LIST_W - 8, ry + ROW_H / 2 - 2, 3, 3,
-                        active ? Ef.ON_SIGNAL : Ef.SIGNAL);
+                        active ? pal.onSignal() : pal.signal());
             }
         }
     }

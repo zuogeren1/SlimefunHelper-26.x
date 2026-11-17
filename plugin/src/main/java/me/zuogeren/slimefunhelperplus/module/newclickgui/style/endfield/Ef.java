@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -7,6 +7,8 @@ import java.util.Map;
 import me.matl114.renderer.TextRenderers;
 import me.matl114.renderer.text.TextDrawer;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyle;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyles;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
@@ -60,9 +62,22 @@ public final class Ef {
         TL
     }
 
-    /** 一套主题的纸面/墨色。深色不是浅色的反相，是另一组独立取值。 */
+    /** 宽体拉丁的横向拉伸：界面字体没有宽度轴，靠这一步做宽体。 */
+    private static final float WIDE = 1.2F;
+
+    /**
+     * 一套主题在一种明暗下的完整样式：纸面/墨色 + 强调色 + 命令栏 + 三色条 + 切角 + 宽体拉伸。
+     *
+     * <p>深色不是浅色的反相，是另一组独立取值。界面代码只认这些语义、不认具体色值，
+     * 所以换一套外观时改 {@link GuiStyle} 里的取值即可，上层一行都不用动。
+     */
     public record Palette(
-            int paper, int panel, int ink, int ink2, int rule, int chip, int trace, int tagBg, int tagFg) {
+            int paper, int panel, int ink, int ink2, int rule, int chip, int trace, int tagBg, int tagFg,
+            int signal, int onSignal,
+            int barBg, int barInk, int barInk2, int barRule,
+            int triA, int triC,
+            int cut, int cutWide, int cutPanel,
+            float wide) {
         /** 只按比例淡掉背景类色值；文字、trace 保持不透明，窗口半透明时字还得看得清。 */
         public Palette withAlpha(double factor) {
             if (factor >= 0.999D) {
@@ -78,7 +93,19 @@ public final class Ef {
                     fade(chip, alpha),
                     trace,
                     fade(tagBg, alpha),
-                    tagFg);
+                    tagFg,
+                    signal,
+                    onSignal,
+                    barBg,
+                    barInk,
+                    barInk2,
+                    barRule,
+                    triA,
+                    triC,
+                    cut,
+                    cutWide,
+                    cutPanel,
+                    wide);
         }
 
         /**
@@ -86,7 +113,7 @@ public final class Ef {
          * 浅色主题的 trace 退成墨色（纸上黄线看不见），此时用纸色反白。
          */
         public int onTrace() {
-            return trace == ink ? paper : ON_SIGNAL;
+            return trace == ink ? paper : onSignal;
         }
 
         private static int fade(int color, int alpha) {
@@ -94,14 +121,29 @@ public final class Ef {
         }
     }
 
-    public static final Palette DARK =
-            new Palette(0xFF191919, 0xFF222222, 0xFFEDEDED, 0xFFA3A3A3, 0xFF353535, 0xFF2E2E2E, SIGNAL, 0xFF3A3A3A, 0xFFEDEDED);
+    public static final Palette DARK = new Palette(
+            0xFF191919, 0xFF222222, 0xFFEDEDED, 0xFFA3A3A3, 0xFF353535, 0xFF2E2E2E, SIGNAL, 0xFF3A3A3A, 0xFFEDEDED,
+            SIGNAL, ON_SIGNAL,
+            BAR_BG, BAR_INK, BAR_INK2, BAR_RULE,
+            TRI_A, TRI_C,
+            CUT, CUT_WIDE, CUT_PANEL,
+            WIDE);
 
-    public static final Palette LIGHT =
-            new Palette(0xFFF4F4F2, 0xFFFFFFFF, 0xFF161616, 0xFF5C5C5C, 0xFFD9D9D6, 0xFFE4E4E0, 0xFF161616, 0xFF161616, 0xFFFFFFFF);
+    public static final Palette LIGHT = new Palette(
+            0xFFF4F4F2, 0xFFFFFFFF, 0xFF161616, 0xFF5C5C5C, 0xFFD9D9D6, 0xFFE4E4E0, 0xFF161616, 0xFF161616, 0xFFFFFFFF,
+            SIGNAL, ON_SIGNAL,
+            BAR_BG, BAR_INK, BAR_INK2, BAR_RULE,
+            TRI_A, TRI_C,
+            CUT, CUT_WIDE, CUT_PANEL,
+            WIDE);
+
+    /** 当前生效的风格：由配置项 {@code new-click-gui.style} 决定，解析不出来时退回默认那套。 */
+    public static GuiStyle style() {
+        return GuiStyles.getOrDefault(NewClickGui.style());
+    }
 
     public static Palette palette(boolean light) {
-        return light ? LIGHT : DARK;
+        return style().palette(light);
     }
 
     // ------------------------------------------------------------------ 颜色

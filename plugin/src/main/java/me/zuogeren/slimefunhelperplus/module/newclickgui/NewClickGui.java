@@ -6,12 +6,15 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
+import me.matl114.hacks.utils.config.StringEnum;
 import me.matl114.managers.config.KeyBindRef;
+import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.managers.Configs;
 import me.zuogeren.slimefunhelperplus.config.PluginConfig;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldClickGuiScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldClickGuiScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyles;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -30,7 +33,7 @@ import net.minecraft.client.Minecraft;
  */
 public class NewClickGui extends BaseModule {
     private static NewClickGui instance;
-    private static EndfieldSettings settings;
+    private static Settings settings;
 
     private final ModulePath base;
 
@@ -48,6 +51,9 @@ public class NewClickGui extends BaseModule {
 
     /** 字体排版优化：按前缀量宽、行高跟随字号，避免逐字取整累积出忽宽忽窄的字距。 */
     public final FlagRef fontOptimize;
+
+    /** 界面风格：整套切换（强调色、切角、宽体拉伸一起换），明暗仍在风格内部单独切。 */
+    public final NBTRef<StringEnum> style;
 
     public NewClickGui() {
         super("NewClickGui");
@@ -71,6 +77,10 @@ public class NewClickGui extends BaseModule {
                 .defaultValue(true)
                 .build();
 
+        this.style = builder(base.add("style"), StringEnum.class)
+                .defaultValue(new StringEnum(GuiStyles.ENDFIELD.toString(), GuiStyles.configValues()))
+                .build();
+
         this.openKey = hotkey(base.add("open-key"))
                 .defaultValue(new MultiKeyBind())
                 .registerHotkey(HotKeyUtils.wrapAsHandler((Runnable) this::openGui))
@@ -82,9 +92,9 @@ public class NewClickGui extends BaseModule {
         return ELEMENT_FACTORY;
     }
 
-    public static EndfieldSettings settings() {
+    public static Settings settings() {
         if (settings == null) {
-            settings = new EndfieldSettings(PluginConfig.get());
+            settings = new Settings(PluginConfig.get());
         }
         return settings;
     }
@@ -107,6 +117,15 @@ public class NewClickGui extends BaseModule {
         return instance == null || instance.animations == null || instance.animations.get();
     }
 
+    /** 当前风格 id；没有实例时给默认那套，界面至少是完整的。 */
+    public static String style() {
+        if (instance == null || instance.style == null) {
+            return GuiStyles.ENDFIELD.toString();
+        }
+        StringEnum value = instance.style.get();
+        return value == null ? GuiStyles.ENDFIELD.toString() : value.value();
+    }
+
     /** 字体排版优化是否打开；没有实例时按打开处理（默认就是优化过的排版）。 */
     public static boolean fontOptimize() {
         return instance == null || instance.fontOptimize == null || instance.fontOptimize.get();
@@ -123,7 +142,7 @@ public class NewClickGui extends BaseModule {
         if (minecraft == null) {
             return;
         }
-        ScreenAccess.of(new EndfieldClickGuiScreen(settings())).openFromCurrent();
+        ScreenAccess.of(GuiStyles.getOrDefault(style()).openMain(settings())).openFromCurrent();
     }
 
     private void openGui() {

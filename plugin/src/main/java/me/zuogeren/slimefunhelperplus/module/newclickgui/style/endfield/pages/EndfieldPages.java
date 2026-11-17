@@ -1,6 +1,6 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 import net.minecraft.client.gui.screens.Screen;
 
 /**
@@ -12,7 +12,7 @@ import net.minecraft.client.gui.screens.Screen;
 public final class EndfieldPages {
     private EndfieldPages() {}
 
-    public static Screen create(String key, EndfieldSettings settings) {
+    public static Screen create(String key, Settings settings) {
         return switch (key) {
             case "Friends" -> new FriendsPage(settings);
             case "CmdMacros" -> new MacrosPage(settings);

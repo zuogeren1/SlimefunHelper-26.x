@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -25,12 +25,14 @@ import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldClickGuiScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldTabBar;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.FieldEditor;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyle;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.GuiStyles;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EfWidget;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldClickGuiScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldTabBar;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.FieldEditor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -69,11 +71,10 @@ public class ConfigPage extends GenericScreen {
     private static final int VALUE_W = 56;
     /** 枚举下拉里一行候选的高度。 */
     private static final int DROP_ROW_H = 13;
-    private static final float WIDE = 1.2F;
     private static final String TITLE = "全配置";
     private static final String LATIN = "CONFIG";
 
-    private final EndfieldSettings settings;
+    private final Settings settings;
 
     /** 配置根清单：每份配置文件一项，顺序沿用注册表。 */
     private final List<Config> roots = new ArrayList<>();
@@ -126,7 +127,7 @@ public class ConfigPage extends GenericScreen {
     /** 一块矩形：值槽与下拉面板共用，绘制与命中取同一份几何。 */
     private record Rect(int x, int y, int w, int h) {}
 
-    public ConfigPage(EndfieldSettings settings) {
+    public ConfigPage(Settings settings) {
         super(Component.empty(), 0, 0);
         this.settings = settings;
     }
@@ -675,7 +676,7 @@ public class ConfigPage extends GenericScreen {
         int boxW = searchWidth();
         boolean focused = searchBox != null && searchBox.isFocused();
         Ef.fill(ctx, boxX, y + 4, boxW, 13, p.paper());
-        Ef.cutOutline(ctx, boxX, y + 4, boxW, 13, focused ? p.ink() : p.rule(), Ef.CUT);
+        Ef.cutOutline(ctx, boxX, y + 4, boxW, 13, focused ? p.ink() : p.rule(), p.cut());
         if (focused) {
             // 聚焦时下沿换 2px 的当前位置线，颜色跟主题走
             Ef.fill(ctx, boxX + 1, y + 15, boxW - 2, 2, p.trace());
@@ -719,23 +720,23 @@ public class ConfigPage extends GenericScreen {
             if (y + RAIL_CHIP_H >= bodyTop() && y <= bodyBottom()) {
                 boolean current = config == selected;
                 boolean hover = mouseX >= chipX && mouseX <= chipX + chipW && mouseY >= y && mouseY < y + RAIL_CHIP_H;
-                int bg = current ? Ef.SIGNAL : (hover ? Ef.mix(p.chip(), p.ink(), 0.12F) : p.chip());
-                int fg = current ? Ef.ON_SIGNAL : p.ink();
-                Ef.cutFill(ctx, chipX, y, chipW, RAIL_CHIP_H, bg, Ef.CUT_WIDE);
+                int bg = current ? p.signal() : (hover ? Ef.mix(p.chip(), p.ink(), 0.12F) : p.chip());
+                int fg = current ? p.onSignal() : p.ink();
+                Ef.cutFill(ctx, chipX, y, chipW, RAIL_CHIP_H, bg, p.cutWide());
 
                 String number = String.valueOf(itemsOf(config).size());
                 int numberW = Ef.textWidth(number);
                 // 切角会啃掉右下角，右侧数字必须让开切角宽度
-                int nameW = Math.max(20, chipW - 10 - numberW - Ef.CUT_WIDE);
+                int nameW = Math.max(20, chipW - 10 - numberW - p.cutWide());
                 Ef.text(ctx, Ef.ellipsis(rootName(config), nameW), chipX + 5, y + 3, fg);
-                Ef.text(ctx, number, chipX + chipW - Ef.CUT_WIDE - 4 - numberW, y + 3, current ? Ef.ON_SIGNAL : p.ink2());
+                Ef.text(ctx, number, chipX + chipW - p.cutWide() - 4 - numberW, y + 3, current ? p.onSignal() : p.ink2());
             }
             y += RAIL_STEP;
         }
 
         // 表头最后画：左列滚动时从它底下穿过去，不用再套一层裁剪
         Ef.fill(ctx, x, bodyTop(), Math.max(1, railW - 1), railRowsTop() - bodyTop(), p.paper());
-        Ef.trackedWide(ctx, "// CONFIGS", x + 8, bodyTop() + 6, p.ink2(), 1, WIDE);
+        Ef.trackedWide(ctx, "// CONFIGS", x + 8, bodyTop() + 6, p.ink2(), 1, p.wide());
         int titleY = bodyTop() + 6 + Ef.lineH() + 2;
         Ef.text(ctx, "配置文件", x + 8, titleY, p.ink());
         String count = roots.size() + " 个";
@@ -773,7 +774,7 @@ public class ConfigPage extends GenericScreen {
         // 标题块最后画：设置项滚上来时从它底下穿过去，不用再套一层裁剪
         int top = bodyTop() + 6;
         Ef.fill(ctx, winX + railW, bodyTop(), winW - railW, listTop() - bodyTop(), p.paper());
-        Ef.trackedWide(ctx, Ef.ellipsisWide("// " + codeOf(selected), itemsWidth(), 1, WIDE), ix, top, p.ink2(), 1, WIDE);
+        Ef.trackedWide(ctx, Ef.ellipsisWide("// " + codeOf(selected), itemsWidth(), 1, p.wide()), ix, top, p.ink2(), 1, p.wide());
         int titleY = top + Ef.lineH() + 2;
         List<Item> items = all();
         String meta = items.size() + " 项  │  " + sectionsOf(items) + " 组";
@@ -789,8 +790,8 @@ public class ConfigPage extends GenericScreen {
         String section = line.section();
         String mark = section.isEmpty() ? "MAIN" : leaf(section).replace('-', ' ').toUpperCase(Locale.ROOT);
         String eyebrow = "// " + mark;
-        Ef.trackedWide(ctx, eyebrow, ix, line.y() + 7, p.ink2(), 1, WIDE);
-        int titleX = ix + Math.max(72, Ef.trackedWideWidth(eyebrow, 1, WIDE) + 10);
+        Ef.trackedWide(ctx, eyebrow, ix, line.y() + 7, p.ink2(), 1, p.wide());
+        int titleX = ix + Math.max(72, Ef.trackedWideWidth(eyebrow, 1, p.wide()) + 10);
         int titleW = Math.max(20, itemsWidth() - (titleX - ix));
         Ef.text(ctx, Ef.ellipsis(sectionTitle(section), titleW), titleX, line.y() + 7, p.ink());
         Ef.rule(ctx, ix, line.y() + SECTION_H - 5, itemsWidth(), p.rule());
@@ -841,7 +842,7 @@ public class ConfigPage extends GenericScreen {
             int chipX = right - width;
             boolean open = enumKey(item).equals(dropdownKey);
             boolean hot = open || (mouseX >= chipX && mouseX <= right && mouseY >= y + 3 && mouseY < y + 15);
-            Ef.cutFill(ctx, chipX, y + 3, width, 12, hot ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), Ef.CUT);
+            Ef.cutFill(ctx, chipX, y + 3, width, 12, hot ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), p.cut());
             Ef.text(ctx, text, chipX + 5, y + 5, p.ink());
         } else if (ref instanceof StringRef) {
             paintValue(ctx, p, item, y, mouseX, mouseY);
@@ -902,7 +903,7 @@ public class ConfigPage extends GenericScreen {
         }
         Rect box = dropdownRect(line, options.size());
         Ef.fill(ctx, box.x(), box.y(), box.w(), box.h(), p.panel());
-        Ef.cutOutline(ctx, box.x(), box.y(), box.w(), box.h(), p.ink(), Ef.CUT);
+        Ef.cutOutline(ctx, box.x(), box.y(), box.w(), box.h(), p.ink(), p.cut());
 
         ConfigEnum current = currentEnum(line.item().ref());
         for (int i = 0; i < options.size(); i++) {
@@ -928,9 +929,9 @@ public class ConfigPage extends GenericScreen {
     private void paintStep(VDrawContext ctx, Ef.Palette p, int x, int y, String glyph, int mouseX, int mouseY) {
         boolean hot = mouseX >= x && mouseX < x + BTN && mouseY >= y + 2 && mouseY < y + 2 + BTN;
         if (hot) {
-            Ef.cutFill(ctx, x, y + 2, BTN, BTN, p.chip(), Ef.CUT);
+            Ef.cutFill(ctx, x, y + 2, BTN, BTN, p.chip(), p.cut());
         }
-        Ef.cutOutline(ctx, x, y + 2, BTN, BTN, hot ? p.ink() : p.rule(), Ef.CUT);
+        Ef.cutOutline(ctx, x, y + 2, BTN, BTN, hot ? p.ink() : p.rule(), p.cut());
         Ef.text(ctx, glyph, x + 4, y + 4, hot ? p.ink() : p.ink2());
     }
 
@@ -1080,7 +1081,8 @@ public class ConfigPage extends GenericScreen {
         if (hit == null || "Config".equals(hit)) {
             return false;
         }
-        Screen next = "Module".equals(hit) ? new EndfieldClickGuiScreen(settings) : EndfieldPages.create(hit, settings);
+        GuiStyle style = GuiStyles.getOrDefault(NewClickGui.style());
+        Screen next = "Module".equals(hit) ? style.openMain(settings) : style.openPage(hit, settings);
         if (next != null) {
             ScreenAccess.of(this).switchToScreen(next);
         }

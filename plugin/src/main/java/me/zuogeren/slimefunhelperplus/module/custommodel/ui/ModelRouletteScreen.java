@@ -13,8 +13,8 @@ import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
 import me.zuogeren.slimefunhelperplus.module.custommodel.ModelCatalog;
 import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ui.Ef;
+import me.zuogeren.slimefunhelperplus.module.custommodel.ui.EfWidget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
@@ -67,6 +67,9 @@ public class ModelRouletteScreen extends GenericScreen {
             return new Slot("", "返回", false, "", true);
         }
     }
+
+    /** 轮盘固定用深色样式：它铺在世界画面上，浅色纸面会把角色挡掉。 */
+    private final Ef.Palette pal = Ef.palette(false);
 
     private final List<ModelRuntime.ExtraOption> options = new ArrayList<>();
     /** 主轮盘：服装预设、没有分类的动作、每个分类一个入口。 */
@@ -286,7 +289,7 @@ public class ModelRouletteScreen extends GenericScreen {
             boolean hot = slice[0] == hoveredSlot;
             int color = RouletteTheme.SLICE;
             if (active) {
-                color = hot ? RouletteTheme.SLICE_ACTIVE_HOVER : RouletteTheme.SLICE_ACTIVE;
+                color = hot ? RouletteTheme.sliceActiveHover(pal) : RouletteTheme.sliceActive(pal);
             }
             ctx.fill(slice[2], slice[1], slice[3], slice[1] + 1, color);
         }
@@ -297,13 +300,13 @@ public class ModelRouletteScreen extends GenericScreen {
         if (!isActive(runtime, slots.get(base + hoveredSlot))) {
             for (int[] slice : slices) {
                 if (slice[0] == hoveredSlot) {
-                    ctx.fill(slice[2], slice[1], slice[3], slice[1] + 1, RouletteTheme.SLICE_HOVER);
+                    ctx.fill(slice[2], slice[1], slice[3], slice[1] + 1, RouletteTheme.sliceHover(pal));
                 }
             }
         }
         for (int[] lip : lips) {
             if (lip[0] == hoveredSlot) {
-                ctx.fill(lip[2], lip[1], lip[3], lip[1] + 1, RouletteTheme.SLICE_LIP);
+                ctx.fill(lip[2], lip[1], lip[3], lip[1] + 1, RouletteTheme.sliceLip(pal));
             }
         }
     }
@@ -322,7 +325,7 @@ public class ModelRouletteScreen extends GenericScreen {
             double angle = RouletteTheme.FIRST_ANGLE + slot * RouletteTheme.SLOT_ANGLE;
             int labelX = centerX + (int) Math.round(RouletteTheme.LABEL_R * scale * Math.cos(angle));
             int labelY = centerY + (int) Math.round(RouletteTheme.LABEL_R * scale * Math.sin(angle));
-            int ink = RouletteTheme.labelInk(isActive(runtime, entry));
+            int ink = RouletteTheme.labelInk(pal, isActive(runtime, entry));
             List<String> lines = wrapLabel(entry.label(), maxWidth);
             int top = labelY - lines.size() * rowH / 2;
             for (String line : lines) {
@@ -374,17 +377,17 @@ public class ModelRouletteScreen extends GenericScreen {
         int y = centerY - size / 2;
         Ef.Corner corner = direction < 0 ? Ef.Corner.TL : Ef.Corner.BR;
         if (enabled && hot) {
-            Ef.cutFill(ctx, x, y, size, size, RouletteTheme.ARROW_HOVER, Ef.CUT_WIDE, corner);
+            Ef.cutFill(ctx, x, y, size, size, RouletteTheme.arrowHover(pal), pal.cutWide(), corner);
         } else if (enabled) {
-            Ef.cutFill(ctx, x, y, size, size, RouletteTheme.ARROW_FILL, Ef.CUT_WIDE, corner);
+            Ef.cutFill(ctx, x, y, size, size, RouletteTheme.ARROW_FILL, pal.cutWide(), corner);
         }
         Ef.cutOutline(ctx, x, y, size, size,
-                enabled ? RouletteTheme.ARROW_EDGE : RouletteTheme.ARROW_EDGE_DEAD, Ef.CUT_WIDE, corner);
+                enabled ? RouletteTheme.ARROW_EDGE : RouletteTheme.ARROW_EDGE_DEAD, pal.cutWide(), corner);
         int ink = RouletteTheme.ARROW_INK;
         if (!enabled) {
             ink = RouletteTheme.ARROW_INK_DEAD;
         } else if (hot) {
-            ink = RouletteTheme.TEXT_ACTIVE;
+            ink = RouletteTheme.textActive(pal);
         }
         Ef.text(ctx, glyph, x + (size - Ef.textWidth(glyph)) / 2 + 1, y + (size - Ef.lineH()) / 2 + 1, ink);
     }
@@ -413,7 +416,7 @@ public class ModelRouletteScreen extends GenericScreen {
         // 右对齐遇上中文会量宽不准、压到屏幕外，改成左对齐第三行
         String current = Component.translatable("custom-model.roulette.current", currentLabel(runtime)).getString();
         Ef.text(ctx, Ef.ellipsis(current, columnWidth), PAD, 32,
-                RouletteTheme.TEXT_ACTIVE);
+                RouletteTheme.textActive(pal));
     }
 
     private void paintFooter(VDrawContext ctx) {

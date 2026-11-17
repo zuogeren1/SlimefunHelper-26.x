@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield;
 
 import java.util.function.Consumer;
 import me.matl114.accessors.gui.ScreenAccess;

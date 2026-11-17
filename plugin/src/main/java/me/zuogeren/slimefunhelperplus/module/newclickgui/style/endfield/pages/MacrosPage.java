@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -7,9 +7,9 @@ import me.matl114.hacks.modules.task.BindCommand;
 import me.matl114.hacks.modules.task.EventCommand;
 import me.matl114.hacks.utils.config.PrimitivePairList;
 import me.matl114.versioned.api.VDrawContext;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 
 /**
  * 「宏」页：绑定命令与事件命令两个模块的配置合在一起，按各自的配置路径分节。
@@ -42,7 +42,7 @@ public class MacrosPage extends EndfieldModuleConfigScreen {
         return out;
     }
 
-    public MacrosPage(EndfieldSettings settings) {
+    public MacrosPage(Settings settings) {
         super("MACROS", "宏", null, MacrosPage::refs, settings, "CmdMacros");
     }
 
@@ -97,9 +97,9 @@ public class MacrosPage extends EndfieldModuleConfigScreen {
         // 模块停着却还留着条目：这些宏不会触发，数字垫上强调色
         boolean idle = !enabled && count > 0;
         if (idle) {
-            Ef.fill(ctx, numberX - 3, textY - 2, numberWidth + 6, 12, Ef.SIGNAL);
+            Ef.fill(ctx, numberX - 3, textY - 2, numberWidth + 6, 12, p.signal());
         }
-        Ef.trackedWide(ctx, number, numberX, textY, idle ? Ef.ON_SIGNAL : p.ink(), 0, NUMBER_STRETCH);
+        Ef.trackedWide(ctx, number, numberX, textY, idle ? p.onSignal() : p.ink(), 0, NUMBER_STRETCH);
         Ef.text(ctx, "条", numberX + numberWidth + 4, textY, p.ink2());
 
         String state = enabled ? "启用" : "停用";

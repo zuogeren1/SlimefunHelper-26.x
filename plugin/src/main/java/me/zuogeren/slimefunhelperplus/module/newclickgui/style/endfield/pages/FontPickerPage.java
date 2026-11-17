@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,9 +10,9 @@ import me.matl114.hacks.modules.task.TextFont;
 import me.matl114.renderer.text.LocalFontTextDrawer;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EfWidget;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EfWidget;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
@@ -32,14 +32,13 @@ public class FontPickerPage extends GenericScreen {
     private static final int FOOT_H = 14;
     private static final int ROW_H = 18;
     private static final int PAD = 14;
-    private static final float WIDE = 1.2F;
     private static final String TITLE = "系统字体";
     private static final String LATIN = "SYSTEM FONTS";
 
     /** 扫出来的字体：扫一次就够，字体目录在游戏运行期间不会变。 */
     private static List<LocalFontTextDrawer.FontFile> scanned;
 
-    private final EndfieldSettings settings;
+    private final Settings settings;
 
     private String query = "";
     private int scroll;
@@ -65,7 +64,7 @@ public class FontPickerPage extends GenericScreen {
 
     private record Row(int y, LocalFontTextDrawer.FontFile font) {}
 
-    public FontPickerPage(EndfieldSettings settings) {
+    public FontPickerPage(Settings settings) {
         super(Component.empty(), 0, 0);
         this.settings = settings;
     }
@@ -234,24 +233,25 @@ public class FontPickerPage extends GenericScreen {
     }
 
     private void paintBar(VDrawContext ctx, int mouseX, int mouseY) {
-        Ef.fill(ctx, winX, winY, winW, BAR_H, Ef.BAR_BG);
-        Ef.fill(ctx, winX, winY, winW, 3, Ef.SIGNAL);
+        Ef.Palette p = pal();
+        Ef.fill(ctx, winX, winY, winW, BAR_H, p.barBg());
+        Ef.fill(ctx, winX, winY, winW, 3, p.signal());
 
         boolean backHot = mouseX >= winX + 6 && mouseX <= winX + 40 && mouseY >= winY + 5 && mouseY <= winY + 17;
         if (backHot) {
-            Ef.cutFill(ctx, winX + 6, winY + 5, 34, 12, Ef.BAR_RULE, Ef.CUT);
+            Ef.cutFill(ctx, winX + 6, winY + 5, 34, 12, p.barRule(), p.cut());
         } else {
-            Ef.cutOutline(ctx, winX + 6, winY + 5, 34, 12, Ef.BAR_INK2, Ef.CUT);
+            Ef.cutOutline(ctx, winX + 6, winY + 5, 34, 12, p.barInk2(), p.cut());
         }
-        Ef.text(ctx, "< 返回", winX + 9, winY + 6, Ef.BAR_INK);
+        Ef.text(ctx, "< 返回", winX + 9, winY + 6, p.barInk());
 
         int titleX = winX + 48;
-        Ef.text(ctx, TITLE, titleX, winY + 6, Ef.BAR_INK);
-        Ef.trackedWide(ctx, LATIN, titleX + Ef.textWidth(TITLE) + 8, winY + 7, Ef.BAR_INK2, 1, WIDE);
+        Ef.text(ctx, TITLE, titleX, winY + 6, p.barInk());
+        Ef.trackedWide(ctx, LATIN, titleX + Ef.textWidth(TITLE) + 8, winY + 7, p.barInk2(), 1, p.wide());
 
         String count = shown().size() + " / " + fonts().size();
         if (winW >= 360) {
-            Ef.text(ctx, count, winX + winW - 8 - Ef.textWidth(count), winY + 6, Ef.BAR_INK2);
+            Ef.text(ctx, count, winX + winW - 8 - Ef.textWidth(count), winY + 6, p.barInk2());
         }
     }
 
@@ -263,7 +263,7 @@ public class FontPickerPage extends GenericScreen {
         int boxW = searchWidth();
         boolean focused = searchBox != null && searchBox.isFocused();
         Ef.fill(ctx, contentLeft, y + 4, boxW, 13, p.paper());
-        Ef.cutOutline(ctx, contentLeft, y + 4, boxW, 13, focused ? p.ink() : p.rule(), Ef.CUT);
+        Ef.cutOutline(ctx, contentLeft, y + 4, boxW, 13, focused ? p.ink() : p.rule(), p.cut());
         if (focused) {
             Ef.fill(ctx, contentLeft + 1, y + 15, boxW - 2, 2, p.trace());
         }
@@ -321,7 +321,7 @@ public class FontPickerPage extends GenericScreen {
             Ef.fill(ctx, contentLeft - 4, row.y, 3, ROW_H, p.trace());
         } else if (current) {
             // 当前生效的字体：不靠悬停也看得出来
-            Ef.fill(ctx, contentLeft - 4, row.y, 3, ROW_H, Ef.SIGNAL);
+            Ef.fill(ctx, contentLeft - 4, row.y, 3, ROW_H, p.signal());
         }
 
         int chipW = current ? Ef.textWidth("当前") + 10 : 0;
@@ -333,8 +333,8 @@ public class FontPickerPage extends GenericScreen {
             Ef.text(ctx, fileNameOf(path), metaX, row.y + 5, p.ink2());
         }
         if (current) {
-            Ef.cutFill(ctx, contentLeft + contentWidth - chipW, row.y + 3, chipW, 11, Ef.SIGNAL, Ef.CUT);
-            Ef.text(ctx, "当前", contentLeft + contentWidth - chipW + 5, row.y + 5, Ef.ON_SIGNAL);
+            Ef.cutFill(ctx, contentLeft + contentWidth - chipW, row.y + 3, chipW, 11, p.signal(), p.cut());
+            Ef.text(ctx, "当前", contentLeft + contentWidth - chipW + 5, row.y + 5, p.onSignal());
         }
         Ef.rule(ctx, contentLeft - 4, row.y + ROW_H - 1, contentWidth + 8, Ef.alpha(p.rule(), 0.55F));
     }

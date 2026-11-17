@@ -1,4 +1,4 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -13,9 +13,9 @@ import me.matl114.hacks.modules.HackModules;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.versioned.api.VDrawContext;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Ef;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
@@ -59,7 +59,7 @@ public class HotkeysPage extends EndfieldModuleConfigScreen {
         return all;
     }
 
-    public HotkeysPage(EndfieldSettings settings) {
+    public HotkeysPage(Settings settings) {
         super("HOTKEYS", "快捷键", null, HotkeysPage::all, settings, "Hotkeys");
     }
 
@@ -97,7 +97,7 @@ public class HotkeysPage extends EndfieldModuleConfigScreen {
             searchBox.setTextColor(p.ink());
         }
         Ef.fill(ctx, x, y + 4, boxW, 13, p.panel());
-        Ef.cutOutline(ctx, x, y + 4, boxW, 13, p.rule(), Ef.CUT);
+        Ef.cutOutline(ctx, x, y + 4, boxW, 13, p.rule(), p.cut());
         Ef.tracked(ctx, "//", x + 4, y + 7, p.ink2(), 1);
         String shown = shownCount() + " / " + all().size() + " 个键位";
         Ef.text(ctx, shown, x + boxW + 12, y + 7, p.ink2());

@@ -1,11 +1,11 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.List;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.combat.TargetSelector;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 
 /**
  * 「好友」页：宿主把好友/名单相关的配置挂在 {@link TargetSelector} 上，这一页就是把它们排成新界面的表单。
@@ -17,7 +17,7 @@ public class FriendsPage extends EndfieldModuleConfigScreen {
         return TargetSelector.INSTANCE.getEditableConfig();
     }
 
-    public FriendsPage(EndfieldSettings settings) {
+    public FriendsPage(Settings settings) {
         super("FRIENDS", "好友", null, FriendsPage::refs, settings, "Friends");
     }
 

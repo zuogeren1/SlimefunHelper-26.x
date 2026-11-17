@@ -1,10 +1,10 @@
-package me.zuogeren.slimefunhelperplus.module.newclickgui.ui.pages;
+package me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages;
 
 import java.util.List;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ClickGui;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldModuleConfigScreen;
-import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.EndfieldSettings;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 
 /**
  * 「GUI」页：宿主 ClickGui 自己的设置（风格、按键大小、编辑器样式、开关菜单的键位……）。
@@ -17,7 +17,7 @@ public class GuiSettingsPage extends EndfieldModuleConfigScreen {
         return ClickGui.INSTANCE.getEditableConfig();
     }
 
-    public GuiSettingsPage(EndfieldSettings settings) {
+    public GuiSettingsPage(Settings settings) {
         super("GUI SETTINGS", "GUI 设置", null, GuiSettingsPage::refs, settings, "GuiSettings");
     }
 
