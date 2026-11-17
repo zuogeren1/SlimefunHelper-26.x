@@ -21,6 +21,9 @@ import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Holder;
+import me.matl114.hacks.utils.config.ItemStackTemplate;
+import me.matl114.hacks.InvTasks;
+import net.minecraft.core.registries.BuiltInRegistries;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.gui.Constants;
 import me.matl114.hacks.utils.config.StringEnum;
@@ -292,6 +295,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 这一帧鼠标停在哪一条格式化串的颜色编辑器按钮上：说明框要带实时预览。 */
     private StringFormat editorHover;
+
+    /** 这一帧鼠标停在物品模板的编辑按钮上。 */
+    private boolean itemTemplateHover;
 
 
     /** 没有显式约束的数值，其推导区间只算一次，避免跨数量级时轨道跳档；复合数值按分量分开记。 */
@@ -755,6 +761,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             // toString 是对象身份，编辑框里要的是格式串本身
             return format.formatString();
         }
+        if (raw instanceof ItemStackTemplate template) {
+            return template.itemId().toString();
+        }
         return raw == null ? "" : raw.toString();
     }
 
@@ -806,6 +815,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             } catch (RuntimeException ignored) {
                 // 表达式还不完整，等打完
             }
+            return;
+        }
+        if (target.ref().getValue() instanceof ItemStackTemplate template) {
+            // 只换物品类型，数据组件原样保留；id 解析不出来就不落配置
+            Identifier id = Identifier.tryParse(next);
+            if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
+                template.setType(id);
+                setValue(target.ref(), template);
+            }
+            this.textOriginal = next;
             return;
         }
         if (target.ref().getValue() instanceof Holder<?> holder) {
@@ -969,6 +988,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof WidgetPos
                 || value.getValue() instanceof PrimitiveMap<?, ?>
                 || value.getValue() instanceof Holder<?>
+                || value.getValue() instanceof ItemStackTemplate
                 || value.getValue() instanceof Regex
                 || recordParts(value.getValue()) != null
                 || booleanParts(value.getValue()) != null;
@@ -1442,6 +1462,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         truncatedHover = null;
         formatArgumentHover = null;
         editorHover = null;
+        itemTemplateHover = false;
 
         paintBar(ctx, p, mouseX, mouseY);
         paintBody(ctx, p, mouseX, mouseY);
@@ -1680,6 +1701,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             boolean open = dropdown == ref;
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        } else if (raw instanceof ItemStackTemplate template) {
+            paintItemTemplate(ctx, p, y, ref, template, mouseX, mouseY);
         } else if (raw instanceof Holder<?> holder) {
             // 注册表条目：值框里写「注册表|条目 id」，与宿主存盘格式一致，写回时再解析
             paintTextValue(ctx, p, textValue, ref, holder.asString(), mouseX, mouseY);
@@ -2226,6 +2249,71 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return true;
     }
 
+    /**
+     * 物品模板：值框显示物品 id，行尾一个按钮打开宿主的物品编辑屏。
+     *
+     * <p>模板里除了 id 还有整套数据组件（附魔、名字、数量…），自绘一份等于重写物品编辑器；
+     * 所以值框只管 id，要改组件就点按钮——与列表、键值表同一个思路。
+     */
+    private void paintItemTemplate(
+            VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref, ItemStackTemplate template,
+            int mouseX, int mouseY) {
+        int right = controlRight();
+        int btn = 13;
+        int gap = 2;
+        int btnX = right - btn;
+        Box field = new Box(Math.max(contentLeft, btnX - gap - Math.max(120, Math.min(280, contentWidth / 2))),
+                y + FIELD_TOP, Math.max(120, Math.min(280, contentWidth / 2)), FIELD_H);
+        boolean editing = textTarget == ref;
+        if (editing) {
+            paintFieldFrame(ctx, p, field.x(), field.y(), field.w(), field.h(), true, false);
+            if (textBox != null) {
+                textBox.setTextColor(p.ink());
+            }
+        } else {
+            boolean hot = inBox(field.x(), field.y(), field.w(), field.h(), mouseX, mouseY);
+            if (hot) {
+                paintFieldFrame(ctx, p, field.x(), field.y(), field.w(), field.h(), false, true);
+            } else {
+                int lineY = field.y() + field.h() - 2;
+                for (int i = 0; i < field.w(); i += 3) {
+                    Ef.fill(ctx, field.x() + i, lineY, Math.min(2, field.w() - i), 1, p.rule());
+                }
+            }
+            String shown = Ef.ellipsis(template.itemId().toString(), field.w() - FIELD_PAD * 2);
+            Ef.text(ctx, shown, field.x() + field.w() - FIELD_PAD - Ef.textWidth(shown),
+                    field.y() + FIELD_PAD, p.ink());
+        }
+        boolean hot = inBox(btnX, y + 2, btn, btn, mouseX, mouseY);
+        if (hot) {
+            Ef.cutFill(ctx, btnX, y + 2, btn, btn, p.chip(), Ef.CUT);
+        }
+        Ef.icon(ctx, Constants.EDITOR_SPRITE, btnX, y + 2, btn, hot ? p.ink() : p.ink2());
+        if (hot) {
+            itemTemplateHover = true;
+        }
+    }
+
+    /** 物品模板行的一击：值框改 id，行尾按钮开物品编辑屏。 */
+    private boolean hitItemTemplate(
+            WrapperConfigRef<?> wrapper, ItemStackTemplate template, int mouseX, int mouseY, int button, int rowY) {
+        if (button != 0) {
+            return false;
+        }
+        int btnX = controlRight() - 13;
+        if (inBox(btnX, rowY + 2, 13, 13, mouseX, mouseY)) {
+            if (template.itemStack() == null) {
+                return true;
+            }
+            InvTasks.openEditScreen(template.itemStack(), edited -> {
+                template.setItemStack(edited);
+                setValue(wrapper.ref(), template);
+            });
+            return true;
+        }
+        return hitText(wrapper, mouseX, mouseY, button, rowY);
+    }
+
     /** 列表行的一击：只有计数块接，点它把宿主的列表编辑器开到这一页上。 */
     private boolean hitPrimitiveList(
             WrapperConfigRef<?> wrapper, PrimitiveList<?> list, int mouseX, int mouseY, int button, int rowY) {
@@ -2620,6 +2708,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
             formatArgumentHover = null;
             Ef.tooltip(ctx, p, lines, mouseX, mouseY, this.width, this.height);
+            return;
+        }
+        if (itemTemplateHover) {
+            itemTemplateHover = false;
+            Ef.tooltip(ctx, p, List.of("打开物品编辑屏：附魔、名字、数量等组件在那里改"), mouseX, mouseY,
+                    this.width, this.height);
             return;
         }
         if (editorHover != null) {
@@ -3225,6 +3319,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof Holder<?>) {
             return hitText(wrapper, mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof ItemStackTemplate template) {
+            return hitItemTemplate(wrapper, template, mouseX, mouseY, button, rowY);
         }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
