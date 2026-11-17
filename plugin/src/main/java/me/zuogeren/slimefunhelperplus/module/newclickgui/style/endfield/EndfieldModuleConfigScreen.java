@@ -44,6 +44,7 @@ import net.minecraft.client.gui.components.EditBox;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.config.NumberClamp;
 import me.matl114.utils.config.AttrKeyValue;
+import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
@@ -540,15 +541,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 所以统一在这个每 tick 调一次的位置做。
      */
     private void startNumberBox() {
-        EditBox box = new EditBox(
-                Minecraft.getInstance().font,
+        EditBox box = HostControls.editBox(
                 numberSlotX + FIELD_PAD,
                 numberRowY + Math.max(0, numberPart) * ROW_H + FIELD_TOP + FIELD_PAD,
                 TEXT_W - FIELD_PAD * 2,
-                9,
-                Component.empty());
-        box.setBordered(false);
-        box.setMaxLength(16);
+                16,
+                null);
         this.numberBox = box;
         this.lastNumberKey = numberKey(numberTarget, numberPart, numberRowY);
         applyNumberText(box, numberTarget, numberPart);
@@ -626,15 +624,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      */
     private void startColorBox() {
         ColorGeometry geo = colorGeometry();
-        EditBox box = new EditBox(
-                Minecraft.getInstance().font,
-                geo.hexX(),
-                colorRowY + FIELD_TOP + FIELD_PAD,
-                geo.hexW(),
-                9,
-                Component.empty());
-        box.setBordered(false);
-        box.setMaxLength(16);
+        EditBox box = HostControls.editBox(
+                geo.hexX(), colorRowY + FIELD_TOP + FIELD_PAD, geo.hexW(), 16, null);
         this.colorBox = box;
         this.lastColorKey = colorKey(colorTarget, colorRowY);
         applyColorText(box, colorTarget);
@@ -2030,15 +2021,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      * 换框之后旧框再回调也写不到新面板里。
      */
     private void startListSearch(ListBox box) {
-        EditBox editor = new EditBox(
-                Minecraft.getInstance().font,
+        EditBox editor = HostControls.editBox(
                 box.searchX() + 4 + searchPrefixW(),
                 box.searchY() + FIELD_PAD,
                 Math.max(24, box.searchW() - 8 - searchPrefixW()),
-                9,
-                Component.empty());
-        editor.setBordered(false);
-        editor.setMaxLength(64);
+                64,
+                null);
         this.listSearchBox = editor;
         applyListText(editor);
         this.addRenderableWidget(editor);

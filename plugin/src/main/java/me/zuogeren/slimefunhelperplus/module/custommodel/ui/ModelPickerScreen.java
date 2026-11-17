@@ -10,6 +10,7 @@ import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.utils.ClientUtils;
+import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelManager;
 import me.zuogeren.slimefunhelperplus.module.custommodel.CustomModelModule;
@@ -248,19 +249,14 @@ public class ModelPickerScreen extends GenericScreen {
         if (this.searchBox != null) {
             this.removeWidget(this.searchBox);
         }
-        this.searchBox = new EditBox(
-                Minecraft.getInstance().font,
+        this.searchBox = HostControls.editBoxText(
                 panelX + SEARCH_X + 4,
                 panelY + SEARCH_Y + 4,
                 SEARCH_W - 8,
-                9,
-                Component.empty());
-        this.searchBox.setBordered(false);
-        this.searchBox.setMaxLength(48);
-        this.searchBox.setHint(Component.translatable("custom-model.picker.search"));
+                48,
+                Component.translatable("custom-model.picker.search"));
         this.searchBox.setTextColor(pal.ink());
-        this.searchBox.setValue(query);
-        this.searchBox.setResponder(this::applyQuery);
+        HostControls.setValueQuietly(this.searchBox, query, this::applyQuery);
         this.addRenderableWidget(this.searchBox);
     }
 

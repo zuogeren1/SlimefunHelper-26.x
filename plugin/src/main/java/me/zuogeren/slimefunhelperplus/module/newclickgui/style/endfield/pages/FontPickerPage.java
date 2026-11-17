@@ -8,6 +8,7 @@ import me.matl114.gui.GenericScreen;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.modules.task.TextFont;
 import me.matl114.renderer.text.LocalFontTextDrawer;
+import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
@@ -158,18 +159,13 @@ public class FontPickerPage extends GenericScreen {
                 .scroll(this::wheel)
                 .addTo(this);
 
-        EditBox box = new EditBox(
-                Minecraft.getInstance().font,
+        EditBox box = HostControls.editBox(
                 contentLeft + 4 + prefixWidth(),
                 searchTop() + 7,
                 Math.max(24, searchWidth() - 8 - prefixWidth()),
-                9,
-                Component.literal("搜索字体"));
-        box.setBordered(false);
-        box.setMaxLength(48);
-        box.setHint(Component.literal("搜索字体名"));
-        box.setValue(query);
-        box.setResponder(text -> {
+                48,
+                "搜索字体名");
+        HostControls.setValueQuietly(box, query, text -> {
             query = text;
             scroll = 0;
         });

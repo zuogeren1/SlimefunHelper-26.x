@@ -23,6 +23,7 @@ import me.matl114.managers.config.MapRef;
 import me.matl114.managers.config.Ref;
 import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.MultiKeyBind;
+import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
@@ -188,18 +189,13 @@ public class ConfigPage extends GenericScreen {
         // 搜索框交给原版 EditBox：输入法、退格、粘贴都由 MC 自己处理
         int boxX = winX + 8;
         int prefixW = Ef.trackedWidth("//", 1) + 4;
-        EditBox box = new EditBox(
-                Minecraft.getInstance().font,
+        EditBox box = HostControls.editBox(
                 boxX + 4 + prefixW,
                 searchTop() + 6,
                 Math.max(24, searchWidth() - 8 - prefixW),
-                9,
-                Component.literal("搜索配置项"));
-        box.setBordered(false);
-        box.setMaxLength(48);
-        box.setHint(Component.literal("搜索配置项"));
-        box.setValue(query);
-        box.setResponder(text -> {
+                48,
+                "搜索配置项");
+        HostControls.setValueQuietly(box, query, text -> {
             query = text;
             itemScroll = 0;
         });

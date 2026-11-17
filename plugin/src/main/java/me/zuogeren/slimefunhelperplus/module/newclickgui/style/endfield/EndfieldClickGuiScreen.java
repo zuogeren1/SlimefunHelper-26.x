@@ -21,6 +21,7 @@ import me.matl114.hacks.modules.task.ClickGui;
 import me.matl114.hacks.utils.gui.ClassicClickGuiScreen;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.ChatUtils;
+import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
@@ -414,18 +415,13 @@ public class EndfieldClickGuiScreen extends GenericScreen {
         int searchWidth = searchWidth(mainW);
         // 前缀 `//` 也占位：输入框起点按实测宽度让开，字不会压到前缀上
         int prefixW = Ef.trackedWidth("//", 1) + 4;
-        EditBox box = new EditBox(
-                Minecraft.getInstance().font,
+        EditBox box = HostControls.editBox(
                 winX + railW + searchX(mainW) + 4 + prefixW,
                 winY + barH + 4,
                 Math.max(24, searchWidth - 8 - prefixW),
-                9,
-                Component.literal("搜索"));
-        box.setBordered(false);
-        box.setMaxLength(32);
-        box.setHint(Component.literal("搜索模块"));
-        box.setValue(query);
-        box.setResponder(text -> {
+                32,
+                "搜索模块");
+        HostControls.setValueQuietly(box, query, text -> {
             query = text;
             scrollTop.put(group, 0);
             animStart = System.currentTimeMillis();

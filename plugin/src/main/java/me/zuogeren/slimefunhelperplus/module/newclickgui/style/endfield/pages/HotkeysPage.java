@@ -12,6 +12,7 @@ import me.matl114.hacks.api.ModuleGroup;
 import me.matl114.hacks.modules.HackModules;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
+import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.Ef;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.EndfieldModuleConfigScreen;
@@ -68,18 +69,13 @@ public class HotkeysPage extends EndfieldModuleConfigScreen {
         super.refreshWidgets();
         int boxW = searchBoxWidth();
         int prefixW = Ef.trackedWidth("//", 1) + 4;
-        EditBox box = new EditBox(
-                Minecraft.getInstance().font,
+        EditBox box = HostControls.editBox(
                 contentLeftPx() + 4 + prefixW,
                 bodyTopPx() + 7,
                 Math.max(24, boxW - 8 - prefixW),
-                9,
-                Component.literal("搜索"));
-        box.setBordered(false);
-        box.setMaxLength(32);
-        box.setHint(Component.literal("搜索键名"));
-        box.setValue(query);
-        box.setResponder(text -> query = text);
+                32,
+                "搜索键名");
+        HostControls.setValueQuietly(box, query, text -> query = text);
         this.searchBox = box;
         this.addRenderableWidget(box);
     }
