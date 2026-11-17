@@ -20,6 +20,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
 import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.Holder;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.gui.Constants;
 import me.matl114.hacks.utils.config.StringEnum;
@@ -807,6 +808,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
             return;
         }
+        if (target.ref().getValue() instanceof Holder<?> holder) {
+            // 解析失败就不落配置：写坏一个 id 会让这一项永远指向不存在的条目
+            Holder.parse(next).ifSuccess(parsed -> setValue(target.ref(), parsed));
+            this.textOriginal = next;
+            return;
+        }
         if (target.ref().getValue() instanceof StringFormat format) {
             // 只换格式串，参数表与 colorString 原样保留：那是这一项的契约，不该被编辑值顺手改掉
             setValue(target.ref(), format.withFormatString(next));
@@ -961,6 +968,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof PrimitiveList<?>
                 || value.getValue() instanceof WidgetPos
                 || value.getValue() instanceof PrimitiveMap<?, ?>
+                || value.getValue() instanceof Holder<?>
                 || value.getValue() instanceof Regex
                 || recordParts(value.getValue()) != null
                 || booleanParts(value.getValue()) != null;
@@ -1550,7 +1558,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             Ef.fill(ctx, contentLeft - 4, y, 3, rowH, p.trace());
         }
         // 文本行的值区占住行右半段，行名按它让出的宽度截断，长路径压不到行名上
-        Box textValue = ref.ref() instanceof StringRef || ref.ref().getValue() instanceof Regex
+        Box textValue = ref.ref() instanceof StringRef
+                        || ref.ref().getValue() instanceof Regex
+                        || ref.ref().getValue() instanceof Holder<?>
                 ? textValueBox(y)
                 : null;
         int labelW = textValue != null
@@ -1670,6 +1680,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             boolean open = dropdown == ref;
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        } else if (raw instanceof Holder<?> holder) {
+            // 注册表条目：值框里写「注册表|条目 id」，与宿主存盘格式一致，写回时再解析
+            paintTextValue(ctx, p, textValue, ref, holder.asString(), mouseX, mouseY);
         } else if (raw instanceof PrimitiveMap<?, ?> map) {
             paintCountChip(ctx, p, y, ref, map.toPrimitiveMap().size() + " 项");
         } else if (raw instanceof WidgetPos pos) {
@@ -3209,6 +3222,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof PrimitiveMap<?, ?> map) {
             return hitPrimitiveMap(wrapper, map, mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof Holder<?>) {
+            return hitText(wrapper, mouseX, mouseY, button, rowY);
         }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
