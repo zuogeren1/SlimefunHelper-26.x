@@ -55,6 +55,8 @@
   "custom-model.picker.search": "Search model / author / folder",
   "custom-model.picker.preview": "Preview",
   "custom-model.picker.texture": "Texture",
+  "custom-model.picker.empty-folder": "No usable models in the current folder.",
+  "custom-model.picker.empty-search": "No matching models. Try another keyword.",
   "custom-model.preview.title": "Action Preview",
   "custom-model.preview.tab.main": "Main",
   "custom-model.preview.tab.extra": "Extras",

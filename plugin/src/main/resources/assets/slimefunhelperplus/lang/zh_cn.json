@@ -55,6 +55,8 @@
   "custom-model.picker.search": "搜索模型 / 作者 / 目录",
   "custom-model.picker.preview": "预览",
   "custom-model.picker.texture": "贴图",
+  "custom-model.picker.empty-folder": "当前文件夹下没有可用的模型。",
+  "custom-model.picker.empty-search": "没有匹配的模型，换个关键词试试。",
   "custom-model.preview.title": "动作预览",
   "custom-model.preview.tab.main": "主体",
   "custom-model.preview.tab.extra": "轮盘",

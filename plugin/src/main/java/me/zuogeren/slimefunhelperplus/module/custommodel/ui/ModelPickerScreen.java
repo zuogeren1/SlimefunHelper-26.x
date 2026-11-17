@@ -406,7 +406,10 @@ public class ModelPickerScreen extends GenericScreen {
 
     private void paintCards(VDrawContext ctx, int px, int py) {
         if (view.isEmpty()) {
-            String empty = "没有匹配的模型，换个关键词试试。";
+            // 两种空要分开说：目录里一个模型都没有时，提示「换个关键词」只会让人白试
+            String empty = ModelCatalog.names().isEmpty()
+                    ? Component.translatable("custom-model.picker.empty-folder").getString()
+                    : Component.translatable("custom-model.picker.empty-search").getString();
             Ef.text(ctx, empty, px + RIGHT_X + (RIGHT_W - Ef.textWidth(empty)) / 2, py + 100, pal.ink2());
             return;
         }
