@@ -1206,6 +1206,25 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
     }
 
+    /**
+     * 按配置路径取候选值。
+     *
+     * <p>给宿主侧用：宿主配置页的值控件由 {@code AttrKeyValue#generateValueWidget} 统一创建，
+     * 插件在那里注入时只拿得到 {@code getKeyName()}，拿不到 {@code WrapperConfigRef}。
+     * 键格式与 {@link #registerStringChoices} 一致（{@code custom-model.model} 这种点分全路径）。
+     */
+    public static java.util.List<String> stringChoicesOfPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return java.util.List.of();
+        }
+        java.util.function.Supplier<java.util.List<String>> supplier = STRING_CHOICES.get(path);
+        if (supplier == null) {
+            return java.util.List.of();
+        }
+        java.util.List<String> choices = supplier.get();
+        return choices == null ? java.util.List.of() : choices;
+    }
+
     /** 这个字符串配置有没有候选值；有就走下拉而不是文本框。 */
     private static java.util.List<String> stringChoicesOf(WrapperConfigRef<?> ref) {
         String path = pathOf(ref);
