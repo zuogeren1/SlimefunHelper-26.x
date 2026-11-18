@@ -1099,6 +1099,11 @@ public class ConfigPage extends GenericScreen {
                 FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), true, false);
                 return;
             }
+            // 与普通值槽同一套静态态：一条虚线底边说明这一格能点开编辑
+            int lineY = slot.y() + slot.h() - 2;
+            for (int i = 0; i < slot.w(); i += 3) {
+                Ef.fill(ctx, slot.x() + i, lineY, Math.min(2, slot.w() - i), 1, p.rule());
+            }
             Ef.text(ctx, text, slot.x() + slot.w() - 6 - Ef.textWidth(text), y + 5, p.ink());
         }
     }
@@ -1163,6 +1168,13 @@ public class ConfigPage extends GenericScreen {
                 && mouseY < slot.y() + slot.h();
         if (hot) {
             FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), false, true);
+        } else {
+            // 静态态只画一条虚线底边：不抢视线，又能看出这一格能点开编辑。
+            // 比行的分隔线高 1px 且断成短划，两条线不会并成一条；悬停与聚焦时都不画
+            int lineY = slot.y() + slot.h() - 2;
+            for (int i = 0; i < slot.w(); i += 3) {
+                Ef.fill(ctx, slot.x() + i, lineY, Math.min(2, slot.w() - i), 1, p.rule());
+            }
         }
         boolean blank = false;
         String text;
@@ -1261,7 +1273,9 @@ public class ConfigPage extends GenericScreen {
         if (ref == null) {
             tip.add("这条路径解析不出配置项，只能看。");
         } else {
-            tip.add(writable(ref) ? "可以在这里改。" : "这一类项在这里只能看。");
+            if (!writable(ref)) {
+                tip.add("这一类项在这里只能看。");
+            }
             if (ref.hasDefaultValue()) {
                 tip.add("右键恢复默认值");
             }
