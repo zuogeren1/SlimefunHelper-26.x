@@ -1218,7 +1218,14 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return parts.length;
         }
         boolean[] bools = booleanParts(value);
-        return bools != null ? bools.length : 1;
+        if (bools != null) {
+            return bools.length;
+        }
+        // 位置配置画两行滑杆（X / Y），行高必须跟着算两行，否则下一行会压上来
+        if (value instanceof WidgetPos) {
+            return 2;
+        }
+        return 1;
     }
 
     /** 换掉记录里的一格；数值会先按那一格的声明类型还原（int / float / long…），枚举原样放回。 */
