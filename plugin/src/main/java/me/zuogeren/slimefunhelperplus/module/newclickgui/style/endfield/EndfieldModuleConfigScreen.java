@@ -1513,11 +1513,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             y += height;
         }
         // 模块自己往配置页塞的控件（聊天密钥、服务器存储…）：宿主也是这么接的，
-        // 不接的话这些模块的入口在本界面里整个消失
+        // 不接的话这些模块的入口在本界面里整个消失。
+        // 工厂换成本界面那一套：控件仍是宿主的元素类，只是配色与形状跟着本界面走，
+        // 否则这一节会是一整片宿主外观，与上面的自绘行对不上。
         customWidgets.clear();
         if (module != null) {
             module.addCustomWidgets(
-                    widget -> customWidgets.add(widget), contentWidth, ROW_H, 6, NewClickGui.elementFactory());
+                    widget -> customWidgets.add(widget), contentWidth, ROW_H, 6, new EndfieldElementFactory(light()));
         }
         if (!customWidgets.isEmpty()) {
             rows.add(new Row(y, SECTION_H, null, CUSTOM_SECTION, true));
