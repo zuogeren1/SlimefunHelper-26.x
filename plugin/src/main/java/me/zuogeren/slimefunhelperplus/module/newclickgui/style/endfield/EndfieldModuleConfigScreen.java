@@ -3248,7 +3248,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
         }
         for (Row row : rows) {
-            if (row.header || my < row.y || my >= row.y + row.height) {
+            // 自定义控件行没有配置项：它自己接点击，这里跳过
+            if (row.header || row.ref == null || my < row.y || my >= row.y + row.height) {
                 continue;
             }
             // 行只在正文这一条里接点击：右侧留白在窗口内但没有控件，落在那里的点击不该打中左边的开关
