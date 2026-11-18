@@ -2186,10 +2186,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Vec2 pair = percent ? pos.toPercentage() : pos.toLength();
         String[] names = percent ? new String[] {"X 比例", "Y 比例"} : new String[] {"X 长度", "Y 长度"};
         double[] values = {pair.x(), pair.y()};
+        // 滑杆与数值要让开行尾那个 type 块：两者都右对齐到 controlRight() 会叠在一起
+        int sliderRight = right - modeW - 6;
         for (int i = 0; i < 2; i++) {
             int rowY = y + i * ROW_H;
             double[] range = bounds(ref, values[i], i);
-            paintSlider(ctx, p, rowY, right, formatNumber(values[i]), values[i], range[0], range[1],
+            paintSlider(ctx, p, rowY, sliderRight, formatNumber(values[i]), values[i], range[0], range[1],
                     names[i], numberTarget == ref && numberPart == i);
         }
     }
@@ -2210,7 +2212,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int index = Math.max(0, Math.min(1, (mouseY - rowY) / ROW_H));
         Vec2 pair = pos.getType() == 0 ? pos.toPercentage() : pos.toLength();
         double current = index == 0 ? pair.x() : pair.y();
-        return hitNumber(wrapper, index, right, mouseX, button, rowY, formatNumber(current), current);
+        return hitNumber(wrapper, index, right - modeW - 6, mouseX, button, rowY, formatNumber(current), current);
     }
 
     /**
@@ -2262,8 +2264,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         int btn = 13;
         int gap = 2;
         int btnX = right - btn;
-        Box field = new Box(Math.max(contentLeft, btnX - gap - Math.max(120, Math.min(280, contentWidth / 2))),
-                y + FIELD_TOP, Math.max(120, Math.min(280, contentWidth / 2)), FIELD_H);
+        // 与 hitText 取同一份几何：值框右对齐到按钮左边，命中才不会错位
+        Box base = textValueBox(y);
+        int fieldW = Math.max(120, Math.min(base.w(), btnX - gap - contentLeft));
+        Box field = new Box(btnX - gap - fieldW, y + FIELD_TOP, fieldW, FIELD_H);
         boolean editing = textTarget == ref;
         if (editing) {
             paintFieldFrame(ctx, p, field.x(), field.y(), field.w(), field.h(), true, false);
@@ -2302,16 +2306,25 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         int btnX = controlRight() - 13;
         if (inBox(btnX, rowY + 2, 13, 13, mouseX, mouseY)) {
-            if (template.itemStack() == null) {
+            // itemStack() 解不出来时返回 EMPTY 而不是 null：按 isEmpty 判，否则会开一个空槽编辑屏
+            ItemStack current = template.itemStack();
+            if (current == null || current.isEmpty()) {
                 return true;
             }
-            InvTasks.openEditScreen(template.itemStack(), edited -> {
+            InvTasks.openEditScreen(current, edited -> {
                 template.setItemStack(edited);
                 setValue(wrapper.ref(), template);
             });
             return true;
         }
-        return hitText(wrapper, mouseX, mouseY, button, rowY);
+        // 值框的命中要按 paintItemTemplate 那份几何算：它让开了行尾按钮，与 textValueBox 不同
+        Box base = textValueBox(rowY);
+        int fieldW = Math.max(120, Math.min(base.w(), btnX - 2 - contentLeft));
+        Box field = new Box(btnX - 2 - fieldW, rowY + FIELD_TOP, fieldW, FIELD_H);
+        if (!inBox(field.x(), field.y(), field.w(), field.h(), mouseX, mouseY)) {
+            return false;
+        }
+        return beginTextEdit(wrapper, rowY);
     }
 
     /** 列表行的一击：只有计数块接，点它把宿主的列表编辑器开到这一页上。 */
@@ -2793,7 +2806,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return;
         }
         String shown = Ef.ellipsis(name, available);
-        Ef.tracked(ctx, shown, rightEdge - Ef.trackedWidth(shown, 1), y + 5, p.ink2(), 1);
+        // 悬停时行底会提亮一档，次要色压在上面会显得更暗；跟着换成主色，对比度才不掉
+        int ink = hovered != null ? p.ink() : p.ink2();
+        Ef.tracked(ctx, shown, rightEdge - Ef.trackedWidth(shown, 1), y + 5, ink, 1);
     }
 
     /** 这一行尾要单独占一个开关位（可选值），行名得相应缩短。 */
@@ -3475,6 +3490,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (!inBox(field.x(), field.y(), field.w(), field.h(), mouseX, mouseY)) {
             return false;
         }
+        return beginTextEdit(wrapper, rowY);
+    }
+
+    /** 开始就地编辑这一行：命中判定由调用方做，这里只负责挂上目标。 */
+    private boolean beginTextEdit(WrapperConfigRef<?> wrapper, int rowY) {
         textTarget = wrapper;
         textRowY = rowY;
         textDraft = null;
