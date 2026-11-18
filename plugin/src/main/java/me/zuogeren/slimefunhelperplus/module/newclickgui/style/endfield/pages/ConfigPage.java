@@ -415,7 +415,98 @@ public class ConfigPage extends GenericScreen {
                 || ref.getValue() instanceof Regex
                 || ref.getValue() instanceof StringFormat
                 || ref.getValue() instanceof OptionalPrimitive<?>
-                || ref.getValue() instanceof EntrySet<?>;
+                || ref.getValue() instanceof EntrySet<?>
+                || recordParts(ref.getValue()) != null;
+    }
+
+    /**
+     * 一条记录里的几格：全是数值或枚举才算，别的类型交回只读。
+     *
+     * <p>两格到八格都接：宿主里两个数值的记录（{@code Vec2}）、
+     * 「两个数值 + 一个枚举」的记录（{@code PredictArgument}）都很常见。
+     */
+    private static Object[] recordParts(Object value) {
+        if (value == null || !value.getClass().isRecord()) {
+            return null;
+        }
+        java.lang.reflect.RecordComponent[] parts = value.getClass().getRecordComponents();
+        if (parts.length < 2 || parts.length > 8) {
+            return null;
+        }
+        Object[] out = new Object[parts.length];
+        try {
+            for (int i = 0; i < parts.length; i++) {
+                Object part = parts[i].getAccessor().invoke(value);
+                if (!(part instanceof Number) && !(part instanceof Enum<?>)) {
+                    return null;
+                }
+                out[i] = part;
+            }
+        } catch (Throwable e) {
+            return null;
+        }
+        return out;
+    }
+
+    /** 这一行占几格：记录按分量数铺开，其余类型都是一格。绘制与布局必须取同一个数。 */
+    private static int rowParts(Ref<?> ref) {
+        if (ref == null) {
+            return 1;
+        }
+        Object[] parts = recordParts(ref.getValue());
+        return parts == null ? 1 : parts.length;
+    }
+
+    /** 记录里每一格的字段名：驼峰转成两个大写词（{@code ticksLater} → {@code TICKS LATER}）。 */
+    private static String[] componentNames(Object value) {
+        java.lang.reflect.RecordComponent[] parts = value.getClass().getRecordComponents();
+        String[] names = new String[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            names[i] = spacedUpper(parts[i].getName());
+        }
+        return names;
+    }
+
+    private static String spacedUpper(String raw) {
+        StringBuilder out = new StringBuilder(raw.length() + 4);
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (i > 0 && Character.isUpperCase(c) && out.length() > 0) {
+                out.append(' ');
+            }
+            out.append(Character.toUpperCase(c));
+        }
+        return out.toString();
+    }
+
+    /** 换掉记录里的一格；数值会先按那一格的声明类型还原。 */
+    private static Object withPart(Object value, int index, Object next) {
+        try {
+            java.lang.reflect.RecordComponent[] parts = value.getClass().getRecordComponents();
+            Object[] args = new Object[parts.length];
+            for (int i = 0; i < parts.length; i++) {
+                args[i] = i == index ? next : parts[i].getAccessor().invoke(value);
+            }
+            Class<?>[] types = new Class<?>[parts.length];
+            for (int i = 0; i < parts.length; i++) {
+                types[i] = parts[i].getType();
+            }
+            return value.getClass().getDeclaredConstructor(types).newInstance(args);
+        } catch (Throwable e) {
+            return value;
+        }
+    }
+
+    private static Object withNumericPart(Object value, int index, double next) {
+        try {
+            java.lang.reflect.RecordComponent[] parts = value.getClass().getRecordComponents();
+            if (index >= 0 && index < parts.length) {
+                return withPart(value, index, coerce(parts[index].getType(), next));
+            }
+        } catch (Throwable ignored) {
+            // 读不出记录结构就保持原值
+        }
+        return value;
     }
 
     /** 可选值：行尾一个开关决定这一项是否生效，左边是内层值自己的控件。 */
@@ -674,9 +765,17 @@ public class ConfigPage extends GenericScreen {
 
     /** 写回选中的枚举：走 Ref 自己的写入口，校验器与更新监听照旧生效。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private static void selectEnum(Ref<?> ref, ConfigEnum value) {
+    private void selectEnum(Ref<?> ref, ConfigEnum value) {
         if (ref.getValue() instanceof OptionalPrimitive<?>) {
             writeOptionalOption(ref, value);
+            return;
+        }
+        if (recordParts(ref.getValue()) != null) {
+            // 记录型：下拉身份里带着分量号，按它换掉那一格
+            int part = recordPartOf(ref, dropdownKey);
+            if (part >= 0) {
+                ((Ref) ref).setValue(withPart(ref.getValue(), part, value));
+            }
             return;
         }
         try {
@@ -735,8 +834,9 @@ public class ConfigPage extends GenericScreen {
                 lines.add(new Line(y, SECTION_H, current, null));
                 y += SECTION_H;
             }
-            lines.add(new Line(y, ROW_H, current, item));
-            y += ROW_H;
+            int height = ROW_H * rowParts(item.ref());
+            lines.add(new Line(y, height, current, item));
+            y += height;
         }
         listHeight = (y + itemScroll) - listTop();
     }
@@ -1025,6 +1125,8 @@ public class ConfigPage extends GenericScreen {
             Ef.text(ctx, text, chipX + 5, y + 5, p.ink());
         } else if (ref.getValue() instanceof EntrySet<?> set) {
             paintEntrySet(ctx, p, y, right, ref, set);
+        } else if (recordParts(ref.getValue()) != null) {
+            paintRecord(ctx, p, y, right, ref, mouseX, mouseY);
         } else if (optionalRow(ref)) {
             paintOptional(ctx, p, y, right, ref);
         } else if (ref instanceof KeyBindRef bindRef) {
@@ -1036,6 +1138,75 @@ public class ConfigPage extends GenericScreen {
         } else {
             String text = Ef.ellipsis(valueText(ref), readOnlyWidth());
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink2());
+        }
+    }
+
+    /**
+     * 一条记录里的几格：每格占一行，行名用字段名；数值就地编辑，枚举点开下拉。
+     *
+     * <p>行高由 {@link #rowParts} 按分量数算，绘制与布局取同一个数，下一行不会压上来。
+     */
+    private void paintRecord(VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref, int mouseX, int mouseY) {
+        Object[] parts = recordParts(ref.getValue());
+        if (parts == null) {
+            return;
+        }
+        String[] names = componentNames(ref.getValue());
+        for (int i = 0; i < parts.length; i++) {
+            int partY = y + i * ROW_H;
+            Object part = parts[i];
+            if (part instanceof Number number) {
+                double numeric = number.doubleValue();
+                String text = formatNumber(numeric);
+                Rect slot = new Rect(right - VALUE_W, partY + FieldEditor.FIELD_TOP, VALUE_W, FieldEditor.FIELD_H);
+                if (editor.isOpenFor(recordKey(ref, i))) {
+                    FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), true, false);
+                } else {
+                    boolean hot = mouseX >= slot.x() && mouseX < slot.x() + slot.w()
+                            && mouseY >= slot.y() && mouseY < slot.y() + slot.h();
+                    if (hot) {
+                        FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), false, true);
+                    } else {
+                        int lineY = slot.y() + slot.h() - 2;
+                        for (int k = 0; k < slot.w(); k += 3) {
+                            Ef.fill(ctx, slot.x() + k, lineY, Math.min(2, slot.w() - k), 1, p.rule());
+                        }
+                    }
+                    Ef.text(ctx, text, slot.x() + slot.w() - 6 - Ef.textWidth(text), partY + 5, p.ink());
+                }
+            } else if (part instanceof ConfigEnum configEnum) {
+                String text = enumLabel(configEnum) + " ▾";
+                int width = Ef.textWidth(text) + 10;
+                boolean open = recordKey(ref, i).equals(dropdownKey);
+                Ef.cutFill(ctx, right - width, partY + 3, width, 12,
+                        open ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), p.cut());
+                Ef.text(ctx, text, right - width + 5, partY + 5, p.ink());
+            }
+            // 分量名右对齐贴着控件，与模块配置页同一套画法
+            String name = names[i];
+            int available = Math.max(0, Math.min(150, right - VALUE_W - 12 - itemsX() - 8));
+            if (available >= 18) {
+                String shown = Ef.ellipsis(name, available);
+                Ef.tracked(ctx, shown, right - VALUE_W - 12 - Ef.trackedWidth(shown, 1), partY + 5, p.ink2(), 1);
+            }
+        }
+    }
+
+    /** 记录里某一格的身份：绘制、命中与编辑共用。 */
+    private static String recordKey(Ref<?> ref, int part) {
+        return "record:" + System.identityHashCode(ref) + ":" + part;
+    }
+
+    /** 当前打开的下拉属于记录里的第几格；不是记录型返回 -1。 */
+    private static int recordPartOf(Ref<?> ref, String key) {
+        String prefix = "record:" + System.identityHashCode(ref) + ":";
+        if (key == null || !key.startsWith(prefix)) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(key.substring(prefix.length()));
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
@@ -1268,14 +1439,8 @@ public class ConfigPage extends GenericScreen {
             return;
         }
         List<String> tip = new ArrayList<>();
-        // 第一行是给人看的名字：翻译键取不到才退回路径，别把 mine-arua.enable 这种内部键摆到最上面
-        String name = labelOf(hovered);
-        if (!name.equals(hovered.path())) {
-            tip.addAll(Ef.wrap(name, 240));
-            tip.addAll(Ef.wrap(hovered.path(), 240));
-        } else {
-            tip.addAll(Ef.wrap(hovered.path(), 240));
-        }
+        // 只写给人看的名字：翻译键取不到时才退回路径，内部键不该占一行
+        tip.addAll(Ef.wrap(labelOf(hovered), 240));
         Ref<?> ref = hovered.ref();
         if (ref == null) {
             tip.add("这条路径解析不出配置项，只能看。");
@@ -1537,6 +1702,22 @@ public class ConfigPage extends GenericScreen {
         }
     }
 
+    /** 记录里某一格的数值编辑：几何与绘制共用同一份。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openRecordEditor(Ref<?> ref, int part, int rowY, double current) {
+        editor.open(this, recordKey(ref, part), itemsRight() - VALUE_W,
+                rowY + part * ROW_H + FieldEditor.FIELD_TOP, VALUE_W, formatNumber(current), true, value -> {
+                    try {
+                        double next = Double.parseDouble(value.trim().replace(',', '.'));
+                        if (Double.isFinite(next)) {
+                            ((Ref) ref).setValue(withNumericPart(ref.getValue(), part, next));
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // 半截输入不是错误，继续等下一个字
+                    }
+                });
+    }
+
     /** 可选值内层的数值编辑：几何由调用方算好，与绘制共用同一份。 */
     private void openOptionalEditor(Ref<?> ref, int rowY, int x, int w, double current) {
         editor.open(this, editorKey(ref, optionalKey(ref)), x, rowY + FieldEditor.FIELD_TOP, w,
@@ -1596,6 +1777,24 @@ public class ConfigPage extends GenericScreen {
             int chipX = right - enumWidth(ref);
             if (mx >= chipX && mx <= right && my >= rowY + 3 && my < rowY + 15) {
                 dropdownKey = enumKey(item);
+                return true;
+            }
+            return false;
+        }
+        if (recordParts(ref.getValue()) != null) {
+            Object[] parts = recordParts(ref.getValue());
+            int index = Math.max(0, Math.min(parts.length - 1, (my - rowY) / ROW_H));
+            Object part = parts[index];
+            if (part instanceof Number number) {
+                if (button == 0 && mx >= right - VALUE_W && mx <= right && my >= rowY + index * ROW_H + 3
+                        && my < rowY + index * ROW_H + 15) {
+                    openRecordEditor(ref, index, rowY, number.doubleValue());
+                    return true;
+                }
+                return false;
+            }
+            if (part instanceof ConfigEnum && button == 0) {
+                dropdownKey = recordKey(ref, index);
                 return true;
             }
             return false;
