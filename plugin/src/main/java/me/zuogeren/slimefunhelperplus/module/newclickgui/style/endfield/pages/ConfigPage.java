@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
+import me.matl114.gui.presets.choices.RegistrySelectScreen;
 import me.matl114.gui.GenericScreen;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigEnum;
@@ -24,9 +25,12 @@ import me.matl114.managers.config.Ref;
 import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.WrapColor;
+import me.matl114.hacks.utils.config.WrapEnum;
 import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
@@ -409,7 +413,24 @@ public class ConfigPage extends GenericScreen {
                 || ref instanceof KeyBindRef
                 || ref.getValue() instanceof WrapColor
                 || ref.getValue() instanceof Regex
-                || ref.getValue() instanceof StringFormat;
+                || ref.getValue() instanceof StringFormat
+                || ref.getValue() instanceof OptionalPrimitive<?>
+                || ref.getValue() instanceof EntrySet<?>;
+    }
+
+    /** 可选值：行尾一个开关决定这一项是否生效，左边是内层值自己的控件。 */
+    private static boolean optionalRow(Ref<?> ref) {
+        return ref.getValue() instanceof OptionalPrimitive<?>;
+    }
+
+    /** 可选值的内层：没启用或取不到时返回 null。 */
+    private static Object optionalInner(Ref<?> ref) {
+        Object raw = ref.getValue();
+        if (!(raw instanceof OptionalPrimitive<?> optional) || !optional.isPresent()) {
+            return null;
+        }
+        Object inner = optional.getValue();
+        return inner instanceof WrapEnum<?> wrap ? wrap.value : inner;
     }
 
     /** 就地文本编辑的那几类：值本身就是一段可读写的字符串，不需要另开编辑器。 */
@@ -497,6 +518,63 @@ public class ConfigPage extends GenericScreen {
         }
     }
 
+    /** 切「这一项是否生效」：内层值原样保留，只翻 present。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void setOptionalPresent(Ref<?> ref, boolean present) {
+        Object raw = ref.getValue();
+        if (raw instanceof OptionalPrimitive optional) {
+            ((Ref) ref).setValue(optional.withPresent(present));
+        }
+    }
+
+    /** 可选值内层的数值写回：按内层原本的数值类型还原，别把 Double 写成 Integer。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void writeOptionalNumber(Ref<?> ref, double value) {
+        Object raw = ref.getValue();
+        if (!(raw instanceof OptionalPrimitive optional)) {
+            return;
+        }
+        Object inner = optional.getValue();
+        if (!(inner instanceof Number number)) {
+            return;
+        }
+        ((Ref) ref).setValue(optional.withValue(coerce(number.getClass(), value)));
+    }
+
+    /** 可选值内层的枚举写回：内层是 {@code WrapEnum} 的要原样包回去，宿主按包装类型序列化。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void writeOptionalOption(Ref<?> ref, Object option) {
+        Object raw = ref.getValue();
+        if (!(raw instanceof OptionalPrimitive optional)) {
+            return;
+        }
+        Object next = optional.getValue() instanceof WrapEnum<?> ? new WrapEnum<>((ConfigEnum) option) : option;
+        ((Ref) ref).setValue(optional.withValue(next));
+    }
+
+    /** 按目标类型还原数值：内层是 Integer 就不能塞 Double 进去。 */
+    private static Object coerce(Class<?> type, double value) {
+        if (type == double.class || type == Double.class) {
+            return value;
+        }
+        if (type == float.class || type == Float.class) {
+            return (float) value;
+        }
+        if (type == int.class || type == Integer.class) {
+            return (int) Math.round(value);
+        }
+        if (type == long.class || type == Long.class) {
+            return Math.round(value);
+        }
+        if (type == short.class || type == Short.class) {
+            return (short) Math.round(value);
+        }
+        if (type == byte.class || type == Byte.class) {
+            return (byte) Math.round(value);
+        }
+        return value;
+    }
+
     /**
      * 颜色提交：只认 {@code #RRGGBB} 与命名色。
      *
@@ -565,6 +643,10 @@ public class ConfigPage extends GenericScreen {
     private static List<ConfigEnum> enumOptions(Ref<?> ref) {
         try {
             Object value = ref.getValue();
+            // 可选值：候选取内层枚举，不是外层那个 OptionalPrimitive
+            if (value instanceof OptionalPrimitive<?>) {
+                value = optionalInner(ref);
+            }
             if (value instanceof ConfigEnum configEnum) {
                 Map<String, ConfigEnum> map = configEnum.getMap();
                 if (map != null) {
@@ -581,6 +663,9 @@ public class ConfigPage extends GenericScreen {
     private static ConfigEnum currentEnum(Ref<?> ref) {
         try {
             Object value = ref.getValue();
+            if (value instanceof OptionalPrimitive<?>) {
+                value = optionalInner(ref);
+            }
             return value instanceof ConfigEnum configEnum ? configEnum : null;
         } catch (Throwable e) {
             return null;
@@ -590,6 +675,10 @@ public class ConfigPage extends GenericScreen {
     /** 写回选中的枚举：走 Ref 自己的写入口，校验器与更新监听照旧生效。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static void selectEnum(Ref<?> ref, ConfigEnum value) {
+        if (ref.getValue() instanceof OptionalPrimitive<?>) {
+            writeOptionalOption(ref, value);
+            return;
+        }
         try {
             ((Ref) ref).setValue(value);
         } catch (Throwable e) {
@@ -934,6 +1023,10 @@ public class ConfigPage extends GenericScreen {
             boolean hot = open || (mouseX >= chipX && mouseX <= right && mouseY >= y + 3 && mouseY < y + 15);
             Ef.cutFill(ctx, chipX, y + 3, width, 12, hot ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), p.cut());
             Ef.text(ctx, text, chipX + 5, y + 5, p.ink());
+        } else if (ref.getValue() instanceof EntrySet<?> set) {
+            paintEntrySet(ctx, p, y, right, ref, set);
+        } else if (optionalRow(ref)) {
+            paintOptional(ctx, p, y, right, ref);
         } else if (ref instanceof KeyBindRef bindRef) {
             paintKeyBind(ctx, p, y, right, bindRef, item);
         } else if (ref.getValue() instanceof WrapColor color) {
@@ -943,6 +1036,70 @@ public class ConfigPage extends GenericScreen {
         } else {
             String text = Ef.ellipsis(valueText(ref), readOnlyWidth());
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink2());
+        }
+    }
+
+    /**
+     * 名单：一个「N 项 ▾」切角块，点开宿主的注册表选择屏。
+     *
+     * <p>增删要遍历注册表、要按 id 反查条目，自绘一份等于重写宿主的 {@code RegistrySelectScreen}；
+     * 这里只摆入口，编辑能力借宿主的——与模块配置页同一个思路。
+     */
+    private void paintEntrySet(VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref, EntrySet<?> set) {
+        String label = set.set().size() + " 项   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = right - width;
+        Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), Ef.CUT);
+        Ef.text(ctx, label, x + 5, y + 5, p.ink());
+    }
+
+    /**
+     * 可选值：行尾一个开关决定这一项是否生效，左边是内层值自己的控件。
+     *
+     * <p>没启用时值区写一块「未启用」，留空会被当成坏掉的控件。
+     * 内层可以是数值（就地编辑）或枚举（下拉），与模块配置页同一套画法。
+     */
+    private void paintOptional(VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref) {
+        OptionalPrimitive<?> optional = (OptionalPrimitive<?>) ref.getValue();
+        int sw = 20;
+        int sh = 9;
+        int sy = y + (ROW_H - sh) / 2;
+        if (optional.isPresent()) {
+            Ef.fill(ctx, right - sw, sy, sw, sh, p.ink());
+            Ef.fill(ctx, right - 9, sy + 2, 5, 5, p.paper());
+        } else {
+            Ef.dashedOutline(ctx, right - sw, sy, sw, sh, p.ink2());
+            Ef.fill(ctx, right - sw + 2, sy + 2, 5, 5, p.ink2());
+        }
+
+        int innerRight = right - 28;
+        Object inner = optionalInner(ref);
+        if (inner == null) {
+            String off = "未启用";
+            int offW = Ef.textWidth(off) + 10;
+            Ef.dashedOutline(ctx, innerRight - offW, y + 3, offW, 11, p.ink2());
+            Ef.text(ctx, off, innerRight - offW + 5, y + 5, p.ink2());
+            return;
+        }
+        if (inner instanceof ConfigEnum configEnum) {
+            String text = enumLabel(configEnum) + " ▾";
+            int width = Ef.textWidth(text) + 10;
+            boolean open = optionalKey(ref).equals(dropdownKey);
+            Ef.cutFill(ctx, innerRight - width, y + 3, width, 12,
+                    open ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), p.cut());
+            Ef.text(ctx, text, innerRight - width + 5, y + 5, p.ink());
+            return;
+        }
+        if (inner instanceof Number number) {
+            double numeric = number.doubleValue();
+            String text = formatNumber(numeric);
+            int width = Math.max(VALUE_W, Ef.textWidth(text) + 12);
+            Rect slot = new Rect(innerRight - width, y + FieldEditor.FIELD_TOP, width, FieldEditor.FIELD_H);
+            if (editor.isOpenFor(editorKey(ref, optionalKey(ref)))) {
+                FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), true, false);
+                return;
+            }
+            Ef.text(ctx, text, slot.x() + slot.w() - 6 - Ef.textWidth(text), y + 5, p.ink());
         }
     }
 
@@ -1116,8 +1273,17 @@ public class ConfigPage extends GenericScreen {
 
     /** 行内编辑的身份：数值与文本各占一份，同一行同一用途的 key 不随帧变化。 */
     private static String editorKey(Item item) {
-        String kind = item.ref().getValue() instanceof WrapColor ? "color:" : (textEditable(item.ref()) ? "text:" : "num:");
-        return kind + item.path();
+        return editorKey(item.ref(), item.path());
+    }
+
+    private static String editorKey(Ref<?> ref, String path) {
+        String kind = ref.getValue() instanceof WrapColor ? "color:" : (textEditable(ref) ? "text:" : "num:");
+        return kind + path;
+    }
+
+    /** 可选值内层枚举的下拉身份。 */
+    private static String optionalKey(Ref<?> ref) {
+        return "optional:" + System.identityHashCode(ref);
     }
 
     /** 枚举下拉的身份：芯片、候选与命中都认这一条路径。 */
@@ -1325,6 +1491,46 @@ public class ConfigPage extends GenericScreen {
         });
     }
 
+    /**
+     * 打开宿主的注册表选择屏。
+     *
+     * <p>回调里重建一份 {@code EntrySet} 再写回：宿主按 {@code (registry, set)} 判等，
+     * 原地改那个 {@code set} 不会触发更新监听。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openEntrySet(Ref<?> ref, EntrySet<?> set) {
+        try {
+            // 裸类型接：registry 与 set 的通配捕获对不上，带 <> 推不出类型参数
+            ScreenAccess.of(new RegistrySelectScreen(
+                            set.registry(),
+                            set.set(),
+                            (java.util.function.Consumer<java.util.Set>) selected -> {
+                                if (selected != null) {
+                                    ((Ref) ref).setValue(new EntrySet(set.registry(), selected));
+                                }
+                            },
+                            NewClickGui.elementFactory()))
+                    .openFromCurrent();
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 名单选择屏打开失败: " + e);
+        }
+    }
+
+    /** 可选值内层的数值编辑：几何由调用方算好，与绘制共用同一份。 */
+    private void openOptionalEditor(Ref<?> ref, int rowY, int x, int w, double current) {
+        editor.open(this, editorKey(ref, optionalKey(ref)), x, rowY + FieldEditor.FIELD_TOP, w,
+                formatNumber(current), true, value -> {
+                    try {
+                        double next = Double.parseDouble(value.trim().replace(',', '.'));
+                        if (Double.isFinite(next)) {
+                            writeOptionalNumber(ref, next);
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // 半截输入不是错误，继续等下一个字
+                    }
+                });
+    }
+
     private boolean apply(Item item, int rowY, int mx, int my, int button) {
         Ref<?> ref = item.ref();
         if (ref == null) {
@@ -1370,6 +1576,46 @@ public class ConfigPage extends GenericScreen {
             if (mx >= chipX && mx <= right && my >= rowY + 3 && my < rowY + 15) {
                 dropdownKey = enumKey(item);
                 return true;
+            }
+            return false;
+        }
+        if (ref.getValue() instanceof EntrySet<?> set) {
+            String label = set.set().size() + " 项   ▾";
+            int width = Ef.textWidth(label) + 10;
+            if (button == 0 && mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+                openEntrySet(ref, set);
+                return true;
+            }
+            return false;
+        }
+        if (optionalRow(ref)) {
+            // 行尾开关：只切「这一项是否生效」，不碰内层值
+            if (mx >= right - 22 && mx <= right + 2) {
+                OptionalPrimitive<?> optional = (OptionalPrimitive<?>) ref.getValue();
+                setOptionalPresent(ref, !optional.isPresent());
+                return true;
+            }
+            Object inner = optionalInner(ref);
+            if (inner == null) {
+                return false;
+            }
+            int innerRight = right - 28;
+            if (inner instanceof ConfigEnum) {
+                String text = enumLabel((ConfigEnum) inner) + " ▾";
+                int width = Ef.textWidth(text) + 10;
+                if (mx >= innerRight - width && mx <= innerRight && my >= rowY + 3 && my < rowY + 15) {
+                    dropdownKey = optionalKey(ref);
+                    return true;
+                }
+                return false;
+            }
+            if (inner instanceof Number number) {
+                String text = formatNumber(number.doubleValue());
+                int width = Math.max(VALUE_W, Ef.textWidth(text) + 12);
+                if (mx >= innerRight - width && mx < innerRight && my >= rowY + 3 && my < rowY + 15) {
+                    openOptionalEditor(ref, rowY, innerRight - width, width, number.doubleValue());
+                    return true;
+                }
             }
             return false;
         }
