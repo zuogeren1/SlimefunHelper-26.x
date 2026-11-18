@@ -10,6 +10,9 @@ import java.util.Objects;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.gui.GenericScreen;
+import me.matl114.gui.presets.choices.RegistrySelectScreen;
+import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hooks.BaritoneHooks;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.config.ValueAccessor;
@@ -370,6 +373,15 @@ public class BaritonePage extends GenericScreen {
         return "num:" + entry.name();
     }
 
+    /** 字符串与颜色各占一份编辑身份：同一行同一用途的 key 不随帧变化。 */
+    private static String textKey(Entry entry) {
+        return "text:" + entry.name();
+    }
+
+    private static String colorKey(Entry entry) {
+        return "color:" + entry.name();
+    }
+
     private void buildRows() {
         rows.clear();
         contentLeft = winX + PAD;
@@ -471,10 +483,60 @@ public class BaritonePage extends GenericScreen {
             paintSlider(ctx, p, row, mouseX, mouseY, formatNumber(current), current, bounds[0], bounds[1]);
         } else if (value instanceof Enum<?> option) {
             paintEnum(ctx, p, y, dropdown == row.entry(), option.name());
+        } else if (value instanceof WrapColor color) {
+            paintColor(ctx, p, y, color);
+        } else if (value instanceof EntrySet<?> set) {
+            paintEntrySet(ctx, p, y, set);
+        } else if (value instanceof CharSequence text) {
+            paintText(ctx, p, row, text.toString(), mouseX, mouseY);
         } else {
             String shown = Ef.ellipsis(preview(value), Math.min(200, Math.max(80, contentWidth / 2)));
             Ef.text(ctx, shown, controlRight() - Ef.textWidth(shown), y + 5, p.ink2());
         }
+    }
+
+    /** 颜色：切角块里一块色块加它的十六进制值，点开就地手输。 */
+    private void paintColor(VDrawContext ctx, Ef.Palette p, int y, WrapColor color) {
+        int rgb = color == null || color.color() == null ? 0xFFFFFF : color.asRGB();
+        String hex = String.format(Locale.ROOT, "#%06X", rgb & 0xFFFFFF);
+        int hexW = Ef.textWidth("#RRGGBB") + 2;
+        int width = 2 + 12 + 5 + hexW + 3;
+        int x = controlRight() - width;
+        Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), p.cut());
+        Ef.fill(ctx, x + 2, y + 3, 12, 12, 0xFF000000 | (rgb & 0xFFFFFF));
+        Ef.text(ctx, hex, x + 2 + 12 + 5, y + 5, p.ink());
+    }
+
+    /** 名单：一个「N 项 ▾」切角块，点开宿主的注册表选择屏。 */
+    private void paintEntrySet(VDrawContext ctx, Ef.Palette p, int y, EntrySet<?> set) {
+        String label = set.set().size() + " 项   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = controlRight() - width;
+        Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), p.cut());
+        Ef.text(ctx, label, x + 5, y + 5, p.ink());
+    }
+
+    /** 字符串：与数值槽同一套就地编辑，静态态画一条虚线底边说明这一格能点。 */
+    private void paintText(VDrawContext ctx, Ef.Palette p, Row row, String text, int mouseX, int mouseY) {
+        int fx = fieldX();
+        int fy = row.y() + FieldEditor.FIELD_TOP;
+        if (editor.isOpenFor(fieldKey(row.entry()))) {
+            FieldEditor.paintFrame(ctx, p, fx, fy, TEXT_W, FieldEditor.FIELD_H, true, false);
+            editor.setTextColor(p.ink());
+            return;
+        }
+        boolean over = mouseX >= fx && mouseX < fx + TEXT_W
+                && mouseY >= fy && mouseY < fy + FieldEditor.FIELD_H;
+        if (over) {
+            FieldEditor.paintFrame(ctx, p, fx, fy, TEXT_W, FieldEditor.FIELD_H, false, true);
+        } else {
+            int lineY = fy + FieldEditor.FIELD_H - 2;
+            for (int i = 0; i < TEXT_W; i += 3) {
+                Ef.fill(ctx, fx + i, lineY, Math.min(2, TEXT_W - i), 1, p.rule());
+            }
+        }
+        String shown = Ef.ellipsis(text, TEXT_W - 8);
+        Ef.text(ctx, shown, fx + TEXT_W - 6 - Ef.textWidth(shown), row.y() + 5, p.ink());
     }
 
     /** 行尾重置：只有拿得到出厂值的项才画，点它写回 {@code defaultValue}。 */
@@ -763,7 +825,103 @@ public class BaritonePage extends GenericScreen {
             }
             return false;
         }
+        if (value instanceof WrapColor color) {
+            int fx = fieldX();
+            if (button == 0 && mouseX >= fx && mouseX <= fx + TEXT_W) {
+                openColorField(row, entry, color);
+                return true;
+            }
+            return false;
+        }
+        if (value instanceof EntrySet<?> set) {
+            String label = set.set().size() + " 项   ▾";
+            int width = Ef.textWidth(label) + 10;
+            if (button == 0 && mouseX >= controlRight() - width && mouseX <= controlRight()
+                    && mouseY >= row.y() + 3 && mouseY < row.y() + 15) {
+                openEntrySet(entry, set);
+                return true;
+            }
+            return false;
+        }
+        if (value instanceof CharSequence text) {
+            int fx = fieldX();
+            if (button == 0 && mouseX >= fx && mouseX <= fx + TEXT_W) {
+                openTextField(row, entry, text.toString());
+                return true;
+            }
+            return false;
+        }
         return false;
+    }
+
+    /**
+     * 字符串就地编辑：非即时模式，Enter 或点到别处才交一次。
+     *
+     * <p>Baritone 的字符串设置（{@code prefix}、{@code schematicFallbackExtension}）改动会立刻影响
+     * 它自己的行为，逐字写回等于每敲一个字母就重配一次。
+     */
+    private void openTextField(Row row, Entry entry, String current) {
+        editor.open(this, textKey(entry), fieldX(), row.y() + FieldEditor.FIELD_TOP, TEXT_W, current, false,
+                text -> write(entry, text));
+    }
+
+    /**
+     * 颜色就地编辑：只认 {@code #RRGGBB} 与命名色。
+     *
+     * <p>十六进制按定长六位挡：{@code #} 开头的串只当十六进制解释，打到一半的半截值不能改掉设置。
+     */
+    private void openColorField(Row row, Entry entry, WrapColor current) {
+        int rgb = current == null || current.color() == null ? 0xFFFFFF : current.asRGB();
+        String seed = String.format(Locale.ROOT, "#%06X", rgb & 0xFFFFFF);
+        editor.open(this, colorKey(entry), fieldX(), row.y() + FieldEditor.FIELD_TOP, TEXT_W, seed, false,
+                text -> {
+                    String value = text.trim().toLowerCase(Locale.ROOT);
+                    if (value.startsWith("#") && !fullHex(value)) {
+                        return;
+                    }
+                    try {
+                        write(entry, new WrapColor(value));
+                    } catch (RuntimeException ignored) {
+                        // 名字拼错或者打到一半：等打完
+                    }
+                });
+    }
+
+    /** 整串是否就是 {@code #} 加六位十六进制。 */
+    private static boolean fullHex(String value) {
+        if (value.length() != 7) {
+            return false;
+        }
+        for (int i = 1; i < value.length(); i++) {
+            if (Character.digit(value.charAt(i), 16) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 名单：打开宿主的注册表选择屏。
+     *
+     * <p>回调里重建一份 {@code EntrySet} 再写回：Baritone 的访问器按 {@code list()} 取值，
+     * 原地改那个 {@code set} 不会反映到它的字段上。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openEntrySet(Entry entry, EntrySet<?> set) {
+        try {
+            ScreenAccess.of(new RegistrySelectScreen(
+                            set.registry(),
+                            set.set(),
+                            (java.util.function.Consumer<java.util.Set>) selected -> {
+                                if (selected != null) {
+                                    write(entry, new EntrySet(set.registry(), selected));
+                                }
+                            },
+                            NewClickGui.elementFactory()))
+                    .openFromCurrent();
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] Baritone 名单选择屏打开失败: " + e);
+        }
     }
 
     /**
