@@ -22,8 +22,12 @@ import me.matl114.gui.elements.IconElement;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
+import me.matl114.hacks.utils.config.BoundedPrimitiveFlagMap;
+import me.matl114.hacks.utils.config.EntityTypeEntrySet;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Holder;
+import me.matl114.hacks.utils.config.LabelVec2;
+import me.matl114.hacks.utils.config.LabelVec3;
 import me.matl114.hacks.utils.config.ItemStackTemplate;
 import me.matl114.hacks.utils.config.GuiSetting;
 import me.matl114.hacks.InvTasks;
@@ -41,6 +45,7 @@ import me.matl114.hacks.utils.config.RegexList;
 import me.matl114.managers.config.ListRef;
 import java.util.regex.Pattern;
 import me.matl114.hacks.utils.config.Vec2;
+import me.matl114.hacks.utils.config.Vec3;
 import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.managers.config.NBTType;
 import me.matl114.hacks.utils.config.WrapColor;
@@ -712,6 +717,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 writeOptionalNumber(target.ref(), value);
             } else if (part < 0) {
                 setNumeric(target.ref(), value);
+            } else if (target.ref().getValue() instanceof LabelVec2 label2) {
+                Vec2 data = part == 0
+                        ? new Vec2(value, label2.data().y())
+                        : new Vec2(label2.data().x(), value);
+                setValue(target.ref(), label2.withData(data));
+            } else if (target.ref().getValue() instanceof LabelVec3 label3) {
+                Vec3 data = switch (part) {
+                    case 0 -> new Vec3(value, label3.data().y(), label3.data().z());
+                    case 1 -> new Vec3(label3.data().x(), value, label3.data().z());
+                    default -> new Vec3(label3.data().x(), label3.data().y(), value);
+                };
+                setValue(target.ref(), label3.withData(data));
             } else {
                 setValue(target.ref(), withNumericPart(target.ref().getValue(), part, value));
             }
@@ -1067,6 +1084,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof Holder<?>
                 || value.getValue() instanceof ItemStackTemplate
                 || value.getValue() instanceof GuiSetting
+                || value.getValue() instanceof EntityTypeEntrySet
+                || value.getValue() instanceof BoundedPrimitiveFlagMap<?>
+                || value.getValue() instanceof LabelVec2
+                || value.getValue() instanceof LabelVec3
                 || value instanceof ListRef
                 || value.getValue() instanceof RegexList
                 || value.getValue() instanceof Regex
@@ -1305,6 +1326,13 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         // 位置配置画两行滑杆（X / Y），行高必须跟着算两行，否则下一行会压上来
         if (value instanceof WidgetPos) {
             return 2;
+        }
+        // 带标签的向量：标签是记录里的字符串，数值是内层的 Vec2 / Vec3
+        if (value instanceof LabelVec2) {
+            return 2;
+        }
+        if (value instanceof LabelVec3) {
+            return 3;
         }
         return 1;
     }
@@ -1873,6 +1901,16 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             paintTextValue(ctx, p, textValue, ref, regex.regex(), mouseX, mouseY);
         } else if (raw instanceof GuiSetting) {
             paintGuiSetting(ctx, p, y);
+        } else if (raw instanceof EntityTypeEntrySet set) {
+            paintCountChip(ctx, p, y, ref, set.set().size() + " 项");
+        } else if (raw instanceof BoundedPrimitiveFlagMap<?> flags) {
+            paintCountChip(ctx, p, y, ref, flagCount(flags) + " 项");
+        } else if (raw instanceof LabelVec2 label2) {
+            paintLabelVec(ctx, p, y, ref, label2.xLabel(), label2.yLabel(), null,
+                    label2.data().x(), label2.data().y(), 0, mouseX, mouseY);
+        } else if (raw instanceof LabelVec3 label3) {
+            paintLabelVec(ctx, p, y, ref, label3.xLabel(), label3.yLabel(), label3.zLabel(),
+                    label3.data().x(), label3.data().y(), label3.data().z(), mouseX, mouseY);
         } else {
             // 没有专用控件的类型：按值形态画成只读文本，不再退回宿主控件。
             // 一半自绘一半宿主会让同一张表里出现两种外观，宁可这一格暂时不可编辑。
@@ -2277,6 +2315,63 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         Ef.text(ctx, GUI_SETTING_CHIP, chip.x() + 5, chip.y() + 2, p.ink());
     }
 
+    /** 有界开关表里打开了几项：只数开着的，与宿主编辑屏的语义一致。 */
+    private static int flagCount(BoundedPrimitiveFlagMap<?> flags) {
+        int count = 0;
+        for (Object value : flags.toMap().values()) {
+            if (Boolean.TRUE.equals(value)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 带标签的向量：每格占一行，行名取记录里自带的标签。
+     *
+     * <p>标签是数据的一部分（{@code LabelVec2} 的 {@code xLabel}），不是字段名，
+     * 所以不能走 {@link #componentNames}——那个读的是记录分量名，会画成「X LABEL」。
+     */
+    private void paintLabelVec(
+            VDrawContext ctx, Ef.Palette p, int y, WrapperConfigRef<?> ref,
+            String xLabel, String yLabel, String zLabel, double x, double y2, double z,
+            int mouseX, int mouseY) {
+        String[] labels = {xLabel, yLabel, zLabel};
+        double[] values = {x, y2, z};
+        int count = zLabel == null ? 2 : 3;
+        int right = controlRight();
+        for (int i = 0; i < count; i++) {
+            int partY = y + i * ROW_H;
+            String text = formatNumber(values[i]);
+            int width = Math.max(TEXT_W, Ef.textWidth(text) + 12);
+            int slotX = right - width;
+            int slotY = partY + FIELD_TOP;
+            paintPartName(ctx, p, partY, slotX - 8, labelText(labels[i]));
+            if (numberTarget == ref && numberPart == i) {
+                paintFieldFrame(ctx, p, slotX, slotY, width, FIELD_H, true, false);
+                continue;
+            }
+            boolean hot = inBox(slotX, slotY, width, FIELD_H, mouseX, mouseY);
+            if (hot) {
+                paintFieldFrame(ctx, p, slotX, slotY, width, FIELD_H, false, true);
+            } else {
+                int lineY = slotY + FIELD_H - 2;
+                for (int k = 0; k < width; k += 3) {
+                    Ef.fill(ctx, slotX + k, lineY, Math.min(2, width - k), 1, p.rule());
+                }
+            }
+            Ef.text(ctx, text, slotX + width - 6 - Ef.textWidth(text), partY + 5, p.ink());
+        }
+    }
+
+    /** 标签是翻译键：取不到就原样显示，别让一格坏掉整行。 */
+    private static String labelText(String key) {
+        if (key == null || key.isEmpty()) {
+            return "";
+        }
+        return Component.translatableWithFallback(key, key).getString();
+    }
+
     /** GUI 设置入口块的矩形：绘制与命中取同一份，块才不会「看得见点不到」。 */
     private Box guiSettingChip(int rowY) {
         int width = Ef.textWidth(GUI_SETTING_CHIP) + 10;
@@ -2411,6 +2506,29 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         } catch (Throwable e) {
             me.matl114.utils.Debug.info("[SFH+] 键值表编辑器打开失败: " + e);
         }
+    }
+
+    /** 带标签向量的一击：每格一个数值槽，点开就地编辑。 */
+    private boolean hitLabelVec(
+            WrapperConfigRef<?> wrapper, int count, double x, double y2, double z,
+            int mouseX, int mouseY, int button, int rowY) {
+        if (button != 0) {
+            return false;
+        }
+        int right = controlRight();
+        double[] values = {x, y2, z};
+        int index = Math.max(0, Math.min(count - 1, (mouseY - rowY) / ROW_H));
+        String text = formatNumber(values[index]);
+        int width = Math.max(TEXT_W, Ef.textWidth(text) + 12);
+        int slotX = right - width;
+        int slotY = rowY + index * ROW_H + FIELD_TOP;
+        if (!inBox(slotX, slotY, width, FIELD_H, mouseX, mouseY)) {
+            return false;
+        }
+        numberTarget = wrapper;
+        numberPart = index;
+        numberRowY = rowY;
+        return true;
     }
 
     /** GUI 设置行的一击：只有入口块接，点开宿主那一整套编辑屏。 */
@@ -2558,8 +2676,54 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         if (button != 0 || !inBox(x, rowY + 3, width, 12, mouseX, mouseY)) {
             return false;
         }
+        Object raw = wrapper.ref().getValue();
+        if (raw instanceof EntityTypeEntrySet set) {
+            openEntityTypeSet(wrapper, set);
+            return true;
+        }
+        if (raw instanceof BoundedPrimitiveFlagMap<?> flags) {
+            openBoundedFlagMap(wrapper, flags);
+            return true;
+        }
         openListEditor(wrapper);
         return true;
+    }
+
+    /**
+     * 打开实体类型集合的编辑屏。
+     *
+     * <p>这一项不是 {@code EntrySet}：它由「生成组 + 追加 + 排除」三段拼出来，
+     * 宿主的注册表选择屏只认一个扁平集合，套上去会把三段结构压平。
+     * 所以借它自己的编辑屏，写回时整份替换。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openEntityTypeSet(WrapperConfigRef<?> wrapper, EntityTypeEntrySet set) {
+        try {
+            ScreenAccess.of(new me.matl114.gui.presets.choices.EntityTypeEntrySetScreen(
+                            set, next -> setValue(wrapper.ref(), next), NewClickGui.elementFactory()))
+                    .openFromCurrent();
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 实体集合编辑屏打开失败: " + e);
+        }
+    }
+
+    /**
+     * 打开有界开关表（HUD 元素、皮肤部件…）的编辑屏。
+     *
+     * <p>键是枚举、值是布尔，宿主按「键清单 + 值类型」生成一张表；
+     * 这里直接借它产出的控件，塞进一个独立屏——与键值表那条路同一个思路。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openBoundedFlagMap(WrapperConfigRef<?> wrapper, BoundedPrimitiveFlagMap<?> flags) {
+        try {
+            AttrKeyValue<Object> source = (AttrKeyValue<Object>) (AttrKeyValue<?>) handle(wrapper);
+            DrawableWidget widget = source.generateValueWidget(NewClickGui.elementFactory(), 0, 0, 300, 20);
+            if (widget != null) {
+                ScreenAccess.of(new HostEditorScreen(widget, 300, 20)).openFromCurrent();
+            }
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 有界开关表编辑屏打开失败: " + e);
+        }
     }
 
     /**
@@ -3632,6 +3796,20 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof GuiSetting) {
             return hitGuiSetting(wrapper, mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof EntityTypeEntrySet set) {
+            return hitCountChip(wrapper, set.set().size(), mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof BoundedPrimitiveFlagMap<?> flags) {
+            return hitCountChip(wrapper, flagCount(flags), mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof LabelVec2 label2) {
+            return hitLabelVec(wrapper, 2, label2.data().x(), label2.data().y(), 0,
+                    mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof LabelVec3 label3) {
+            return hitLabelVec(wrapper, 3, label3.data().x(), label3.data().y(), label3.data().z(),
+                    mouseX, mouseY, button, rowY);
         }
         if (ref instanceof ListRef listRef) {
             return hitCountChip(wrapper, listRef.get().size(), mouseX, mouseY, button, rowY);

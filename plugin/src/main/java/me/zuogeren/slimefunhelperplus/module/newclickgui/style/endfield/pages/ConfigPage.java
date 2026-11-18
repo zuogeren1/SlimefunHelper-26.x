@@ -36,9 +36,14 @@ import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.PrimitiveList;
 import me.matl114.hacks.utils.config.PrimitiveMap;
 import me.matl114.hacks.utils.config.RegexList;
+import me.matl114.hacks.utils.config.BoundedPrimitiveFlagMap;
+import me.matl114.hacks.utils.config.EntityTypeEntrySet;
 import me.matl114.hacks.utils.config.GuiSetting;
+import me.matl114.hacks.utils.config.LabelVec2;
+import me.matl114.hacks.utils.config.LabelVec3;
 import me.matl114.hacks.utils.config.StringEnum;
 import me.matl114.hacks.utils.config.Vec2;
+import me.matl114.hacks.utils.config.Vec3;
 import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.managers.config.ListRef;
 import me.matl114.managers.config.NBTType;
@@ -446,6 +451,10 @@ public class ConfigPage extends GenericScreen {
                 || ref.getValue() instanceof StringEnum
                 || ref.getValue() instanceof WidgetPos
                 || ref.getValue() instanceof GuiSetting
+                || ref.getValue() instanceof EntityTypeEntrySet
+                || ref.getValue() instanceof BoundedPrimitiveFlagMap<?>
+                || ref.getValue() instanceof LabelVec2
+                || ref.getValue() instanceof LabelVec3
                 || booleanParts(ref.getValue()) != null
                 || recordParts(ref.getValue()) != null;
     }
@@ -548,6 +557,13 @@ public class ConfigPage extends GenericScreen {
         // 位置配置画两行（X / Y），行高必须跟着算两行，否则下一行会压上来
         if (ref.getValue() instanceof WidgetPos) {
             return 2;
+        }
+        // 带标签的向量：标签是记录里的字符串，数值是内层的 Vec2 / Vec3
+        if (ref.getValue() instanceof LabelVec2) {
+            return 2;
+        }
+        if (ref.getValue() instanceof LabelVec3) {
+            return 3;
         }
         return 1;
     }
@@ -1331,6 +1347,16 @@ public class ConfigPage extends GenericScreen {
             paintGuiSetting(ctx, p, y, right);
         } else if (ref.getValue() instanceof StringEnum choice) {
             paintStringEnum(ctx, p, y, right, ref, choice);
+        } else if (ref.getValue() instanceof EntityTypeEntrySet set) {
+            paintCountChip(ctx, p, y, right, set.set().size() + " 项");
+        } else if (ref.getValue() instanceof BoundedPrimitiveFlagMap<?> flags) {
+            paintCountChip(ctx, p, y, right, flagCount(flags) + " 项");
+        } else if (ref.getValue() instanceof LabelVec2 label2) {
+            paintLabelVec(ctx, p, y, right, ref, label2.xLabel(), label2.yLabel(), null,
+                    label2.data().x(), label2.data().y(), 0, mouseX, mouseY);
+        } else if (ref.getValue() instanceof LabelVec3 label3) {
+            paintLabelVec(ctx, p, y, right, ref, label3.xLabel(), label3.yLabel(), label3.zLabel(),
+                    label3.data().x(), label3.data().y(), label3.data().z(), mouseX, mouseY);
         } else if (optionalRow(ref)) {
             paintOptional(ctx, p, y, right, ref);
         } else if (ref instanceof KeyBindRef bindRef) {
@@ -1529,6 +1555,76 @@ public class ConfigPage extends GenericScreen {
         int x = right - width;
         Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), p.cut());
         Ef.text(ctx, GUI_SETTING_CHIP, x + 5, y + 5, p.ink());
+    }
+
+    /** 计数块：一个「N 项 ▾」切角块，点开宿主的编辑屏。 */
+    private void paintCountChip(VDrawContext ctx, Ef.Palette p, int y, int right, String text) {
+        String label = text + "   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = right - width;
+        Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), p.cut());
+        Ef.text(ctx, label, x + 5, y + 5, p.ink());
+    }
+
+    /** 有界开关表里打开了几项：只数开着的，与宿主编辑屏的语义一致。 */
+    private static int flagCount(BoundedPrimitiveFlagMap<?> flags) {
+        int count = 0;
+        for (Object value : flags.toMap().values()) {
+            if (Boolean.TRUE.equals(value)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 带标签的向量：每格占一行，行名取记录里自带的标签。
+     *
+     * <p>标签是数据的一部分（{@code LabelVec2} 的 {@code xLabel}），不是字段名，
+     * 所以不能走 {@link #componentNames}——那个读的是记录分量名，会画成「X LABEL」。
+     */
+    private void paintLabelVec(
+            VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref,
+            String xLabel, String yLabel, String zLabel, double x, double y2, double z,
+            int mouseX, int mouseY) {
+        String[] labels = {xLabel, yLabel, zLabel};
+        double[] values = {x, y2, z};
+        int count = zLabel == null ? 2 : 3;
+        for (int i = 0; i < count; i++) {
+            int partY = y + i * ROW_H;
+            String text = formatNumber(values[i]);
+            int width = Math.max(VALUE_W, Ef.textWidth(text) + 12);
+            Rect slot = new Rect(right - width, partY + FieldEditor.FIELD_TOP, width, FieldEditor.FIELD_H);
+            paintPartName(ctx, p, partY, slot.x() - 8, labelText(labels[i]));
+            if (editor.isOpenFor(labelVecKey(ref, i))) {
+                FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), true, false);
+                continue;
+            }
+            boolean hot = mouseX >= slot.x() && mouseX < slot.x() + slot.w()
+                    && mouseY >= slot.y() && mouseY < slot.y() + slot.h();
+            if (hot) {
+                FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), false, true);
+            } else {
+                int lineY = slot.y() + slot.h() - 2;
+                for (int k = 0; k < slot.w(); k += 3) {
+                    Ef.fill(ctx, slot.x() + k, lineY, Math.min(2, slot.w() - k), 1, p.rule());
+                }
+            }
+            Ef.text(ctx, text, slot.x() + slot.w() - 6 - Ef.textWidth(text), partY + 5, p.ink());
+        }
+    }
+
+    /** 标签是翻译键：取不到就原样显示，别让一格坏掉整行。 */
+    private static String labelText(String key) {
+        if (key == null || key.isEmpty()) {
+            return "";
+        }
+        return Component.translatableWithFallback(key, key).getString();
+    }
+
+    /** 带标签向量里某一格的身份：绘制、命中与编辑共用。 */
+    private static String labelVecKey(Ref<?> ref, int part) {
+        return "labelvec:" + System.identityHashCode(ref) + ":" + part;
     }
 
     /** 有限字符串候选：与枚举同一套下拉，值框显示当前项。 */
@@ -2193,6 +2289,93 @@ public class ConfigPage extends GenericScreen {
         });
     }
 
+    /** 带标签向量的一击：每格一个数值槽，点开就地编辑。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private boolean applyLabelVec(
+            Ref<?> ref, int rowY, int mx, int my, int button, int count, double x, double y2, double z) {
+        if (button != 0) {
+            return false;
+        }
+        int right = itemsRight();
+        double[] values = {x, y2, z};
+        int index = Math.max(0, Math.min(count - 1, (my - rowY) / ROW_H));
+        String text = formatNumber(values[index]);
+        int width = Math.max(VALUE_W, Ef.textWidth(text) + 12);
+        int slotX = right - width;
+        int slotY = rowY + index * ROW_H + FieldEditor.FIELD_TOP;
+        if (mx >= slotX && mx < slotX + width && my >= slotY && my < slotY + FieldEditor.FIELD_H) {
+            openLabelVecEditor(ref, index, slotX, slotY, width, values[index]);
+            return true;
+        }
+        return false;
+    }
+
+    /** 带标签向量里某一格的数值编辑：几何与绘制共用同一份。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openLabelVecEditor(Ref<?> ref, int part, int x, int y, int w, double current) {
+        editor.open(this, labelVecKey(ref, part), x, y, w, formatNumber(current), true, value -> {
+            try {
+                double next = Double.parseDouble(value.trim().replace(',', '.'));
+                if (!Double.isFinite(next)) {
+                    return;
+                }
+                Object raw = ref.getValue();
+                if (raw instanceof LabelVec2 label2) {
+                    Vec2 data = part == 0
+                            ? new Vec2(next, label2.data().y())
+                            : new Vec2(label2.data().x(), next);
+                    ((Ref) ref).setValue(label2.withData(data));
+                } else if (raw instanceof LabelVec3 label3) {
+                    Vec3 data = switch (part) {
+                        case 0 -> new Vec3(next, label3.data().y(), label3.data().z());
+                        case 1 -> new Vec3(label3.data().x(), next, label3.data().z());
+                        default -> new Vec3(label3.data().x(), label3.data().y(), next);
+                    };
+                    ((Ref) ref).setValue(label3.withData(data));
+                }
+            } catch (NumberFormatException ignored) {
+                // 半截输入不是错误，继续等下一个字
+            }
+        });
+    }
+
+    /**
+     * 打开实体类型集合的编辑屏。
+     *
+     * <p>这一项不是 {@code EntrySet}：它由「生成组 + 追加 + 排除」三段拼出来，
+     * 宿主的注册表选择屏只认一个扁平集合，套上去会把三段结构压平。
+     * 所以借它自己的编辑屏，写回时整份替换。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openEntityTypeSet(Ref<?> ref, EntityTypeEntrySet set) {
+        try {
+            ScreenAccess.of(new me.matl114.gui.presets.choices.EntityTypeEntrySetScreen(
+                            set, next -> ((Ref) ref).setValue(next), NewClickGui.elementFactory()))
+                    .openFromCurrent();
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 实体集合编辑屏打开失败: " + e);
+        }
+    }
+
+    /**
+     * 打开有界开关表（HUD 元素、皮肤部件…）的编辑屏。
+     *
+     * <p>键是枚举、值是布尔，宿主按「键清单 + 值类型」生成一张表；
+     * 写回要包一层转换，否则它会把 {@code Map} 直接写回那个包装类型。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openBoundedFlagMap(Ref<?> ref, BoundedPrimitiveFlagMap<?> flags) {
+        try {
+            AttrKeyValue<Object> source = (AttrKeyValue<Object>) (AttrKeyValue<?>) ref.createKeyValue("bounded");
+            DrawableWidget widget = source.generateValueWidget(NewClickGui.elementFactory(), 0, 0, 300, 20);
+            if (widget != null) {
+                ScreenAccess.of(new HostEditorScreen(widget, 300, 20)).openFromCurrent();
+            }
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 有界开关表编辑屏打开失败: " + e);
+        }
+    }
+
     /** 打开 GUI 设置的详细页：本界面自己的屏，不是宿主那一套。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void openGuiSetting(Ref<?> ref) {
@@ -2335,6 +2518,38 @@ public class ConfigPage extends GenericScreen {
                 return true;
             }
             return false;
+        }
+        if (ref.getValue() instanceof EntityTypeEntrySet set) {
+            if (button != 0) {
+                return false;
+            }
+            String label = set.set().size() + " 项   ▾";
+            int width = Ef.textWidth(label) + 10;
+            if (mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+                openEntityTypeSet(ref, set);
+                return true;
+            }
+            return false;
+        }
+        if (ref.getValue() instanceof BoundedPrimitiveFlagMap<?> flags) {
+            if (button != 0) {
+                return false;
+            }
+            String label = flagCount(flags) + " 项   ▾";
+            int width = Ef.textWidth(label) + 10;
+            if (mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+                openBoundedFlagMap(ref, flags);
+                return true;
+            }
+            return false;
+        }
+        if (ref.getValue() instanceof LabelVec2 label2) {
+            return applyLabelVec(ref, rowY, mx, my, button, 2,
+                    label2.data().x(), label2.data().y(), 0);
+        }
+        if (ref.getValue() instanceof LabelVec3 label3) {
+            return applyLabelVec(ref, rowY, mx, my, button, 3,
+                    label3.data().x(), label3.data().y(), label3.data().z());
         }
         if (recordParts(ref.getValue()) != null) {
             Object[] parts = recordParts(ref.getValue());
