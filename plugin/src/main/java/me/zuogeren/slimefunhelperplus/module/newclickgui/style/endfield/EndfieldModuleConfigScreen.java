@@ -70,6 +70,7 @@ import me.zuogeren.slimefunhelperplus.module.custommodel.model.ModelRuntime;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.ui.Settings;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages.EndfieldPages;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.pages.GuiSettingPage;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.core.Registry;
@@ -2374,18 +2375,18 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 打开宿主的 GUI 设置编辑屏。
+     * 打开 GUI 设置的详细页：本界面自己的屏，不是宿主那一套。
      *
-     * <p>写回走的是 {@link #handle} 那一份 {@code AttrKeyValue}：宿主编辑屏改完调 {@code accept}，
-     * 监听器再转成 {@code Ref#setValue}，与本界面其它控件是同一条链路。
+     * <p>那一份设置由十来个分量组成，摊成一行一项正好是本界面已有的控件形态；
+     * 宿主编辑屏的外观与这里对不上，所以只借它的数据结构，不借它的界面。
      */
     @SuppressWarnings("unchecked")
     private void openGuiSettingEditor(WrapperConfigRef<?> wrapper) {
         try {
-            AttrKeyValue<GuiSetting> source = (AttrKeyValue<GuiSetting>) (AttrKeyValue<?>) handle(wrapper);
-            HostControls.openGuiSettingEditor(NewClickGui.elementFactory(), source);
+            WrapperConfigRef<GuiSetting> target = (WrapperConfigRef<GuiSetting>) wrapper;
+            ScreenAccess.of(new GuiSettingPage(target, settings)).openFromCurrent();
         } catch (Throwable e) {
-            me.matl114.utils.Debug.info("[SFH+] GUI 设置编辑器打开失败: " + e);
+            me.matl114.utils.Debug.info("[SFH+] GUI 设置页打开失败: " + e);
         }
     }
 

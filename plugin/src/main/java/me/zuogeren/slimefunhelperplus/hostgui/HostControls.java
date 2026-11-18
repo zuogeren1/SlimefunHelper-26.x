@@ -1,13 +1,9 @@
 package me.zuogeren.slimefunhelperplus.hostgui;
 
-import java.lang.reflect.Method;
 import java.util.function.Consumer;
 import me.matl114.gui.Constants;
 import me.matl114.gui.FilterService;
-import me.matl114.gui.interfaces.ElementFactory;
-import me.matl114.hacks.utils.config.GuiSetting;
 import me.matl114.managers.config.Ref;
-import me.matl114.utils.Debug;
 import me.matl114.utils.config.AttrKeyValue;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
@@ -87,41 +83,5 @@ public final class HostControls {
     /** 行尾重置按钮的图标。 */
     public static Identifier resetIcon() {
         return Constants.RESET_BUTTON_SPRITE;
-    }
-
-    /**
-     * 宿主的 GUI 设置编辑屏。
-     *
-     * <p>宿主把「打开编辑屏」做成了 {@code GuiSetting} 自己的控件工厂，产出的却只是一个按钮；
-     * 真正的编辑屏构造是私有的。这里按方法名反射进去——宿主改名时只会在本类失效，
-     * 调用方看到的是「点了没反应」而不是崩溃。
-     */
-    public static void openGuiSettingEditor(ElementFactory factory, AttrKeyValue<GuiSetting> source) {
-        Method editor = guiSettingEditor();
-        if (editor == null) {
-            return;
-        }
-        try {
-            editor.invoke(null, factory, source);
-        } catch (Throwable e) {
-            Debug.info("[SFH+] GUI 设置编辑器打开失败: " + e);
-        }
-    }
-
-    /** 解析结果只算一次：找不到就一直是 null，不必每点一次都去反射一遍。 */
-    private static Method guiSettingEditor;
-
-    private static Method guiSettingEditor() {
-        if (guiSettingEditor == null) {
-            try {
-                Method method =
-                        GuiSetting.class.getDeclaredMethod("openEditorScreen", ElementFactory.class, AttrKeyValue.class);
-                method.setAccessible(true);
-                guiSettingEditor = method;
-            } catch (Throwable e) {
-                Debug.info("[SFH+] 找不到宿主的 GUI 设置编辑屏: " + e);
-            }
-        }
-        return guiSettingEditor;
     }
 }
