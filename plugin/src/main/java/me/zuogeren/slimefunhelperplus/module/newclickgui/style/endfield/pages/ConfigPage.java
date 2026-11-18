@@ -814,6 +814,13 @@ public class ConfigPage extends GenericScreen {
                 String keys = bind.isEmpty() ? "" : bind.getKeyStr();
                 return keys.isEmpty() ? "未绑定" : keys;
             }
+            // 文本族取原文：它们的 toString 是类名，摆到行里等于什么都没说
+            if (value instanceof Regex regex) {
+                return regex.regex();
+            }
+            if (value instanceof StringFormat format) {
+                return format.formatString();
+            }
             String text = String.valueOf(value);
             return text.length() > 40 ? text.substring(0, 40) + "..." : text;
         } catch (Throwable e) {
@@ -1349,8 +1356,9 @@ public class ConfigPage extends GenericScreen {
         }
         boolean blank = false;
         String text;
-        if (ref instanceof StringRef) {
-            text = textValueOf(ref);
+        if (textEditable(ref)) {
+            // 文本族（字符串 / 正则 / 格式化串）取的是原文：String.valueOf 会输出类名
+            text = editableTextOf(ref);
             blank = text.isEmpty();
         } else {
             text = valueText(ref);
