@@ -146,6 +146,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int PAL_HEAD = 14;
     /** 动作节的分节键：不会与任何配置路径相同（配置路径里不可能出现 NUL）。 */
     private static final String ACTION_SECTION = "\u0000actions";
+
+    /** 模块自定义控件那一节：同样不是配置路径，标题写死。 */
+    private static final String CUSTOM_SECTION = "\u0000custom";
     /** 数值格的下标：-1 是整值，>= 0 是记录分量，-2 是「可选值」里那一层。 */
     private static final int OPTIONAL_PART = -2;
 
@@ -298,6 +301,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
 
     /** 这一帧鼠标停在物品模板的编辑按钮上。 */
     private boolean itemTemplateHover;
+
+    /** 模块自己塞进来的控件：每帧重建，位置由 buildRows 排。 */
+    private final List<DrawableWidget> customWidgets = new ArrayList<>();
+
+    /** 已经挂到屏幕上的那一批：与 customWidgets 不是同一份对象时整批换掉。 */
+    private final List<DrawableWidget> mountedCustom = new ArrayList<>();
 
 
     /** 没有显式约束的数值，其推导区间只算一次，避免跨数量级时轨道跳档；复合数值按分量分开记。 */
@@ -539,6 +548,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         // 布局重来（开屏、改窗口大小）时行会挪位：浮层的锚点跟着失效，先收起来
         this.palette = null;
         this.listPanel = null;
+        // 重新 init 会把子控件全部清掉：这份记录跟着作废，否则 tick 会以为它们还在屏幕上
+        this.mountedCustom.clear();
+        this.customWidgets.clear();
         // 输入框随旧控件树一起拆掉了：先把打的字提交掉，再作废目标（没在编辑时这一下什么都不做）
         closeTextEdit();
         if (tabKey != null) {
@@ -582,6 +594,51 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         applyNumberText(box, numberTarget, numberPart);
         this.addRenderableWidget(box);
         this.setFocused(box);
+    }
+
+    /**
+     * 把模块自定义控件挂到屏幕上。
+     *
+     * <p>与输入框同一条规矩：增删控件不能发生在点击/渲染的遍历里，所以统一在 tick 做。
+     * 每帧 {@code buildRows} 会重建 {@code customWidgets}，这里按对象身份判断要不要整批换。
+     */
+    private void syncCustomWidgets() {
+        if (customWidgets.size() == mountedCustom.size()
+                && java.util.stream.IntStream.range(0, customWidgets.size())
+                        .allMatch(i -> customWidgets.get(i) == mountedCustom.get(i))) {
+            // 同一批对象：只更新位置，不重挂
+            for (int i = 0; i < mountedCustom.size(); i++) {
+                placeCustomWidget(i);
+            }
+            return;
+        }
+        for (DrawableWidget old : mountedCustom) {
+            this.removeWidget(old);
+        }
+        mountedCustom.clear();
+        for (DrawableWidget widget : customWidgets) {
+            this.addRenderableWidget(widget);
+            mountedCustom.add(widget);
+        }
+        for (int i = 0; i < mountedCustom.size(); i++) {
+            placeCustomWidget(i);
+        }
+    }
+
+    /** 第 {@code index} 个自定义控件摆在哪：位置由 buildRows 排出的行决定。 */
+    private void placeCustomWidget(int index) {
+        int seen = -1;
+        for (Row row : rows) {
+            if (!CUSTOM_SECTION.equals(row.section) || row.header) {
+                continue;
+            }
+            if (++seen == index) {
+                DrawableWidget widget = mountedCustom.get(index);
+                widget.setX(contentLeft);
+                widget.setY(row.y);
+                return;
+            }
+        }
     }
 
     private static String numberKey(WrapperConfigRef<?> target, int part, int rowY) {
@@ -900,6 +957,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     @Override
     public void tick() {
         super.tick();
+        // 自定义控件的位置来自 buildRows 排出的行：tick 可能先于第一次绘制跑，
+        // 不先建一次的话首帧挂上去的控件全在 (0,0)
+        buildRows();
+        syncCustomWidgets();
         if (numberTarget == null) {
             if (numberBox != null) {
                 numberBox.setResponder(null);
@@ -1440,6 +1501,21 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             rows.add(new Row(y, height, ref, section, false));
             y += height;
         }
+        // 模块自己往配置页塞的控件（聊天密钥、服务器存储…）：宿主也是这么接的，
+        // 不接的话这些模块的入口在本界面里整个消失
+        customWidgets.clear();
+        if (module != null) {
+            module.addCustomWidgets(
+                    widget -> customWidgets.add(widget), contentWidth, ROW_H, 6, NewClickGui.elementFactory());
+        }
+        if (!customWidgets.isEmpty()) {
+            rows.add(new Row(y, SECTION_H, null, CUSTOM_SECTION, true));
+            y += SECTION_H;
+            for (DrawableWidget widget : customWidgets) {
+                rows.add(new Row(y, ROW_H, null, CUSTOM_SECTION, false));
+                y += ROW_H;
+            }
+        }
         List<Action> actions = actions();
         if (!actions.isEmpty()) {
             rows.add(new Row(y, SECTION_H, null, ACTION_SECTION, true));
@@ -1534,9 +1610,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                     }
                     if (row.header) {
                         paintSection(ctx, p, row.y, row.section);
-                    } else {
+                    } else if (row.ref != null) {
                         paintRow(ctx, p, row.y, row.ref, mouseX, mouseY);
                     }
+                    // 自定义控件自己画自己，这里只留出行高
                 }
             }
             for (ActionRow row : actionRows) {
@@ -1559,13 +1636,17 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private void paintSection(VDrawContext ctx, Ef.Palette p, int y, String section) {
         // 动作节不是配置路径，没有翻译键可用，眉标与标题都写死
         boolean actions = ACTION_SECTION.equals(section);
+        boolean custom = CUSTOM_SECTION.equals(section);
         String head = actions
                 ? "ACTIONS"
-                : (section.isEmpty() ? "MAIN" : leaf(section).replace('-', ' ').toUpperCase(Locale.ROOT));
+                : custom
+                        ? "CUSTOM"
+                        : (section.isEmpty() ? "MAIN" : leaf(section).replace('-', ' ').toUpperCase(Locale.ROOT));
         String eyebrow = "// " + head;
         Ef.trackedWide(ctx, eyebrow, contentLeft, y + 7, p.ink2(), 1, 1.2F);
         int titleX = contentLeft + Math.max(72, Ef.trackedWideWidth(eyebrow, 1, 1.2F) + 10);
-        Ef.text(ctx, actions ? "操作" : sectionTitle(section), titleX, y + 7, p.ink());
+        String title = actions ? "操作" : custom ? "模块工具" : sectionTitle(section);
+        Ef.text(ctx, title, titleX, y + 7, p.ink());
         Ef.rule(ctx, contentLeft, y + SECTION_H - 6, contentWidth, p.rule());
     }
 
