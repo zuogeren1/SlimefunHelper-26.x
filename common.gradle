@@ -220,20 +220,34 @@ def pluginJarDir = rootProject.file("plugin/versions/${project.minecraft_version
 def pluginModsDir = rootProject.file("run/${project.minecraft_version}/mods")
 def includedPlugin = gradle.includedBuilds.find { it.name == 'plugin' }
 
+// 插件工程是可选的：它放在 plugin/ 子目录里，也可能被拆成独立仓库再挂回来。
+// 缺了它宿主照样要能构建，所以这里一律「有就用、没有就跳过」——
+// 配置期抛异常会让 ./gradlew buildAndGather 本身也跑不起来。
+def pluginPropsFile = rootProject.file('plugin/gradle.properties')
+def pluginProps = new Properties()
+if (pluginPropsFile.isFile()) {
+	pluginPropsFile.withInputStream { pluginProps.load(it) }
+}
+
 // 只拷当前 mod_version 的那一个 jar：build/libs 里会同时留着历史版本的产物，
 // 按 '*.jar' 全量拷贝会把旧包一起带进 mods。Fabric 对同 id 的多个候选不报错，
 // 只按版本挑一个，旧包会静默参与解析（版本号相同时挑哪个取决于目录顺序）。
-def pluginProps = new Properties()
-rootProject.file('plugin/gradle.properties').withInputStream { pluginProps.load(it) }
-def pluginJarName = "${pluginProps.getProperty('archives_base_name')}-${project.minecraft_version}-${pluginProps.getProperty('mod_version')}.jar"
-def pluginJarFile = new File(pluginJarDir, pluginJarName)
+def pluginJarName = pluginPropsFile.isFile()
+		? "${pluginProps.getProperty('archives_base_name')}-${project.minecraft_version}-${pluginProps.getProperty('mod_version')}.jar"
+		: null
+def pluginJarFile = pluginJarName == null ? null : new File(pluginJarDir, pluginJarName)
 
 def syncPluginJar = tasks.register('syncPluginJar', Copy) {
 	group = 'slimefunhelper'
 	description = "构建 SlimeFunHelper+ 并把它的 jar 放进 run/${project.minecraft_version}/mods"
 
-	from(pluginJarDir) {
-		include pluginJarName
+	// 插件不在时整个任务跳过：只构建宿主的人不该被它挡住
+	onlyIf { pluginJarName != null }
+
+	if (pluginJarName != null) {
+		from(pluginJarDir) {
+			include pluginJarName
+		}
 	}
 	into pluginModsDir
 
@@ -243,6 +257,9 @@ def syncPluginJar = tasks.register('syncPluginJar', Copy) {
 	outputs.upToDateWhen { false }
 
 	doFirst {
+		if (pluginJarName == null) {
+			return
+		}
 		// 名字对不上时 Copy 会静默拷 0 个文件，mods 被清空后游戏照常启动、插件却没加载，
 		// 比直接失败更难查。先确认产物存在再删。
 		if (!pluginJarFile.isFile()) {
@@ -260,7 +277,9 @@ def syncPluginJar = tasks.register('syncPluginJar', Copy) {
 	}
 }
 
-if (includedPlugin == null) {
+if (pluginJarName == null) {
+	logger.info("[slimefunhelper] 没有 plugin/ 工程，跳过插件构建与同步")
+} else if (includedPlugin == null) {
 	logger.warn("[slimefunhelper] settings.gradle 没有 includeBuild('plugin')，syncPluginJar 只会拷贝已存在的 jar")
 }
 

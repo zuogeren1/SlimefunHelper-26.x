@@ -33,8 +33,14 @@ repositories {
 // 宿主 jar：仓库根 build/release/SlimefunHelper-<mc版本>-<宿主 mod_version>.jar；
 // 刚 buildAndGather 完、还没同步到 build/release 时，build/libs 里那份同样新，退而取它。
 // 宿主 mod_version 直接读仓库根 gradle.properties（本工程不重复维护）。
+// 宿主版本号：优先取 -Phost_mod_version，其次读宿主仓库根的 gradle.properties。
+// 插件工程可能被单独 clone 出来（那时 ../ 不是宿主仓库），所以读不到时不能直接抛——
+// 留到编译期由 ensureHostJar 报一条能看懂的话。
+def hostPropsFile = rootProject.file('../gradle.properties')
 def hostProps = new Properties()
-rootProject.file('../gradle.properties').withInputStream { hostProps.load(it) }
+if (hostPropsFile.isFile()) {
+	hostPropsFile.withInputStream { hostProps.load(it) }
+}
 final String hostModVersion = project.findProperty('host_mod_version') ?: hostProps.getProperty('mod_version')
 final String hostJarName = "SlimefunHelper-${project.minecraft_version}-${hostModVersion}.jar"
 final File hostJar = project.hasProperty('host_jar')
@@ -48,6 +54,11 @@ final File hostJar = project.hasProperty('host_jar')
 // 根上的任何一次 Gradle 调用都会配置到这里；配置期抛异常会让「先 buildAndGather 出宿主 jar」
 // 这件事本身也跑不起来（版本号刚改时就是死锁）。改为编译期再检查。
 def ensureHostJar = {
+	if (hostModVersion == null) {
+		throw new GradleException("读不到宿主版本号：${hostPropsFile} 不存在。\n" +
+				"插件工程要放在宿主仓库的 plugin/ 目录下构建，" +
+				"或用 -Phost_mod_version=<宿主版本> 显式指定。")
+	}
 	if (!hostJar.isFile()) {
 		throw new GradleException("找不到宿主 jar: ${hostJar}\n" +
 				"请先在仓库根目录构建宿主（./gradlew buildAndGather），" +
