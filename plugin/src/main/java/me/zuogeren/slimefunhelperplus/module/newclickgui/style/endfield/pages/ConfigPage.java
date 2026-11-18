@@ -17,11 +17,16 @@ import me.matl114.managers.config.EnumRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.FloatRef;
 import me.matl114.managers.config.IntRef;
+import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.LongRef;
 import me.matl114.managers.config.MapRef;
 import me.matl114.managers.config.Ref;
 import me.matl114.managers.config.StringRef;
+import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.hacks.utils.config.Regex;
+import me.matl114.hacks.utils.config.StringFormat;
+import me.matl114.hacks.utils.config.WrapColor;
 import me.zuogeren.slimefunhelperplus.hostgui.HostControls;
 import me.matl114.versioned.api.VDrawContext;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.NewClickGui;
@@ -100,6 +105,9 @@ public class ConfigPage extends GenericScreen {
 
     /** 打开中的枚举下拉：记的是 key，列表重建后同一条路径仍是同一下拉。 */
     private String dropdownKey;
+
+    /** 正在等按键的那一条：记路径，列表重建后仍是同一项。 */
+    private String keyTarget;
 
     private int winX;
     private int winY;
@@ -183,6 +191,7 @@ public class ConfigPage extends GenericScreen {
         EfWidget.of(0, 0, this.width, this.height, this::paint)
                 .click(this::click)
                 .scroll(this::wheel)
+                .keys(this::captureKey)
                 .addTo(this);
 
         // 搜索框交给原版 EditBox：输入法、退格、粘贴都由 MC 自己处理
@@ -393,7 +402,33 @@ public class ConfigPage extends GenericScreen {
 
     /** 这一页真正给了控件的类型；其余只显示当前值。 */
     private static boolean writable(Ref<?> ref) {
-        return ref instanceof FlagRef || isNumeric(ref) || ref instanceof EnumRef<?> || ref instanceof StringRef;
+        return ref instanceof FlagRef
+                || isNumeric(ref)
+                || ref instanceof EnumRef<?>
+                || ref instanceof StringRef
+                || ref instanceof KeyBindRef
+                || ref.getValue() instanceof WrapColor
+                || ref.getValue() instanceof Regex
+                || ref.getValue() instanceof StringFormat;
+    }
+
+    /** 就地文本编辑的那几类：值本身就是一段可读写的字符串，不需要另开编辑器。 */
+    private static boolean textEditable(Ref<?> ref) {
+        return ref instanceof StringRef
+                || ref.getValue() instanceof Regex
+                || ref.getValue() instanceof StringFormat;
+    }
+
+    /** 文本类配置的原文：显示会截断，回填与写回都必须拿完整值。 */
+    private static String editableTextOf(Ref<?> ref) {
+        Object value = ref.getValue();
+        if (value instanceof Regex regex) {
+            return regex.regex();
+        }
+        if (value instanceof StringFormat format) {
+            return format.formatString();
+        }
+        return textValueOf(ref);
     }
 
     private static double numericOf(Ref<?> ref) {
@@ -441,10 +476,57 @@ public class ConfigPage extends GenericScreen {
     }
 
     /** 文本提交：交的是 trim 之后的原文，空串照写（空串是合法取值，不是"没改"）。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
     private static void commitText(Ref<?> ref, String text) {
+        String next = text.trim();
         if (ref instanceof StringRef stringRef) {
-            stringRef.set(text.trim());
+            stringRef.set(next);
+            return;
         }
+        if (ref.getValue() instanceof Regex) {
+            // 非法表达式不落配置：打到一半的括号不该把这一项变成永远匹配不上的正则
+            try {
+                ((Ref) ref).setValue(new Regex(next));
+            } catch (RuntimeException ignored) {
+                // 表达式还不完整，等打完
+            }
+            return;
+        }
+        if (ref.getValue() instanceof StringFormat format) {
+            ((Ref) ref).setValue(format.withFormatString(next));
+        }
+    }
+
+    /**
+     * 颜色提交：只认 {@code #RRGGBB} 与命名色。
+     *
+     * <p>十六进制按定长六位挡：{@code #} 开头的串只当十六进制解释，{@code "#12"} 会被收成 RGB(0x12)，
+     * 打到一半的半截值不能就这样改掉配置。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void commitColor(Ref<?> ref, String text) {
+        String value = text.trim().toLowerCase(Locale.ROOT);
+        if (value.startsWith("#") && !fullHex(value)) {
+            return;
+        }
+        try {
+            ((Ref) ref).setValue(new WrapColor(value));
+        } catch (RuntimeException ignored) {
+            // 名字拼错或者打到一半（空串、单独的 "#"）：等打完
+        }
+    }
+
+    /** 整串是否就是 {@code #} 加六位十六进制。 */
+    private static boolean fullHex(String value) {
+        if (value.length() != 7) {
+            return false;
+        }
+        for (int i = 1; i < value.length(); i++) {
+            if (Character.digit(value.charAt(i), 16) < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 文本行的原文：显示会截断，回填与写回都必须拿完整值。 */
@@ -592,6 +674,12 @@ public class ConfigPage extends GenericScreen {
         if (ref instanceof EnumRef<?>) {
             return right - enumWidth(ref);
         }
+        if (ref instanceof KeyBindRef bindRef) {
+            return right - (Ef.textWidth(keyText(bindRef)) + 12);
+        }
+        if (ref.getValue() instanceof WrapColor) {
+            return right - (2 + 12 + 5 + Ef.textWidth("#RRGGBB") + 2 + 3);
+        }
         return right - readOnlyWidth();
     }
 
@@ -613,6 +701,13 @@ public class ConfigPage extends GenericScreen {
         Ref<?> ref = item.ref();
         int w = isNumeric(ref) ? VALUE_W : readOnlyWidth();
         return new Rect(controlLeft(item), rowY + FieldEditor.FIELD_TOP, w, FieldEditor.FIELD_H);
+    }
+
+    /** 颜色行的值槽：与 {@link #paintColor} 的切角块同一份几何，点哪一格就是哪一格。 */
+    private Rect colorSlot(int rowY) {
+        int hexW = Ef.textWidth("#RRGGBB") + 2;
+        int w = 2 + 12 + 5 + hexW + 3;
+        return new Rect(itemsRight() - w, rowY + FieldEditor.FIELD_TOP, w, FieldEditor.FIELD_H);
     }
 
     private boolean inValueSlot(Item item, int rowY, int mx, int my) {
@@ -839,12 +934,57 @@ public class ConfigPage extends GenericScreen {
             boolean hot = open || (mouseX >= chipX && mouseX <= right && mouseY >= y + 3 && mouseY < y + 15);
             Ef.cutFill(ctx, chipX, y + 3, width, 12, hot ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), p.cut());
             Ef.text(ctx, text, chipX + 5, y + 5, p.ink());
-        } else if (ref instanceof StringRef) {
+        } else if (ref instanceof KeyBindRef bindRef) {
+            paintKeyBind(ctx, p, y, right, bindRef, item);
+        } else if (ref.getValue() instanceof WrapColor color) {
+            paintColor(ctx, p, y, right, color);
+        } else if (textEditable(ref)) {
             paintValue(ctx, p, item, y, mouseX, mouseY);
         } else {
             String text = Ef.ellipsis(valueText(ref), readOnlyWidth());
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink2());
         }
+    }
+
+    /**
+     * 按键绑定：等待按键时整块换成强调色，其余时候是描边块。
+     *
+     * <p>等待态必须一眼看出来——这时按下的任何键都会被这一项吃掉，
+     * 没有提示的话用户会以为界面卡住了。
+     */
+    private void paintKeyBind(VDrawContext ctx, Ef.Palette p, int y, int right, KeyBindRef ref, Item item) {
+        boolean listening = keyTarget != null && keyTarget.equals(item.path());
+        String text = listening ? "按任意键…" : keyText(ref);
+        int width = Ef.textWidth(text) + 12;
+        int x = right - width;
+        if (listening) {
+            Ef.cutFill(ctx, x, y + 3, width, 12, p.trace(), Ef.CUT);
+            Ef.text(ctx, text, x + 6, y + 5, p.onTrace());
+        } else {
+            Ef.cutOutline(ctx, x, y + 3, width, 12, p.rule(), Ef.CUT);
+            Ef.text(ctx, text, x + 6, y + 5, p.ink());
+        }
+    }
+
+    private static String keyText(KeyBindRef ref) {
+        MultiKeyBind bind = ref.get();
+        if (bind == null || bind.isEmpty()) {
+            return "未绑定";
+        }
+        String keys = bind.getKeyStr();
+        return keys == null || keys.isEmpty() ? "未绑定" : keys;
+    }
+
+    /** 颜色：切角块里一块色块加它的十六进制值，点开调色盘。 */
+    private void paintColor(VDrawContext ctx, Ef.Palette p, int y, int right, WrapColor color) {
+        int rgb = color == null || color.color() == null ? 0xFFFFFF : color.asRGB();
+        String hex = String.format(Locale.ROOT, "#%06X", rgb & 0xFFFFFF);
+        int hexW = Ef.textWidth("#RRGGBB") + 2;
+        int width = 2 + 12 + 5 + hexW + 3;
+        int x = right - width;
+        Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), Ef.CUT);
+        Ef.fill(ctx, x + 2, y + 3, 12, 12, 0xFF000000 | (rgb & 0xFFFFFF));
+        Ef.text(ctx, hex, x + 2 + 12 + 5, y + 5, p.ink());
     }
 
     /**
@@ -976,12 +1116,47 @@ public class ConfigPage extends GenericScreen {
 
     /** 行内编辑的身份：数值与文本各占一份，同一行同一用途的 key 不随帧变化。 */
     private static String editorKey(Item item) {
-        return (item.ref() instanceof StringRef ? "text:" : "num:") + item.path();
+        String kind = item.ref().getValue() instanceof WrapColor ? "color:" : (textEditable(item.ref()) ? "text:" : "num:");
+        return kind + item.path();
     }
 
     /** 枚举下拉的身份：芯片、候选与命中都认这一条路径。 */
     private static String enumKey(Item item) {
         return "enum:" + item.path();
+    }
+
+    /**
+     * 按键捕获：等按键的那一条把下一次按键写进配置。
+     *
+     * <p>Esc 取消而不是绑成 Esc——绑一个"取消键"上去，这一项就再也改不回来了。
+     */
+    private boolean captureKey(EfWidget self, int keyCode, int scanCode, int modifiers) {
+        if (keyTarget == null) {
+            return false;
+        }
+        if (keyCode == KeyCode.KEY_ESCAPE) {
+            keyTarget = null;
+            return true;
+        }
+        String name = KeyCode.getNameForKey(keyCode);
+        if (name != null) {
+            Item target = itemOfPath(keyTarget);
+            if (target != null && target.ref() instanceof KeyBindRef bindRef) {
+                bindRef.set(new MultiKeyBind(new String[] {name}, false, false));
+            }
+            keyTarget = null;
+        }
+        return true;
+    }
+
+    /** 按路径找回当前列表里的那一项：列表重建后对象会换，路径不会。 */
+    private Item itemOfPath(String path) {
+        for (Line line : lines) {
+            if (line.item() != null && line.item().path().equals(path)) {
+                return line.item();
+            }
+        }
+        return null;
     }
 
     private boolean click(EfWidget self, double mouseX, double mouseY, int button) {
@@ -1128,22 +1303,26 @@ public class ConfigPage extends GenericScreen {
     private void openEditor(Item item, int rowY) {
         Ref<?> ref = item.ref();
         Rect slot = valueSlot(item, rowY);
-        boolean text = ref instanceof StringRef;
-        editor.open(
-                this,
-                editorKey(item),
-                slot.x(),
-                slot.y(),
-                slot.w(),
-                text ? textValueOf(ref) : valueText(ref),
-                !text,
-                value -> {
-                    if (text) {
-                        commitText(ref, value);
-                    } else {
-                        commitNumber(ref, value);
-                    }
-                });
+        boolean color = ref.getValue() instanceof WrapColor;
+        boolean text = textEditable(ref);
+        String seed;
+        if (color) {
+            int rgb = ((WrapColor) ref.getValue()).asRGB();
+            seed = String.format(Locale.ROOT, "#%06X", rgb & 0xFFFFFF);
+        } else if (text) {
+            seed = editableTextOf(ref);
+        } else {
+            seed = valueText(ref);
+        }
+        editor.open(this, editorKey(item), slot.x(), slot.y(), slot.w(), seed, !text, value -> {
+            if (color) {
+                commitColor(ref, value);
+            } else if (text) {
+                commitText(ref, value);
+            } else {
+                commitNumber(ref, value);
+            }
+        });
     }
 
     private boolean apply(Item item, int rowY, int mx, int my, int button) {
@@ -1194,7 +1373,24 @@ public class ConfigPage extends GenericScreen {
             }
             return false;
         }
-        if (ref instanceof StringRef) {
+        if (ref instanceof KeyBindRef bindRef) {
+            int width = Ef.textWidth(keyText(bindRef)) + 12;
+            if (mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+                if (button == 0) {
+                    keyTarget = item.path();
+                }
+                return true;
+            }
+            return false;
+        }
+        if (ref.getValue() instanceof WrapColor) {
+            if (inValueSlot(item, rowY, mx, my)) {
+                openEditor(item, rowY);
+                return true;
+            }
+            return false;
+        }
+        if (textEditable(ref)) {
             if (inValueSlot(item, rowY, mx, my)) {
                 openEditor(item, rowY);
                 return true;
