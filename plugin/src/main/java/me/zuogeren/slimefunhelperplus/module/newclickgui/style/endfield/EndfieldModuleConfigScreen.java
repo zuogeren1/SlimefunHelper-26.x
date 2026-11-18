@@ -33,6 +33,9 @@ import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.Primitive;
 import me.matl114.hacks.utils.config.PrimitiveList;
 import me.matl114.hacks.utils.config.PrimitiveMap;
+import me.matl114.hacks.utils.config.RegexList;
+import me.matl114.managers.config.ListRef;
+import java.util.regex.Pattern;
 import me.matl114.hacks.utils.config.Vec2;
 import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.managers.config.NBTType;
@@ -1050,6 +1053,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof PrimitiveMap<?, ?>
                 || value.getValue() instanceof Holder<?>
                 || value.getValue() instanceof ItemStackTemplate
+                || value instanceof ListRef
+                || value.getValue() instanceof RegexList
                 || value.getValue() instanceof Regex
                 || recordParts(value.getValue()) != null
                 || booleanParts(value.getValue()) != null;
@@ -1217,7 +1222,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /**
      * 一条记录里的几格：数值各自走滑杆，枚举走下拉，别的类型返回 null 交回宿主控件。
      *
-     * <p>两格到四格都接：宿主里两个数值的记录（{@code Vec2}）和
+     * <p>两格到八格都接：宿主里两个数值的记录（{@code Vec2}）、
      * 「两个数值 + 一个枚举」的记录（{@code PredictArgument}）都很常见。
      */
     private static Object[] recordParts(Object value) {
@@ -1225,7 +1230,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return null;
         }
         RecordComponent[] parts = value.getClass().getRecordComponents();
-        if (parts.length < 2 || parts.length > 4) {
+        // 上限 8 格：再多就不是「一条记录里几个数」而是嵌套结构了，逐格滑杆排不下
+        if (parts.length < 2 || parts.length > 8) {
             return null;
         }
         Object[] out = new Object[parts.length];
@@ -1789,6 +1795,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             boolean open = dropdown == ref;
             Ef.cutFill(ctx, chipX, y + 3, textW + 10, 11, open ? p.ink() : p.chip(), Ef.CUT);
             Ef.text(ctx, text, chipX + 5, y + 5, open ? p.paper() : p.ink());
+        } else if (value instanceof ListRef listRef) {
+            // 字符串列表：与名单同一套计数块，点开宿主列表编辑屏
+            paintCountChip(ctx, p, y, ref, listRef.get().size() + " 项");
+        } else if (raw instanceof RegexList regexList) {
+            paintCountChip(ctx, p, y, ref, regexList.patterns().size() + " 项");
         } else if (raw instanceof ItemStackTemplate template) {
             paintItemTemplate(ctx, p, y, ref, template, mouseX, mouseY);
         } else if (raw instanceof Holder<?> holder) {
@@ -2413,6 +2424,60 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             return false;
         }
         return beginTextEdit(wrapper, rowY);
+    }
+
+    /** 计数块的一击：点它打开这一项的列表编辑器。 */
+    private boolean hitCountChip(
+            WrapperConfigRef<?> wrapper, int count, int mouseX, int mouseY, int button, int rowY) {
+        String label = count + " 项   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = controlRight() - width;
+        if (button != 0 || !inBox(x, rowY + 3, width, 12, mouseX, mouseY)) {
+            return false;
+        }
+        openListEditor(wrapper);
+        return true;
+    }
+
+    /**
+     * 字符串列表与正则列表的编辑器。
+     *
+     * <p>两者都是「一串可增删的条目」，宿主的 {@code openListModifyScreen} 正好是这个形状；
+     * 元素类型不同（String / Regex），所以按值类型分派。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openListEditor(WrapperConfigRef<?> wrapper) {
+        Object raw = wrapper.ref().getValue();
+        try {
+            AttrKeyValue<Object> source = (AttrKeyValue<Object>) (AttrKeyValue<?>) handle(wrapper);
+            if (raw instanceof ListRef) {
+                NBTTypes.openListModifyScreen(
+                        NewClickGui.elementFactory(),
+                        (AttrKeyValue) source,
+                        NBTTypes.STRING_TYPE,
+                        () -> "",
+                        300,
+                        20);
+                return;
+            }
+            if (raw instanceof RegexList regexList) {
+                // RegexList 是 record(List<Pattern>)，而宿主的 REGEX_TYPE 就是 NBTType<Pattern>：
+                // 直接按 Pattern 列表编辑，不用再包一层 Regex
+                WrapperFactory<List<Pattern>, RegexList> factory =
+                        WrapperFactory.of(RegexList::new, RegexList::patterns);
+                AttrKeyValue<RegexList> typed = (AttrKeyValue<RegexList>) (AttrKeyValue<?>) source;
+                AttrKeyValue<List<Pattern>> converted = new WrapperAttrKeyValue<>(typed, factory);
+                NBTTypes.openListModifyScreen(
+                        NewClickGui.elementFactory(),
+                        converted,
+                        NBTTypes.REGEX_TYPE,
+                        () -> Pattern.compile(""),
+                        300,
+                        20);
+            }
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 列表编辑器打开失败: " + e);
+        }
     }
 
     /** 列表行的一击：只有计数块接，点它把宿主的列表编辑器开到这一页上。 */
@@ -3426,6 +3491,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof ItemStackTemplate template) {
             return hitItemTemplate(wrapper, template, mouseX, mouseY, button, rowY);
+        }
+        if (ref instanceof ListRef listRef) {
+            return hitCountChip(wrapper, listRef.get().size(), mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof RegexList regexList) {
+            return hitCountChip(wrapper, regexList.patterns().size(), mouseX, mouseY, button, rowY);
         }
         if (ref instanceof StringRef) {
             // 有候选值的：点右端箭头开候选，点其余位置开编辑（值框本身可手输）
