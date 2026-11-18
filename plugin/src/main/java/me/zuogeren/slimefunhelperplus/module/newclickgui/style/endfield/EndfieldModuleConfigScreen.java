@@ -16,6 +16,9 @@ import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.gui.basic.ExecutableWidget;
+import me.matl114.gui.basic.SubScreenWidget;
+import me.matl114.gui.elements.IconElement;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.hacks.modules.task.ConfigManager;
@@ -1529,8 +1532,10 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             if (module != null) {
                 module.addCustomWidgets(
                         widget -> customWidgets.add(widget), contentWidth, ROW_H, 6,
-                        new EndfieldElementFactory(light()));
+                        new EndfieldElementFactory(light(), controlRight() - contentLeft));
             }
+            // 宿主自己造的那几个图标按钮绕过了工厂（列表入口写死了绿色精灵图），挂载前换成本界面的画法
+            restyleCustomWidgets();
         }
         customRowY.clear();
         if (!customWidgets.isEmpty()) {
@@ -1555,6 +1560,35 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             }
         }
         totalHeight = (y + scroll) - bodyTop();
+    }
+
+    /**
+     * 把宿主自己造的图标按钮换成本界面的画法。
+     *
+     * <p>模块的 {@code addCustomWidgets} 里，输入框、开关都走工厂，但列表入口是宿主
+     * {@code WidgetUtils.createOpenListModifyScreenButton} 直接造的：它把写死的绿色精灵图
+     * 塞进 {@code IconElement}，工厂连插手的机会都没有。所以只能在这一层换掉——
+     * 控件本身（点击、说明框）原样保留，只换渲染。
+     *
+     * <p>只认「图标 + 点击」这一种形态：别的图标按钮（文件树、颜色编辑器…）各有各的语义，
+     * 一律不动，免得把不相干的按钮也画成列表入口。
+     */
+    private void restyleCustomWidgets() {
+        for (DrawableWidget widget : customWidgets) {
+            if (!(widget instanceof SubScreenWidget sub)) {
+                continue;
+            }
+            for (DrawableWidget child : sub.childrenRenderOrder()) {
+                if (!(child instanceof ExecutableWidget exec) || !(exec.getHandler() instanceof IconElement icon)) {
+                    continue;
+                }
+                if (!Constants.LIST_TAG_SPRITE.equals(icon.getTextureId(null, child, false))) {
+                    continue;
+                }
+                exec.setRenderHandler(new EndfieldElementFactory(light())
+                        .createListButton((element, widget0, mouseButton) -> icon.onClick(widget0, 0, 0, mouseButton)));
+            }
+        }
     }
 
     private int maxScroll() {

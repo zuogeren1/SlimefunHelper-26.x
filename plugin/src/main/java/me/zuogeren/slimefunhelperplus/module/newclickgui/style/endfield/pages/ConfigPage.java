@@ -14,6 +14,7 @@ import me.matl114.gui.presets.choices.RegistrySelectScreen;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.HostEditorScreen;
 import me.matl114.gui.GenericScreen;
+import me.matl114.hacks.api.BaseModule.WrapperConfigRef;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigEnum;
 import me.matl114.managers.config.DoubleRef;
@@ -35,6 +36,10 @@ import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.PrimitiveList;
 import me.matl114.hacks.utils.config.PrimitiveMap;
 import me.matl114.hacks.utils.config.RegexList;
+import me.matl114.hacks.utils.config.GuiSetting;
+import me.matl114.hacks.utils.config.StringEnum;
+import me.matl114.hacks.utils.config.Vec2;
+import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.managers.config.ListRef;
 import me.matl114.managers.config.NBTType;
 import me.matl114.utils.config.AttrKeyValue;
@@ -93,6 +98,9 @@ public class ConfigPage extends GenericScreen {
     private static final int VALUE_W = 56;
     /** 枚举下拉里一行候选的高度。 */
     private static final int DROP_ROW_H = 13;
+
+    /** GUI 设置入口块上的字：与模块配置页同一个词。 */
+    private static final String GUI_SETTING_CHIP = "详细设置";
     private static final String TITLE = "全配置";
     private static final String LATIN = "CONFIG";
 
@@ -435,6 +443,10 @@ public class ConfigPage extends GenericScreen {
                 || ref.getValue() instanceof PrimitiveMap<?, ?>
                 || ref.getValue() instanceof ItemStackTemplate
                 || ref.getValue() instanceof Holder<?>
+                || ref.getValue() instanceof StringEnum
+                || ref.getValue() instanceof WidgetPos
+                || ref.getValue() instanceof GuiSetting
+                || booleanParts(ref.getValue()) != null
                 || recordParts(ref.getValue()) != null;
     }
 
@@ -526,7 +538,47 @@ public class ConfigPage extends GenericScreen {
             return 1;
         }
         Object[] parts = recordParts(ref.getValue());
-        return parts == null ? 1 : parts.length;
+        if (parts != null) {
+            return parts.length;
+        }
+        boolean[] bools = booleanParts(ref.getValue());
+        if (bools != null) {
+            return bools.length;
+        }
+        // 位置配置画两行（X / Y），行高必须跟着算两行，否则下一行会压上来
+        if (ref.getValue() instanceof WidgetPos) {
+            return 2;
+        }
+        return 1;
+    }
+
+    /**
+     * 一条记录里的几格开关：全是布尔才算，混着别的类型就交回只读。
+     *
+     * <p>与 {@link #recordParts} 分开认：开关和数值的行高一样，但画法与命中都不同，
+     * 合成一个数组会让「这一格是数值还是开关」在每处都要再判一次。
+     */
+    private static boolean[] booleanParts(Object value) {
+        if (value == null || !value.getClass().isRecord()) {
+            return null;
+        }
+        java.lang.reflect.RecordComponent[] parts = value.getClass().getRecordComponents();
+        if (parts.length < 2 || parts.length > 8) {
+            return null;
+        }
+        boolean[] out = new boolean[parts.length];
+        try {
+            for (int i = 0; i < parts.length; i++) {
+                Object part = parts[i].getAccessor().invoke(value);
+                if (!(part instanceof Boolean flag)) {
+                    return null;
+                }
+                out[i] = flag;
+            }
+        } catch (Throwable e) {
+            return null;
+        }
+        return out;
     }
 
     /** 记录里每一格的字段名：驼峰转成两个大写词（{@code ticksLater} → {@code TICKS LATER}）。 */
@@ -793,6 +845,9 @@ public class ConfigPage extends GenericScreen {
     private static String enumText(Ref<?> ref) {
         try {
             Object value = ref.getValue();
+            if (value instanceof StringEnum choice) {
+                return choice.value();
+            }
             return value == null ? "—" : enumLabel(value);
         } catch (Throwable e) {
             return "—";
@@ -806,6 +861,10 @@ public class ConfigPage extends GenericScreen {
     private static List<ConfigEnum> enumOptions(Ref<?> ref) {
         try {
             Object value = ref.getValue();
+            if (value instanceof StringEnum) {
+                // 有限字符串候选不是 ConfigEnum：候选走另一条路，见 stringEnumOptions
+                return List.of();
+            }
             // 可选值：候选取内层枚举，不是外层那个 OptionalPrimitive
             if (value instanceof OptionalPrimitive<?>) {
                 value = optionalInner(ref);
@@ -822,6 +881,12 @@ public class ConfigPage extends GenericScreen {
         return List.of();
     }
 
+    /** 有限字符串候选：值就是候选本身，不需要再包一层枚举。 */
+    private static List<String> stringEnumOptions(Ref<?> ref) {
+        Object value = ref.getValue();
+        return value instanceof StringEnum choice ? choice.values() : List.of();
+    }
+
     /** 当前取值：只用来在下拉里标出当前项，取不到就当没有当前项。 */
     private static ConfigEnum currentEnum(Ref<?> ref) {
         try {
@@ -832,6 +897,54 @@ public class ConfigPage extends GenericScreen {
             return value instanceof ConfigEnum configEnum ? configEnum : null;
         } catch (Throwable e) {
             return null;
+        }
+    }
+
+    /**
+     * 下拉里要画的候选文字：枚举与有限字符串候选共用一套面板。
+     *
+     * <p>两者候选来源不同（一个取 {@code ConfigEnum#getMap()}，一个取 {@code StringEnum#values()}），
+     * 但面板、命中与写回都是同一件事，所以在这里统一成「一串标签 + 一个下标」。
+     */
+    private static List<String> optionLabels(Ref<?> ref) {
+        List<String> strings = stringEnumOptions(ref);
+        if (!strings.isEmpty()) {
+            return strings;
+        }
+        List<ConfigEnum> enums = enumOptions(ref);
+        List<String> out = new ArrayList<>(enums.size());
+        for (ConfigEnum option : enums) {
+            out.add(enumLabel(option));
+        }
+        return out;
+    }
+
+    /** 当前项在候选里的标签：只用来标出哪一行是当前值。 */
+    private static String currentOptionLabel(Ref<?> ref) {
+        Object value = ref.getValue();
+        if (value instanceof StringEnum choice) {
+            return choice.value();
+        }
+        ConfigEnum current = currentEnum(ref);
+        return current == null ? null : enumLabel(current);
+    }
+
+    /** 写回下拉里选中的那一项：枚举与有限字符串候选各走各的写入口。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void selectOption(Ref<?> ref, int index) {
+        List<String> strings = stringEnumOptions(ref);
+        if (!strings.isEmpty()) {
+            if (index >= 0 && index < strings.size()) {
+                Object value = ref.getValue();
+                if (value instanceof StringEnum choice) {
+                    ((Ref) ref).setValue(new StringEnum(strings.get(index), choice.values()));
+                }
+            }
+            return;
+        }
+        List<ConfigEnum> enums = enumOptions(ref);
+        if (index >= 0 && index < enums.size()) {
+            selectEnum(ref, enums.get(index));
         }
     }
 
@@ -1208,8 +1321,16 @@ public class ConfigPage extends GenericScreen {
             paintTextValueRow(ctx, p, item, y, mouseX, mouseY);
         } else if (countRow(ref)) {
             paintCount(ctx, p, y, right, ref);
+        } else if (booleanParts(ref.getValue()) != null) {
+            paintBooleanRecord(ctx, p, y, right, ref);
         } else if (recordParts(ref.getValue()) != null) {
             paintRecord(ctx, p, y, right, ref, mouseX, mouseY);
+        } else if (ref.getValue() instanceof WidgetPos pos) {
+            paintWidgetPos(ctx, p, y, right, ref, pos, mouseX, mouseY);
+        } else if (ref.getValue() instanceof GuiSetting) {
+            paintGuiSetting(ctx, p, y, right);
+        } else if (ref.getValue() instanceof StringEnum choice) {
+            paintStringEnum(ctx, p, y, right, ref, choice);
         } else if (optionalRow(ref)) {
             paintOptional(ctx, p, y, right, ref);
         } else if (ref instanceof KeyBindRef bindRef) {
@@ -1304,6 +1425,120 @@ public class ConfigPage extends GenericScreen {
                 Ef.tracked(ctx, shown, right - VALUE_W - 12 - Ef.trackedWidth(shown, 1), partY + 5, p.ink2(), 1);
             }
         }
+    }
+
+    /**
+     * 一条记录里的几格开关：每格占一行，行名用字段名，开关贴着行尾。
+     *
+     * <p>行高由 {@link #rowParts} 按分量数算，绘制与布局取同一个数，下一行不会压上来。
+     */
+    private void paintBooleanRecord(VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref) {
+        boolean[] bools = booleanParts(ref.getValue());
+        if (bools == null) {
+            return;
+        }
+        String[] names = componentNames(ref.getValue());
+        for (int i = 0; i < bools.length; i++) {
+            int partY = y + i * ROW_H;
+            paintPartName(ctx, p, partY, right - 28, names[i]);
+            paintSwitch(ctx, p, partY, right, bools[i]);
+        }
+    }
+
+    /** 分量行名：右对齐贴着控件，宽度按可用空间截断，长字段名不会压到行名上。 */
+    private void paintPartName(VDrawContext ctx, Ef.Palette p, int y, int rightEdge, String name) {
+        if (name == null || name.isEmpty()) {
+            return;
+        }
+        int available = Math.max(0, Math.min(150, rightEdge - itemsX() - 8));
+        if (available < 18) {
+            return;
+        }
+        String shown = Ef.ellipsis(name, available);
+        Ef.tracked(ctx, shown, rightEdge - Ef.trackedWidth(shown, 1), y + 5, p.ink2(), 1);
+    }
+
+    /** 行尾那个小开关：开是实心块加纸色缺口，关是虚线框加小方块。 */
+    private void paintSwitch(VDrawContext ctx, Ef.Palette p, int y, int right, boolean on) {
+        int sw = 20;
+        int sh = 9;
+        int sy = y + (ROW_H - sh) / 2;
+        if (on) {
+            Ef.fill(ctx, right - sw, sy, sw, sh, p.ink());
+            Ef.fill(ctx, right - 9, sy + 2, 5, 5, p.paper());
+        } else {
+            Ef.dashedOutline(ctx, right - sw, sy, sw, sh, p.ink2());
+            Ef.fill(ctx, right - sw + 2, sy + 2, 5, 5, p.ink2());
+        }
+    }
+
+    /**
+     * 位置配置：行尾一个 type 切换块，下面两行滑杆。
+     *
+     * <p>{@code type} 决定哪两个字段生效（0 = 百分比、1 = 绝对长度），
+     * 所以只画当前生效的那一对——四个字段全摆出来会让人以为都能调。
+     */
+    private void paintWidgetPos(
+            VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref, WidgetPos pos,
+            int mouseX, int mouseY) {
+        boolean percent = pos.getType() == 0;
+        String mode = percent ? "百分比" : "绝对";
+        int modeW = Ef.textWidth(mode) + 10;
+        int modeX = right - modeW;
+        boolean hot = mouseX >= modeX && mouseX < modeX + modeW && mouseY >= y + 3 && mouseY < y + 15;
+        Ef.cutFill(ctx, modeX, y + 3, modeW, 12, hot ? p.ink() : p.chip(), p.cut());
+        Ef.text(ctx, mode, modeX + 5, y + 5, hot ? p.paper() : p.ink());
+
+        Vec2 pair = percent ? pos.toPercentage() : pos.toLength();
+        String[] names = percent ? new String[] {"X 比例", "Y 比例"} : new String[] {"X 长度", "Y 长度"};
+        double[] values = {pair.x(), pair.y()};
+        // 滑杆与数值要让开行尾那个 type 块：两者都右对齐到 itemsRight() 会叠在一起
+        int sliderRight = right - modeW - 6;
+        for (int i = 0; i < 2; i++) {
+            int rowY = y + i * ROW_H;
+            String text = formatNumber(values[i]);
+            int width = Math.max(VALUE_W, Ef.textWidth(text) + 12);
+            Rect slot = new Rect(sliderRight - width, rowY + FieldEditor.FIELD_TOP, width, FieldEditor.FIELD_H);
+            paintPartName(ctx, p, rowY, slot.x() - 8, names[i]);
+            if (editor.isOpenFor(widgetPosKey(ref, i))) {
+                FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), true, false);
+                continue;
+            }
+            boolean slotHot = mouseX >= slot.x() && mouseX < slot.x() + slot.w()
+                    && mouseY >= slot.y() && mouseY < slot.y() + slot.h();
+            if (slotHot) {
+                FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), false, true);
+            } else {
+                int lineY = slot.y() + slot.h() - 2;
+                for (int k = 0; k < slot.w(); k += 3) {
+                    Ef.fill(ctx, slot.x() + k, lineY, Math.min(2, slot.w() - k), 1, p.rule());
+                }
+            }
+            Ef.text(ctx, text, slot.x() + slot.w() - 6 - Ef.textWidth(text), rowY + 5, p.ink());
+        }
+    }
+
+    /** 位置配置里某一格的身份：绘制、命中与编辑共用。 */
+    private static String widgetPosKey(Ref<?> ref, int part) {
+        return "widgetpos:" + System.identityHashCode(ref) + ":" + part;
+    }
+
+    /** GUI 设置：行里一个自绘入口块，点开本界面自己的详细页。 */
+    private void paintGuiSetting(VDrawContext ctx, Ef.Palette p, int y, int right) {
+        int width = Ef.textWidth(GUI_SETTING_CHIP) + 10;
+        int x = right - width;
+        Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), p.cut());
+        Ef.text(ctx, GUI_SETTING_CHIP, x + 5, y + 5, p.ink());
+    }
+
+    /** 有限字符串候选：与枚举同一套下拉，值框显示当前项。 */
+    private void paintStringEnum(VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref, StringEnum choice) {
+        String text = choice.value() + " ▾";
+        int width = Ef.textWidth(text) + 10;
+        int x = right - width;
+        boolean open = enumKeyOf(ref).equals(dropdownKey);
+        Ef.cutFill(ctx, x, y + 3, width, 12, open ? Ef.mix(p.chip(), p.ink(), 0.14F) : p.chip(), p.cut());
+        Ef.text(ctx, text, x + 5, y + 5, p.ink());
     }
 
     /** 记录里某一格的身份：绘制、命中与编辑共用。 */
@@ -1486,27 +1721,27 @@ public class ConfigPage extends GenericScreen {
             dropdownKey = null;
             return;
         }
-        List<ConfigEnum> options = enumOptions(line.item().ref());
-        if (options.isEmpty()) {
+        List<String> labels = optionLabels(line.item().ref());
+        if (labels.isEmpty()) {
             dropdownKey = null;
             return;
         }
-        Rect box = dropdownRect(line, options.size());
+        Rect box = dropdownRect(line, labels.size());
         Ef.fill(ctx, box.x(), box.y(), box.w(), box.h(), p.panel());
         Ef.cutOutline(ctx, box.x(), box.y(), box.w(), box.h(), p.ink(), p.cut());
 
-        ConfigEnum current = currentEnum(line.item().ref());
-        for (int i = 0; i < options.size(); i++) {
+        String current = currentOptionLabel(line.item().ref());
+        for (int i = 0; i < labels.size(); i++) {
             int oy = box.y() + 2 + i * DROP_ROW_H;
             boolean hot = mouseX >= box.x() && mouseX <= box.x() + box.w() && mouseY >= oy && mouseY < oy + DROP_ROW_H;
-            boolean active = options.get(i) == current;
+            boolean active = labels.get(i).equals(current);
             if (hot) {
                 Ef.fill(ctx, box.x() + 1, oy, box.w() - 2, DROP_ROW_H, Ef.mix(p.panel(), p.ink(), 0.08F));
             }
             if (active) {
                 Ef.fill(ctx, box.x() + 1, oy, 3, DROP_ROW_H, p.trace());
             }
-            Ef.text(ctx, Ef.ellipsis(enumLabel(options.get(i)), box.w() - 14), box.x() + 8, oy + 3,
+            Ef.text(ctx, Ef.ellipsis(labels.get(i), box.w() - 14), box.x() + 8, oy + 3,
                     active ? p.ink() : p.ink2());
         }
 
@@ -1592,6 +1827,11 @@ public class ConfigPage extends GenericScreen {
         return "enum:" + item.path();
     }
 
+    /** 有限字符串候选的下拉身份：与枚举分开，两者候选来源不同。 */
+    private static String enumKeyOf(Ref<?> ref) {
+        return "stringenum:" + System.identityHashCode(ref);
+    }
+
     /**
      * 按键捕获：等按键的那一条把下一次按键写进配置。
      *
@@ -1669,7 +1909,8 @@ public class ConfigPage extends GenericScreen {
             return null;
         }
         for (Line line : lines) {
-            if (line.item() == null || !key.equals(enumKey(line.item()))) {
+            if (line.item() == null
+                    || !(key.equals(enumKey(line.item())) || key.equals(enumKeyOf(line.item().ref())))) {
                 continue;
             }
             if (line.y() + ROW_H < bodyTop() || line.y() > bodyBottom()) {
@@ -1689,20 +1930,20 @@ public class ConfigPage extends GenericScreen {
         if (line == null) {
             return false;
         }
-        List<ConfigEnum> options = enumOptions(line.item().ref());
-        if (options.isEmpty()) {
+        List<String> labels = optionLabels(line.item().ref());
+        if (labels.isEmpty()) {
             return false;
         }
-        Rect box = dropdownRect(line, options.size());
+        Rect box = dropdownRect(line, labels.size());
         if (mx < box.x() || mx > box.x() + box.w()) {
             return false;
         }
         int top = box.y() + 2;
         int index = (my - top) / DROP_ROW_H;
-        if (my < top || index < 0 || index >= options.size()) {
+        if (my < top || index < 0 || index >= labels.size()) {
             return false;
         }
-        selectEnum(line.item().ref(), options.get(index));
+        selectOption(line.item().ref(), index);
         return true;
     }
 
@@ -1906,6 +2147,64 @@ public class ConfigPage extends GenericScreen {
         }
     }
 
+    /** 位置行的一击：行尾切 type，两行数值槽各管一格。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private boolean applyWidgetPos(Ref<?> ref, WidgetPos pos, int rowY, int mx, int my, int button) {
+        if (button != 0) {
+            return false;
+        }
+        int right = itemsRight();
+        String mode = pos.getType() == 0 ? "百分比" : "绝对";
+        int modeW = Ef.textWidth(mode) + 10;
+        if (mx >= right - modeW && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+            ((Ref) ref).setValue(pos.withType((pos.getType() + 1) % 2));
+            return true;
+        }
+        int index = Math.max(0, Math.min(1, (my - rowY) / ROW_H));
+        Vec2 pair = pos.getType() == 0 ? pos.toPercentage() : pos.toLength();
+        double current = index == 0 ? pair.x() : pair.y();
+        String text = formatNumber(current);
+        int width = Math.max(VALUE_W, Ef.textWidth(text) + 12);
+        int slotX = right - modeW - 6 - width;
+        int slotY = rowY + index * ROW_H + FieldEditor.FIELD_TOP;
+        if (mx >= slotX && mx < slotX + width && my >= slotY && my < slotY + FieldEditor.FIELD_H) {
+            openWidgetPosEditor(ref, pos, index, slotX, slotY, width, current);
+            return true;
+        }
+        return false;
+    }
+
+    /** 位置配置里某一格的数值编辑：几何与绘制共用同一份。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openWidgetPosEditor(
+            Ref<?> ref, WidgetPos pos, int part, int x, int y, int w, double current) {
+        editor.open(this, widgetPosKey(ref, part), x, y, w, formatNumber(current), true, value -> {
+            try {
+                double next = Double.parseDouble(value.trim().replace(',', '.'));
+                if (!Double.isFinite(next)) {
+                    return;
+                }
+                Vec2 pair = pos.getType() == 0 ? pos.toPercentage() : pos.toLength();
+                Vec2 updated = part == 0 ? new Vec2(next, pair.y()) : new Vec2(pair.x(), next);
+                ((Ref) ref).setValue(pos.getType() == 0 ? pos.withPercentage(updated) : pos.withLength(updated));
+            } catch (NumberFormatException ignored) {
+                // 半截输入不是错误，继续等下一个字
+            }
+        });
+    }
+
+    /** 打开 GUI 设置的详细页：本界面自己的屏，不是宿主那一套。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openGuiSetting(Ref<?> ref) {
+        try {
+            WrapperConfigRef<GuiSetting> target =
+                    new WrapperConfigRef<>((Ref<GuiSetting>) ref, null, new String[] {"gui-setting"});
+            ScreenAccess.of(new GuiSettingPage(target, settings)).openFromCurrent();
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] GUI 设置页打开失败: " + e);
+        }
+    }
+
     /** 记录里某一格的数值编辑：几何与绘制共用同一份。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void openRecordEditor(Ref<?> ref, int part, int rowY, double current) {
@@ -1997,6 +2296,42 @@ public class ConfigPage extends GenericScreen {
             int width = Ef.textWidth(label) + 10;
             if (button == 0 && mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
                 openCountEditor(ref, itemPath(ref));
+                return true;
+            }
+            return false;
+        }
+        if (booleanParts(ref.getValue()) != null) {
+            // 开关只吃行尾那一段：与单值开关同一块命中区，留白里的点击不算
+            if (button != 0 || mx < right - 24 || mx > right) {
+                return false;
+            }
+            boolean[] bools = booleanParts(ref.getValue());
+            int index = Math.max(0, Math.min(bools.length - 1, (my - rowY) / ROW_H));
+            ((Ref) ref).setValue(withPart(ref.getValue(), index, !bools[index]));
+            return true;
+        }
+        if (ref.getValue() instanceof WidgetPos pos) {
+            return applyWidgetPos(ref, pos, rowY, mx, my, button);
+        }
+        if (ref.getValue() instanceof GuiSetting) {
+            if (button != 0) {
+                return false;
+            }
+            int width = Ef.textWidth(GUI_SETTING_CHIP) + 10;
+            if (mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+                openGuiSetting(ref);
+                return true;
+            }
+            return false;
+        }
+        if (ref.getValue() instanceof StringEnum choice) {
+            if (button != 0) {
+                return false;
+            }
+            String text = choice.value() + " ▾";
+            int width = Ef.textWidth(text) + 10;
+            if (mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+                dropdownKey = enumKeyOf(ref);
                 return true;
             }
             return false;
