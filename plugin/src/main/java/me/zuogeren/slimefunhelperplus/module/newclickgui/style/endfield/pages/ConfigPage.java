@@ -136,6 +136,9 @@ public class ConfigPage extends GenericScreen {
     /** 打开中的枚举下拉：记的是 key，列表重建后同一条路径仍是同一下拉。 */
     private String dropdownKey;
 
+    /** 下拉盖住的是记录里的第几格；不是记录型时为 -1。 */
+    private int dropdownPart = -1;
+
     /** 正在等按键的那一条：记路径，列表重建后仍是同一项。 */
     private String keyTarget;
 
@@ -195,6 +198,7 @@ public class ConfigPage extends GenericScreen {
         // 行要按新尺寸重排：贴行的输入框与下拉都按旧坐标算，先收起来（文本顺手提交）
         editor.close();
         dropdownKey = null;
+        dropdownPart = -1;
         this.roots.clear();
         this.itemCache.clear();
         for (Config config : Config.REGISTRY.stream().toList()) {
@@ -875,14 +879,27 @@ public class ConfigPage extends GenericScreen {
      * 类型还没注册完成时取 map 会抛，这里兜住并退回空表（芯片保持只读）。
      */
     private static List<ConfigEnum> enumOptions(Ref<?> ref) {
+        return enumOptions(ref, -1);
+    }
+
+    /**
+     * 枚举的候选：{@code part} 为记录分量下标，{@code -1} 表示整值。
+     *
+     * <p>记录里的枚举（{@code PredictArgument} 的 {@code mode}）要取那一格自己的枚举类，
+     * 拿整条记录去问 {@code getMap()} 只会得到空表——表现就是「点了没反应」。
+     */
+    private static List<ConfigEnum> enumOptions(Ref<?> ref, int part) {
         try {
             Object value = ref.getValue();
             if (value instanceof StringEnum) {
                 // 有限字符串候选不是 ConfigEnum：候选走另一条路，见 stringEnumOptions
                 return List.of();
             }
-            // 可选值：候选取内层枚举，不是外层那个 OptionalPrimitive
-            if (value instanceof OptionalPrimitive<?>) {
+            if (part >= 0) {
+                Object[] parts = recordParts(value);
+                value = parts != null && part < parts.length ? parts[part] : null;
+            } else if (value instanceof OptionalPrimitive<?>) {
+                // 可选值：候选取内层枚举，不是外层那个 OptionalPrimitive
                 value = optionalInner(ref);
             }
             if (value instanceof ConfigEnum configEnum) {
@@ -905,9 +922,17 @@ public class ConfigPage extends GenericScreen {
 
     /** 当前取值：只用来在下拉里标出当前项，取不到就当没有当前项。 */
     private static ConfigEnum currentEnum(Ref<?> ref) {
+        return currentEnum(ref, -1);
+    }
+
+    /** 当前取值：{@code part} 为记录分量下标，{@code -1} 表示整值。 */
+    private static ConfigEnum currentEnum(Ref<?> ref, int part) {
         try {
             Object value = ref.getValue();
-            if (value instanceof OptionalPrimitive<?>) {
+            if (part >= 0) {
+                Object[] parts = recordParts(value);
+                value = parts != null && part < parts.length ? parts[part] : null;
+            } else if (value instanceof OptionalPrimitive<?>) {
                 value = optionalInner(ref);
             }
             return value instanceof ConfigEnum configEnum ? configEnum : null;
@@ -922,12 +947,14 @@ public class ConfigPage extends GenericScreen {
      * <p>两者候选来源不同（一个取 {@code ConfigEnum#getMap()}，一个取 {@code StringEnum#values()}），
      * 但面板、命中与写回都是同一件事，所以在这里统一成「一串标签 + 一个下标」。
      */
-    private static List<String> optionLabels(Ref<?> ref) {
-        List<String> strings = stringEnumOptions(ref);
-        if (!strings.isEmpty()) {
-            return strings;
+    private static List<String> optionLabels(Ref<?> ref, int part) {
+        if (part < 0) {
+            List<String> strings = stringEnumOptions(ref);
+            if (!strings.isEmpty()) {
+                return strings;
+            }
         }
-        List<ConfigEnum> enums = enumOptions(ref);
+        List<ConfigEnum> enums = enumOptions(ref, part);
         List<String> out = new ArrayList<>(enums.size());
         for (ConfigEnum option : enums) {
             out.add(enumLabel(option));
@@ -936,31 +963,39 @@ public class ConfigPage extends GenericScreen {
     }
 
     /** 当前项在候选里的标签：只用来标出哪一行是当前值。 */
-    private static String currentOptionLabel(Ref<?> ref) {
-        Object value = ref.getValue();
-        if (value instanceof StringEnum choice) {
-            return choice.value();
+    private static String currentOptionLabel(Ref<?> ref, int part) {
+        if (part < 0) {
+            Object value = ref.getValue();
+            if (value instanceof StringEnum choice) {
+                return choice.value();
+            }
         }
-        ConfigEnum current = currentEnum(ref);
+        ConfigEnum current = currentEnum(ref, part);
         return current == null ? null : enumLabel(current);
     }
 
     /** 写回下拉里选中的那一项：枚举与有限字符串候选各走各的写入口。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void selectOption(Ref<?> ref, int index) {
-        List<String> strings = stringEnumOptions(ref);
-        if (!strings.isEmpty()) {
-            if (index >= 0 && index < strings.size()) {
-                Object value = ref.getValue();
-                if (value instanceof StringEnum choice) {
-                    ((Ref) ref).setValue(new StringEnum(strings.get(index), choice.values()));
+    private void selectOption(Ref<?> ref, int index, int part) {
+        if (part < 0) {
+            List<String> strings = stringEnumOptions(ref);
+            if (!strings.isEmpty()) {
+                if (index >= 0 && index < strings.size()) {
+                    Object value = ref.getValue();
+                    if (value instanceof StringEnum choice) {
+                        ((Ref) ref).setValue(new StringEnum(strings.get(index), choice.values()));
+                    }
                 }
+                return;
             }
-            return;
         }
-        List<ConfigEnum> enums = enumOptions(ref);
+        List<ConfigEnum> enums = enumOptions(ref, part);
         if (index >= 0 && index < enums.size()) {
-            selectEnum(ref, enums.get(index));
+            if (part >= 0) {
+                ((Ref) ref).setValue(withPart(ref.getValue(), part, enums.get(index)));
+            } else {
+                selectEnum(ref, enums.get(index));
+            }
         }
     }
 
@@ -1122,7 +1157,8 @@ public class ConfigPage extends GenericScreen {
         int w = Math.min(itemsWidth(), Math.max(120, enumWidth(line.item().ref())));
         int h = count * DROP_ROW_H + 4;
         int x = Math.max(winX + 4, Math.min(winX + winW - 4 - w, itemsRight() - w));
-        int y = line.y() + ROW_H + 2;
+        // 记录里的枚举：面板贴的是那一格，不是整条记录的上沿
+        int y = line.y() + Math.max(0, dropdownPart) * ROW_H + ROW_H + 2;
         if (y + h > winY + winH - 4) {
             y = line.y() - h - 2;
         }
@@ -1815,18 +1851,21 @@ public class ConfigPage extends GenericScreen {
         if (line == null) {
             // 行被筛掉或滚出视野：面板没有可贴的位置
             dropdownKey = null;
+            dropdownPart = -1;
             return;
         }
-        List<String> labels = optionLabels(line.item().ref());
+        int part = recordPartOf(line.item().ref(), dropdownKey);
+        List<String> labels = optionLabels(line.item().ref(), part);
         if (labels.isEmpty()) {
             dropdownKey = null;
+            dropdownPart = -1;
             return;
         }
         Rect box = dropdownRect(line, labels.size());
         Ef.fill(ctx, box.x(), box.y(), box.w(), box.h(), p.panel());
         Ef.cutOutline(ctx, box.x(), box.y(), box.w(), box.h(), p.ink(), p.cut());
 
-        String current = currentOptionLabel(line.item().ref());
+        String current = currentOptionLabel(line.item().ref(), part);
         for (int i = 0; i < labels.size(); i++) {
             int oy = box.y() + 2 + i * DROP_ROW_H;
             boolean hot = mouseX >= box.x() && mouseX <= box.x() + box.w() && mouseY >= oy && mouseY < oy + DROP_ROW_H;
@@ -1977,6 +2016,7 @@ public class ConfigPage extends GenericScreen {
         if (dropdownKey != null) {
             boolean picked = clickDropdown(mx, my, button);
             dropdownKey = null;
+            dropdownPart = -1;
             if (picked) {
                 return true;
             }
@@ -2005,8 +2045,7 @@ public class ConfigPage extends GenericScreen {
             return null;
         }
         for (Line line : lines) {
-            if (line.item() == null
-                    || !(key.equals(enumKey(line.item())) || key.equals(enumKeyOf(line.item().ref())))) {
+            if (line.item() == null || !dropdownKeyMatches(line.item(), key)) {
                 continue;
             }
             if (line.y() + ROW_H < bodyTop() || line.y() > bodyBottom()) {
@@ -2015,6 +2054,22 @@ public class ConfigPage extends GenericScreen {
             return line;
         }
         return null;
+    }
+
+    /**
+     * 这一行的下拉身份是否就是 {@code key}。
+     *
+     * <p>三种身份：整值枚举（{@code enum:}）、有限字符串候选（{@code stringenum:}）、
+     * 记录里的某一格（{@code record:}）。少了最后一种，记录里的枚举点开就立刻被当成「行没了」清掉。
+     */
+    private static boolean dropdownKeyMatches(Item item, String key) {
+        if (key == null) {
+            return false;
+        }
+        if (key.equals(enumKey(item)) || key.equals(enumKeyOf(item.ref()))) {
+            return true;
+        }
+        return recordPartOf(item.ref(), key) >= 0;
     }
 
     /** 下拉里的一击：落在候选行上才写回，面板空白处只收面板。 */
@@ -2026,7 +2081,8 @@ public class ConfigPage extends GenericScreen {
         if (line == null) {
             return false;
         }
-        List<String> labels = optionLabels(line.item().ref());
+        int part = recordPartOf(line.item().ref(), dropdownKey);
+        List<String> labels = optionLabels(line.item().ref(), part);
         if (labels.isEmpty()) {
             return false;
         }
@@ -2039,7 +2095,7 @@ public class ConfigPage extends GenericScreen {
         if (my < top || index < 0 || index >= labels.size()) {
             return false;
         }
-        selectOption(line.item().ref(), index);
+        selectOption(line.item().ref(), index, part);
         return true;
     }
 
@@ -2565,6 +2621,7 @@ public class ConfigPage extends GenericScreen {
             }
             if (part instanceof ConfigEnum && button == 0) {
                 dropdownKey = recordKey(ref, index);
+                dropdownPart = index;
                 return true;
             }
             return false;
@@ -2644,6 +2701,7 @@ public class ConfigPage extends GenericScreen {
         // 滚动会挪行：贴行的输入框与下拉都按旧坐标算，先收起来（文本顺手提交）
         editor.close();
         dropdownKey = null;
+        dropdownPart = -1;
         buildLines();
         int step = (int) (Math.signum(amount) * 18.0D);
         if (mouseX >= winX && mouseX < winX + railW) {
