@@ -2427,9 +2427,11 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /** 这一击是不是落在计数块上：计数块与行尾重置图标会重叠，判定要按同一份几何。 */
-    private boolean inCountChip(Object value, int mouseX, int mouseY, int rowY) {
+    private boolean inCountChip(Ref<?> ref, int mouseX, int mouseY, int rowY) {
+        // 判 ref 不判 value：ListRef 是 Ref 类型，getValue() 拿到的是 ArrayList
+        Object value = ref.getValue();
         String label;
-        if (value instanceof ListRef listRef) {
+        if (ref instanceof ListRef listRef) {
             label = listRef.get().size() + " 项   ▾";
         } else if (value instanceof RegexList regexList) {
             label = regexList.patterns().size() + " 项   ▾";
@@ -2466,11 +2468,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void openListEditor(WrapperConfigRef<?> wrapper) {
-        Object raw = wrapper.ref().getValue();
-        me.matl114.utils.Debug.info("[SFH+] 打开列表编辑器: " + raw.getClass().getSimpleName());
+        // 判的是 ref 不是 value：ListRef 是 Ref 类型，getValue() 拿到的是 ArrayList
+        Ref<?> ref = wrapper.ref();
+        Object raw = ref.getValue();
         try {
             AttrKeyValue<Object> source = (AttrKeyValue<Object>) (AttrKeyValue<?>) handle(wrapper);
-            if (raw instanceof ListRef listRef) {
+            if (ref instanceof ListRef listRef) {
                 // ListRef 的 keyValue 是快照（AttrKeyValue.list 拷了一份），直接交给宿主编辑屏
                 // 写回只会改那份拷贝。包一层把 accept 转回 ListRef.setValue，配置才真的变。
                 WrapperFactory<List<String>, List<String>> factory = WrapperFactory.of(
@@ -3359,7 +3362,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                     && mx <= resetX + 14
                     && my >= row.y
                     && my < row.y + 12
-                    && !inCountChip(row.ref().ref().getValue(), mx, my, row.y)) {
+                    && !inCountChip(row.ref().ref(), mx, my, row.y)) {
                 setValue(row.ref().ref(), row.ref().ref().getDefaultValue());
                 return true;
             }
