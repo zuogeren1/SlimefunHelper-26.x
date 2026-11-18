@@ -195,7 +195,7 @@ public final class EndfieldElementFactory implements ElementFactory {
                 boolean usable = enable.getAsBoolean();
                 Ef.Palette p = pal();
                 // 激活态不整块填色：按钮宽度常常是整行，填满会变成一大块色板，
-                // 与行里那些小控件完全不是一套东西。用左侧一条强调线 + 描边表示。
+                // 与行里那些小控件完全不是一套东西。用描边 + 左侧一条强调线表示。
                 if (shouldHighlight) {
                     Ef.cutFill(context, 0, 0, w, h, p.chip(), Ef.CUT);
                 } else {
@@ -211,6 +211,53 @@ public final class EndfieldElementFactory implements ElementFactory {
                 String shown = Ef.ellipsis(raw.getString(), Math.max(0, w - 8));
                 int color = usable ? p.ink() : p.ink2();
                 Ef.text(context, shown, (w - Ef.textWidth(shown)) / 2, (h - Ef.lineH()) / 2, color);
+            }
+        };
+        return handler == null ? element : element.withTooltips(handler);
+    }
+
+    /**
+     * 开关：与配置页行尾那个小开关同一套画法——开是实心块加纸色缺口，关是虚线框加小方块。
+     *
+     * <p>所有 {@code createToggleButton} 重载最终都汇到这一个，覆写它一处就够。
+     * 不能走 {@link #createButton}：那是整行宽的按钮，开关画成整行块既不像开关，也压掉行名。
+     */
+    @Override
+    public ElementHandler createToggleButton(
+            TextProvider provider, TooltipHandler handler, ValueAccessor<Boolean> accessor, boolean frame) {
+        ElementHandler element = new BoxElement(ButtonAction.run(() -> accessor.setValue(!accessor.getValue()))) {
+            @Override
+            public void renderCentered0(
+                    DrawableWidget widget,
+                    VDrawContext context,
+                    int mouseX,
+                    int mouseY,
+                    float delta,
+                    float alpha,
+                    boolean shouldHighlight) {
+                int w = widget.getTextureWidth();
+                int h = widget.getTextureHeight();
+                boolean on = accessor.getValue();
+                Ef.Palette p = pal();
+                // 开关本体固定 20×9，贴在控件右端：控件本身可能占满整行
+                int sw = 20;
+                int sh = 9;
+                int sx = w - sw;
+                int sy = (h - sh) / 2;
+                if (on) {
+                    Ef.fill(context, sx, sy, sw, sh, p.ink());
+                    Ef.fill(context, sx + sw - 7, sy + 2, 5, 5, p.paper());
+                } else {
+                    Ef.dashedOutline(context, sx, sy, sw, sh, p.ink2());
+                    Ef.fill(context, sx + 2, sy + 2, 5, 5, p.ink2());
+                }
+                Component raw = provider.getText(widget);
+                if (raw == null) {
+                    return;
+                }
+                // 行名占左边，给开关让出 28px
+                String shown = Ef.ellipsis(raw.getString(), Math.max(0, w - sw - 12));
+                Ef.text(context, shown, 2, (h - Ef.lineH()) / 2, p.ink());
             }
         };
         return handler == null ? element : element.withTooltips(handler);
