@@ -1268,7 +1268,14 @@ public class ConfigPage extends GenericScreen {
             return;
         }
         List<String> tip = new ArrayList<>();
-        tip.addAll(Ef.wrap(hovered.path(), 240));
+        // 第一行是给人看的名字：翻译键取不到才退回路径，别把 mine-arua.enable 这种内部键摆到最上面
+        String name = labelOf(hovered);
+        if (!name.equals(hovered.path())) {
+            tip.addAll(Ef.wrap(name, 240));
+            tip.addAll(Ef.wrap(hovered.path(), 240));
+        } else {
+            tip.addAll(Ef.wrap(hovered.path(), 240));
+        }
         Ref<?> ref = hovered.ref();
         if (ref == null) {
             tip.add("这条路径解析不出配置项，只能看。");
