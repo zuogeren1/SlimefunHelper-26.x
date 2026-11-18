@@ -2426,6 +2426,25 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         return beginTextEdit(wrapper, rowY);
     }
 
+    /** 这一击是不是落在计数块上：计数块与行尾重置图标会重叠，判定要按同一份几何。 */
+    private boolean inCountChip(Object value, int mouseX, int mouseY, int rowY) {
+        String label;
+        if (value instanceof ListRef listRef) {
+            label = listRef.get().size() + " 项   ▾";
+        } else if (value instanceof RegexList regexList) {
+            label = regexList.patterns().size() + " 项   ▾";
+        } else if (value instanceof PrimitiveList<?> list) {
+            label = list.list().size() + " 项   ▾";
+        } else if (value instanceof PrimitiveMap<?, ?> map) {
+            label = map.toPrimitiveMap().size() + " 项   ▾";
+        } else {
+            return false;
+        }
+        int width = Ef.textWidth(label) + 10;
+        int x = controlRight() - width;
+        return inBox(x, rowY + 3, width, 12, mouseX, mouseY);
+    }
+
     /** 计数块的一击：点它打开这一项的列表编辑器。 */
     private boolean hitCountChip(
             WrapperConfigRef<?> wrapper, int count, int mouseX, int mouseY, int button, int rowY) {
@@ -2448,12 +2467,23 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void openListEditor(WrapperConfigRef<?> wrapper) {
         Object raw = wrapper.ref().getValue();
+        me.matl114.utils.Debug.info("[SFH+] 打开列表编辑器: " + raw.getClass().getSimpleName());
         try {
             AttrKeyValue<Object> source = (AttrKeyValue<Object>) (AttrKeyValue<?>) handle(wrapper);
-            if (raw instanceof ListRef) {
+            if (raw instanceof ListRef listRef) {
+                // ListRef 的 keyValue 是快照（AttrKeyValue.list 拷了一份），直接交给宿主编辑屏
+                // 写回只会改那份拷贝。包一层把 accept 转回 ListRef.setValue，配置才真的变。
+                WrapperFactory<List<String>, List<String>> factory = WrapperFactory.of(
+                        next -> {
+                            listRef.setValue(new java.util.ArrayList<>(next));
+                            return new java.util.ArrayList<>(next);
+                        },
+                        java.util.ArrayList::new);
+                AttrKeyValue<List<String>> live = new WrapperAttrKeyValue<>(
+                        (AttrKeyValue<List<String>>) (AttrKeyValue<?>) source, factory);
                 NBTTypes.openListModifyScreen(
                         NewClickGui.elementFactory(),
-                        (AttrKeyValue) source,
+                        live,
                         NBTTypes.STRING_TYPE,
                         () -> "",
                         300,
@@ -3321,12 +3351,15 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             if (mx < contentLeft - 4 || mx > contentLeft + contentWidth + 4) {
                 return false;
             }
+            // 重置图标在正文最右一格；计数块右对齐到 controlRight()，两者会重叠 2px。
+            // 计数块优先：它才是这一行的主控件，落在它上面的点击不该变成重置。
             int resetX = contentLeft + contentWidth - 14;
             if (row.ref().ref().hasDefaultValue()
                     && mx >= resetX
                     && mx <= resetX + 14
                     && my >= row.y
-                    && my < row.y + 12) {
+                    && my < row.y + 12
+                    && !inCountChip(row.ref().ref().getValue(), mx, my, row.y)) {
                 setValue(row.ref().ref(), row.ref().ref().getDefaultValue());
                 return true;
             }
