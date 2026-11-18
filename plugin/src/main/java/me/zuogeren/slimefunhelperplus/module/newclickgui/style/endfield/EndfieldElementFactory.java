@@ -194,19 +194,22 @@ public final class EndfieldElementFactory implements ElementFactory {
                 boolean on = active.getAsBoolean();
                 boolean usable = enable.getAsBoolean();
                 Ef.Palette p = pal();
-                if (on && usable) {
-                    Ef.cutFill(context, 0, 0, w, h, p.ink(), Ef.CUT);
-                } else if (shouldHighlight) {
+                // 激活态不整块填色：按钮宽度常常是整行，填满会变成一大块色板，
+                // 与行里那些小控件完全不是一套东西。用左侧一条强调线 + 描边表示。
+                if (shouldHighlight) {
                     Ef.cutFill(context, 0, 0, w, h, p.chip(), Ef.CUT);
                 } else {
-                    Ef.cutOutline(context, 0, 0, w, h, p.rule(), Ef.CUT);
+                    Ef.cutOutline(context, 0, 0, w, h, on && usable ? p.ink() : p.rule(), Ef.CUT);
+                }
+                if (on && usable) {
+                    Ef.fill(context, 0, 0, 2, h, p.trace());
                 }
                 Component raw = provider.getText(widget);
                 if (raw == null) {
                     return;
                 }
                 String shown = Ef.ellipsis(raw.getString(), Math.max(0, w - 8));
-                int color = on && usable ? p.paper() : (usable ? p.ink() : p.ink2());
+                int color = usable ? p.ink() : p.ink2();
                 Ef.text(context, shown, (w - Ef.textWidth(shown)) / 2, (h - Ef.lineH()) / 2, color);
             }
         };
