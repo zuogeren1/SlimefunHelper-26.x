@@ -309,8 +309,19 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     /** 这一帧鼠标停在物品模板的编辑按钮上。 */
     private boolean itemTemplateHover;
 
-    /** 模块自己塞进来的控件：每帧重建，位置由 buildRows 排。 */
+    /** 模块自己塞进来的控件：按 {@link #customKey} 缓存，位置由 buildRows 排。 */
     private final List<DrawableWidget> customWidgets = new ArrayList<>();
+
+    /**
+     * 自定义控件的缓存键：模块、正文宽度、主题任一变化才重建。
+     *
+     * <p>不能每帧重建：{@code addCustomWidgets} 里有的模块要扫系统字体目录（{@code Files.walk}），
+     * 有的要建几百个按钮；每帧做一次就是每帧一次磁盘遍历加一次全量重建。
+     */
+    private String customKey;
+
+    /** 每个自定义控件对应的行 Y，与 {@link #customWidgets} 同序；buildRows 时填。 */
+    private final List<Integer> customRowY = new ArrayList<>();
 
     /** 已经挂到屏幕上的那一批：与 customWidgets 不是同一份对象时整批换掉。 */
     private final List<DrawableWidget> mountedCustom = new ArrayList<>();
@@ -555,9 +566,12 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         // 布局重来（开屏、改窗口大小）时行会挪位：浮层的锚点跟着失效，先收起来
         this.palette = null;
         this.listPanel = null;
-        // 重新 init 会把子控件全部清掉：这份记录跟着作废，否则 tick 会以为它们还在屏幕上
+        // 重新 init 会把子控件全部清掉：这份记录跟着作废，否则 tick 会以为它们还在屏幕上。
+        // 缓存键也要清：控件列表已空，键还留着的话 buildRows 会以为不必重建。
         this.mountedCustom.clear();
         this.customWidgets.clear();
+        this.customRowY.clear();
+        this.customKey = null;
         // 输入框随旧控件树一起拆掉了：先把打的字提交掉，再作废目标（没在编辑时这一下什么都不做）
         closeTextEdit();
         if (tabKey != null) {
@@ -604,47 +618,39 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
-     * 把模块自定义控件挂到屏幕上。
+     * 把模块自定义控件挂到屏幕上，只挂视口内的那些。
      *
      * <p>与输入框同一条规矩：增删控件不能发生在点击/渲染的遍历里，所以统一在 tick 做。
-     * 每帧 {@code buildRows} 会重建 {@code customWidgets}，这里按对象身份判断要不要整批换。
+     *
+     * <p>必须按视口裁剪：字体列表这类模块一次塞几百个按钮，全挂上去每帧都要走一遍渲染与命中，
+     * 屏幕外那些既看不见又白花时间。挂上去的集合只在滚动跨过一行时才变，
+     * 所以这里按对象身份比对，没变就只更新位置。
      */
     private void syncCustomWidgets() {
-        if (customWidgets.size() == mountedCustom.size()
-                && java.util.stream.IntStream.range(0, customWidgets.size())
-                        .allMatch(i -> customWidgets.get(i) == mountedCustom.get(i))) {
-            // 同一批对象：只更新位置，不重挂
-            for (int i = 0; i < mountedCustom.size(); i++) {
-                placeCustomWidget(i);
+        int top = bodyTop();
+        int bottom = top + bodyHeight();
+        List<DrawableWidget> want = new ArrayList<>();
+        for (int i = 0; i < customWidgets.size() && i < customRowY.size(); i++) {
+            int rowY = customRowY.get(i);
+            if (rowY + ROW_H < top || rowY > bottom) {
+                continue;
             }
+            DrawableWidget widget = customWidgets.get(i);
+            widget.setX(contentLeft);
+            widget.setY(rowY);
+            want.add(widget);
+        }
+        if (want.size() == mountedCustom.size()
+                && java.util.stream.IntStream.range(0, want.size()).allMatch(i -> want.get(i) == mountedCustom.get(i))) {
             return;
         }
         for (DrawableWidget old : mountedCustom) {
             this.removeWidget(old);
         }
         mountedCustom.clear();
-        for (DrawableWidget widget : customWidgets) {
+        for (DrawableWidget widget : want) {
             this.addRenderableWidget(widget);
             mountedCustom.add(widget);
-        }
-        for (int i = 0; i < mountedCustom.size(); i++) {
-            placeCustomWidget(i);
-        }
-    }
-
-    /** 第 {@code index} 个自定义控件摆在哪：位置由 buildRows 排出的行决定。 */
-    private void placeCustomWidget(int index) {
-        int seen = -1;
-        for (Row row : rows) {
-            if (!CUSTOM_SECTION.equals(row.section) || row.header) {
-                continue;
-            }
-            if (++seen == index) {
-                DrawableWidget widget = mountedCustom.get(index);
-                widget.setX(contentLeft);
-                widget.setY(row.y);
-                return;
-            }
         }
     }
 
@@ -1516,16 +1522,23 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         // 不接的话这些模块的入口在本界面里整个消失。
         // 工厂换成本界面那一套：控件仍是宿主的元素类，只是配色与形状跟着本界面走，
         // 否则这一节会是一整片宿主外观，与上面的自绘行对不上。
-        customWidgets.clear();
-        if (module != null) {
-            module.addCustomWidgets(
-                    widget -> customWidgets.add(widget), contentWidth, ROW_H, 6, new EndfieldElementFactory(light()));
+        String key = System.identityHashCode(module) + ":" + contentWidth + ":" + light();
+        if (!key.equals(customKey)) {
+            customKey = key;
+            customWidgets.clear();
+            if (module != null) {
+                module.addCustomWidgets(
+                        widget -> customWidgets.add(widget), contentWidth, ROW_H, 6,
+                        new EndfieldElementFactory(light()));
+            }
         }
+        customRowY.clear();
         if (!customWidgets.isEmpty()) {
             rows.add(new Row(y, SECTION_H, null, CUSTOM_SECTION, true));
             y += SECTION_H;
-            for (DrawableWidget widget : customWidgets) {
+            for (int i = 0; i < customWidgets.size(); i++) {
                 rows.add(new Row(y, ROW_H, null, CUSTOM_SECTION, false));
+                customRowY.add(y);
                 y += ROW_H;
             }
         }
