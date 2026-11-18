@@ -9,7 +9,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import me.matl114.accessors.gui.ScreenAccess;
+import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.gui.presets.choices.RegistrySelectScreen;
+import me.matl114.hacks.utils.config.NBTTypes;
+import me.zuogeren.slimefunhelperplus.module.newclickgui.style.endfield.HostEditorScreen;
 import me.matl114.gui.GenericScreen;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigEnum;
@@ -26,7 +29,17 @@ import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.Holder;
+import me.matl114.hacks.utils.config.ItemStackTemplate;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
+import me.matl114.hacks.utils.config.PrimitiveList;
+import me.matl114.hacks.utils.config.PrimitiveMap;
+import me.matl114.hacks.utils.config.RegexList;
+import me.matl114.managers.config.ListRef;
+import me.matl114.managers.config.NBTType;
+import me.matl114.utils.config.AttrKeyValue;
+import me.matl114.utils.config.WrapperFactory;
+import me.matl114.utils.config.kv.WrapperAttrKeyValue;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.hacks.utils.config.WrapColor;
@@ -416,7 +429,66 @@ public class ConfigPage extends GenericScreen {
                 || ref.getValue() instanceof StringFormat
                 || ref.getValue() instanceof OptionalPrimitive<?>
                 || ref.getValue() instanceof EntrySet<?>
+                || ref instanceof ListRef
+                || ref.getValue() instanceof RegexList
+                || ref.getValue() instanceof PrimitiveList<?>
+                || ref.getValue() instanceof PrimitiveMap<?, ?>
+                || ref.getValue() instanceof ItemStackTemplate
+                || ref.getValue() instanceof Holder<?>
                 || recordParts(ref.getValue()) != null;
+    }
+
+    /** 值框里写一段文本的那几类：物品模板写 id，注册表条目写「注册表|条目」。 */
+    private static boolean textValueRow(Ref<?> ref) {
+        return ref.getValue() instanceof ItemStackTemplate || ref.getValue() instanceof Holder<?>;
+    }
+
+    /** 值框里的原文：与宿主存盘格式一致，写回时再解析。 */
+    private static String textValueRowOf(Ref<?> ref) {
+        Object value = ref.getValue();
+        if (value instanceof ItemStackTemplate template) {
+            return template.itemId().toString();
+        }
+        if (value instanceof Holder<?> holder) {
+            return holder.asString();
+        }
+        return "";
+    }
+
+    /** 按 Ref 找回它的配置路径：计数块的编辑屏要用它当键名。 */
+    private String itemPath(Ref<?> ref) {
+        for (Line line : lines) {
+            if (line.item() != null && line.item().ref() == ref) {
+                return line.item().path();
+            }
+        }
+        return "";
+    }
+
+    /** 计数块那几类：值本身是一串条目，点开交给宿主的编辑屏。 */
+    private static boolean countRow(Ref<?> ref) {
+        return ref instanceof ListRef
+                || ref.getValue() instanceof RegexList
+                || ref.getValue() instanceof PrimitiveList<?>
+                || ref.getValue() instanceof PrimitiveMap<?, ?>;
+    }
+
+    /** 计数块上的文字：条目数。 */
+    private static int countOf(Ref<?> ref) {
+        Object value = ref.getValue();
+        if (ref instanceof ListRef listRef) {
+            return listRef.get().size();
+        }
+        if (value instanceof RegexList regexList) {
+            return regexList.patterns().size();
+        }
+        if (value instanceof PrimitiveList<?> list) {
+            return list.list().size();
+        }
+        if (value instanceof PrimitiveMap<?, ?> map) {
+            return map.toPrimitiveMap().size();
+        }
+        return 0;
     }
 
     /**
@@ -1132,6 +1204,10 @@ public class ConfigPage extends GenericScreen {
             Ef.text(ctx, text, chipX + 5, y + 5, p.ink());
         } else if (ref.getValue() instanceof EntrySet<?> set) {
             paintEntrySet(ctx, p, y, right, ref, set);
+        } else if (textValueRow(ref)) {
+            paintTextValueRow(ctx, p, item, y, mouseX, mouseY);
+        } else if (countRow(ref)) {
+            paintCount(ctx, p, y, right, ref);
         } else if (recordParts(ref.getValue()) != null) {
             paintRecord(ctx, p, y, right, ref, mouseX, mouseY);
         } else if (optionalRow(ref)) {
@@ -1146,6 +1222,37 @@ public class ConfigPage extends GenericScreen {
             String text = Ef.ellipsis(valueText(ref), readOnlyWidth());
             Ef.text(ctx, text, right - Ef.textWidth(text), y + 5, p.ink2());
         }
+    }
+
+    /** 值框：物品模板与注册表条目共用，静态态画虚线底边。 */
+    private void paintTextValueRow(VDrawContext ctx, Ef.Palette p, Item item, int y, int mouseX, int mouseY) {
+        Rect slot = valueSlot(item, y);
+        if (editor.isOpenFor(editorKey(item))) {
+            FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), true, false);
+            return;
+        }
+        boolean hot = mouseX >= slot.x() && mouseX < slot.x() + slot.w()
+                && mouseY >= slot.y() && mouseY < slot.y() + slot.h();
+        if (hot) {
+            FieldEditor.paintFrame(ctx, p, slot.x(), slot.y(), slot.w(), slot.h(), false, true);
+        } else {
+            int lineY = slot.y() + slot.h() - 2;
+            for (int i = 0; i < slot.w(); i += 3) {
+                Ef.fill(ctx, slot.x() + i, lineY, Math.min(2, slot.w() - i), 1, p.rule());
+            }
+        }
+        String text = textValueRowOf(item.ref());
+        String shown = Ef.ellipsis(text, slot.w() - 8);
+        Ef.text(ctx, shown, slot.x() + slot.w() - 6 - Ef.textWidth(shown), y + 5, p.ink());
+    }
+
+    /** 计数块：一个「N 项 ▾」切角块，点开宿主的列表/键值编辑屏。 */
+    private void paintCount(VDrawContext ctx, Ef.Palette p, int y, int right, Ref<?> ref) {
+        String label = countOf(ref) + " 项   ▾";
+        int width = Ef.textWidth(label) + 10;
+        int x = right - width;
+        Ef.cutFill(ctx, x, y + 3, width, 12, p.chip(), p.cut());
+        Ef.text(ctx, label, x + 5, y + 5, p.ink());
     }
 
     /**
@@ -1710,6 +1817,95 @@ public class ConfigPage extends GenericScreen {
         }
     }
 
+    /**
+     * 打开宿主的列表 / 键值编辑屏。
+     *
+     * <p>增删行要按元素类型重建，自绘一份等于重写宿主的编辑器；这里只借它的编辑能力。
+     * 写回要包一层转换：宿主编辑屏写回的是 {@code List} / {@code Map}，
+     * 而这一项存的是 {@code PrimitiveList} / {@code PrimitiveMap}，不转换会在 accept 时抛类型错。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void openCountEditor(Ref<?> ref, String path) {
+        try {
+            AttrKeyValue<Object> source = (AttrKeyValue<Object>) (AttrKeyValue<?>) ref.createKeyValue(path);
+            Object raw = ref.getValue();
+            if (raw instanceof PrimitiveMap<?, ?> map) {
+                // 键值表：编辑器由 NBTType 自己生成，塞进一个独立屏
+                DrawableWidget editor = source.generateValueWidget(NewClickGui.elementFactory(), 0, 0, 300, 20);
+                if (editor != null) {
+                    ScreenAccess.of(new HostEditorScreen(editor, 300, 20)).openFromCurrent();
+                }
+                return;
+            }
+            if (raw instanceof PrimitiveList<?> list) {
+                NBTType<Object> elementType = (NBTType<Object>) list.elementType();
+                WrapperFactory<List<Object>, PrimitiveList<Object>> factory = WrapperFactory.of(
+                        next -> new PrimitiveList<>(elementType, next, list.defaultPrimitive()),
+                        PrimitiveList::list);
+                AttrKeyValue<List<Object>> converted = new WrapperAttrKeyValue<>(
+                        (AttrKeyValue<PrimitiveList<Object>>) (AttrKeyValue<?>) source, factory);
+                NBTTypes.openListModifyScreen(
+                        NewClickGui.elementFactory(), converted, elementType, list::createNewElement, 300, 20);
+                return;
+            }
+            if (raw instanceof RegexList regexList) {
+                WrapperFactory<List<java.util.regex.Pattern>, RegexList> factory =
+                        WrapperFactory.of(RegexList::new, RegexList::patterns);
+                AttrKeyValue<List<java.util.regex.Pattern>> converted =
+                        new WrapperAttrKeyValue<>((AttrKeyValue<RegexList>) (AttrKeyValue<?>) source, factory);
+                NBTTypes.openListModifyScreen(
+                        NewClickGui.elementFactory(), converted, NBTTypes.REGEX_TYPE,
+                        () -> java.util.regex.Pattern.compile(""), 300, 20);
+                return;
+            }
+            if (ref instanceof ListRef listRef) {
+                // ListRef 的 keyValue 是快照，写回只改那份拷贝；包一层把 accept 转回 setValue
+                WrapperFactory<List<String>, List<String>> factory = WrapperFactory.of(
+                        next -> {
+                            listRef.setValue(new ArrayList<>(next));
+                            return new ArrayList<>(next);
+                        },
+                        ArrayList::new);
+                AttrKeyValue<List<String>> live = new WrapperAttrKeyValue<>(
+                        (AttrKeyValue<List<String>>) (AttrKeyValue<?>) source, factory);
+                NBTTypes.openListModifyScreen(
+                        NewClickGui.elementFactory(), live, NBTTypes.STRING_TYPE, () -> "", 300, 20);
+            }
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] 列表编辑器打开失败: " + e);
+        }
+    }
+
+    /** 物品模板与注册表条目的就地编辑：非即时模式，Enter 或点到别处才交一次。 */
+    private void openTextValueEditor(Item item, int rowY) {
+        Ref<?> ref = item.ref();
+        Rect slot = valueSlot(item, rowY);
+        editor.open(this, editorKey(item), slot.x(), slot.y(), slot.w(), textValueRowOf(ref), false,
+                text -> commitTextValue(ref, text));
+    }
+
+    /**
+     * 值框写回：物品模板只换类型（数据组件原样保留），注册表条目按「注册表|条目」解析。
+     *
+     * <p>解析不出来就不落配置：打到一半的 id 不该把这一项变成空气。
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void commitTextValue(Ref<?> ref, String text) {
+        String next = text.trim();
+        Object value = ref.getValue();
+        if (value instanceof ItemStackTemplate template) {
+            net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.tryParse(next);
+            if (id != null && net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(id)) {
+                template.setType(id);
+                ((Ref) ref).setValue(template);
+            }
+            return;
+        }
+        if (value instanceof Holder<?>) {
+            Holder.parse(next).ifSuccess(parsed -> ((Ref) ref).setValue(parsed));
+        }
+    }
+
     /** 记录里某一格的数值编辑：几何与绘制共用同一份。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     private void openRecordEditor(Ref<?> ref, int part, int rowY, double current) {
@@ -1785,6 +1981,22 @@ public class ConfigPage extends GenericScreen {
             int chipX = right - enumWidth(ref);
             if (mx >= chipX && mx <= right && my >= rowY + 3 && my < rowY + 15) {
                 dropdownKey = enumKey(item);
+                return true;
+            }
+            return false;
+        }
+        if (textValueRow(ref)) {
+            if (button == 0 && inValueSlot(item, rowY, mx, my)) {
+                openTextValueEditor(item, rowY);
+                return true;
+            }
+            return false;
+        }
+        if (countRow(ref)) {
+            String label = countOf(ref) + " 项   ▾";
+            int width = Ef.textWidth(label) + 10;
+            if (button == 0 && mx >= right - width && mx <= right && my >= rowY + 3 && my < rowY + 15) {
+                openCountEditor(ref, itemPath(ref));
                 return true;
             }
             return false;
