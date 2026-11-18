@@ -22,6 +22,7 @@ import me.matl114.hacks.modules.task.ConfigManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Holder;
 import me.matl114.hacks.utils.config.ItemStackTemplate;
+import me.matl114.hacks.utils.config.GuiSetting;
 import me.matl114.hacks.InvTasks;
 import net.minecraft.core.registries.BuiltInRegistries;
 import me.matl114.hacks.utils.config.Regex;
@@ -117,6 +118,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     private static final int FIELD_TOP = 1;
     /** 值框右侧箭头占的宽度：点这一段开候选列表，点其余位置开编辑。 */
     private static final int ARROW_W = 14;
+    /** GUI 设置行的入口块文案：这一格点开的是宿主那一整套编辑屏。 */
+    private static final String GUI_SETTING_CHIP = "编辑   ▾";
     /** 聚焦环的粗细，以及它离边框内侧的距离（CSS 的 outline-offset: -1px）。 */
     private static final int FIELD_RING = 2;
     private static final int FIELD_RING_INSET = 0;
@@ -1053,6 +1056,7 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
                 || value.getValue() instanceof PrimitiveMap<?, ?>
                 || value.getValue() instanceof Holder<?>
                 || value.getValue() instanceof ItemStackTemplate
+                || value.getValue() instanceof GuiSetting
                 || value instanceof ListRef
                 || value.getValue() instanceof RegexList
                 || value.getValue() instanceof Regex
@@ -1817,6 +1821,8 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         } else if (raw instanceof Regex regex) {
             // 正则与字符串同一套值框：写回时重新构造 Regex，非法表达式不落配置
             paintTextValue(ctx, p, textValue, ref, regex.regex(), mouseX, mouseY);
+        } else if (raw instanceof GuiSetting) {
+            paintGuiSetting(ctx, p, y);
         } else {
             // 没有专用控件的类型：按值形态画成只读文本，不再退回宿主控件。
             // 一半自绘一半宿主会让同一张表里出现两种外观，宁可这一格暂时不可编辑。
@@ -2208,6 +2214,26 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
     }
 
     /**
+     * GUI 设置：一个入口块，点开宿主那一整套编辑屏。
+     *
+     * <p>它由十来个分量组成（文本、背景、标题、按钮、输入框、滑条、选择项），
+     * 还带「当前风格用不用自定义配色」「滑条关掉时后两项不出现」这类联动；
+     * 自绘一份等于把宿主的编辑器重写一遍，两边的默认值还会各自漂移。
+     * 所以这里只摆入口，编辑能力借宿主的——与键值表、列表同一个思路。
+     */
+    private void paintGuiSetting(VDrawContext ctx, Ef.Palette p, int y) {
+        Box chip = guiSettingChip(y);
+        Ef.cutFill(ctx, chip.x(), chip.y(), chip.w(), chip.h(), p.chip(), Ef.CUT);
+        Ef.text(ctx, GUI_SETTING_CHIP, chip.x() + 5, chip.y() + 2, p.ink());
+    }
+
+    /** GUI 设置入口块的矩形：绘制与命中取同一份，块才不会「看得见点不到」。 */
+    private Box guiSettingChip(int rowY) {
+        int width = Ef.textWidth(GUI_SETTING_CHIP) + 10;
+        return new Box(controlRight() - width, rowY + 3, width, 12);
+    }
+
+    /**
      * 列表类配置的计数块：与名单同一套外观，但点开的是宿主的列表编辑器。
      *
      * <p>元素带 {@code NBTType}，增删行要按元素类型重建，自绘一份等于重写宿主的列表编辑器；
@@ -2334,6 +2360,32 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
             ScreenAccess.of(new HostEditorScreen(editor, 300, 20)).openFromCurrent();
         } catch (Throwable e) {
             me.matl114.utils.Debug.info("[SFH+] 键值表编辑器打开失败: " + e);
+        }
+    }
+
+    /** GUI 设置行的一击：只有入口块接，点开宿主那一整套编辑屏。 */
+    private boolean hitGuiSetting(WrapperConfigRef<?> wrapper, int mouseX, int mouseY, int button, int rowY) {
+        Box chip = guiSettingChip(rowY);
+        if (button != 0 || !inBox(chip.x(), chip.y(), chip.w(), chip.h(), mouseX, mouseY)) {
+            return false;
+        }
+        openGuiSettingEditor(wrapper);
+        return true;
+    }
+
+    /**
+     * 打开宿主的 GUI 设置编辑屏。
+     *
+     * <p>写回走的是 {@link #handle} 那一份 {@code AttrKeyValue}：宿主编辑屏改完调 {@code accept}，
+     * 监听器再转成 {@code Ref#setValue}，与本界面其它控件是同一条链路。
+     */
+    @SuppressWarnings("unchecked")
+    private void openGuiSettingEditor(WrapperConfigRef<?> wrapper) {
+        try {
+            AttrKeyValue<GuiSetting> source = (AttrKeyValue<GuiSetting>) (AttrKeyValue<?>) handle(wrapper);
+            HostControls.openGuiSettingEditor(NewClickGui.elementFactory(), source);
+        } catch (Throwable e) {
+            me.matl114.utils.Debug.info("[SFH+] GUI 设置编辑器打开失败: " + e);
         }
     }
 
@@ -3527,6 +3579,9 @@ public class EndfieldModuleConfigScreen extends GenericScreen {
         }
         if (ref.getValue() instanceof ItemStackTemplate template) {
             return hitItemTemplate(wrapper, template, mouseX, mouseY, button, rowY);
+        }
+        if (ref.getValue() instanceof GuiSetting) {
+            return hitGuiSetting(wrapper, mouseX, mouseY, button, rowY);
         }
         if (ref instanceof ListRef listRef) {
             return hitCountChip(wrapper, listRef.get().size(), mouseX, mouseY, button, rowY);
