@@ -6,7 +6,7 @@
 
 在上游更新时会同步更改，同步间隔通常在3~7天，改动过大时可能需要更长时间。
 
-不要向原作者汇报这个分支出现的问题，如果你有创新意见或者mod出现的bug，可以在本分支仓库创建issue，好的提议将被加入到sfhplus插件之中。
+不要向原作者汇报这个分支出现的问题，如果你有创新意见或者mod出现的bug，可以在本分支仓库创建issue，好的提议将被加入到[sfhplus](https://github.com/zuogeren1/sfhplus)插件之中。
 
 该模组旨在**为[粘液科技游戏](https://slimefun-wiki.guizhanss.cn/)和普通生存/各类无规则生存提供更多便利和增强游戏与开发体验**
 
@@ -56,10 +56,6 @@
 - IMBlocker
 - Meteor
 - XaeroMap系列(XaeroWorldMap, XaeroMiniMap, XaeroPlus)
-
-### SlimeFunHelper+ 插件
-
-- ConfluxMap(≥0.1.16)
 
 如果遇到了和其他客户端同时使用导致的异常行为或者崩溃,请联系作者或者提出issue
 
