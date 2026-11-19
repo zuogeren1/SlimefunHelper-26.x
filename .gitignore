@@ -57,5 +57,8 @@ remapped.accesswidener
 # AI agent 规则（本地文件，不进版本库）
 AGENTS.md
 
+# 插件是独立仓库（zuogeren1/sfhplus），本地仍放在这里供复合构建使用
+plugin/
+
 # 子代理临时探测目录（不进版本库）
 _scratch/
