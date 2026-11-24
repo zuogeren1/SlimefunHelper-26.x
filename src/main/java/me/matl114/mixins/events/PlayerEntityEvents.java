@@ -3,6 +3,7 @@ package me.matl114.mixins.events;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import me.matl114.accessors.access.ClientPlayerAccess;
+import me.matl114.accessors.events.EntityAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import net.fabricmc.api.EnvType;
@@ -17,10 +18,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Environment(EnvType.CLIENT)
 @Mixin(Player.class)
-public abstract class PlayerEntityEvents {
+public abstract class PlayerEntityEvents implements EntityAccess<Player> {
     @Inject(method = "travel", at = @At("HEAD"), cancellable = true)
     private void onPlayerTravel(Vec3 movementInput, CallbackInfo ci, @Local(argsOnly = true) LocalRef<Vec3> move) {
-        if ((Object) this instanceof LocalPlayer clientPlayerEntity) {
+        if ((Object) this instanceof LocalPlayer clientPlayerEntity && checkClientPlayer()) {
             Event<Vec3> event = new Event<>(movementInput, true, true, clientPlayerEntity);
             Listener.getPlayerTravelingTick().handleValue(event);
             if (event.isCancelled()) {
@@ -45,7 +46,7 @@ public abstract class PlayerEntityEvents {
 
     @Inject(method = "travel", at = @At("RETURN"))
     private void onPlayerTravelReturn(Vec3 movementInput, CallbackInfo ci) {
-        if ((Object) this instanceof LocalPlayer clientPlayerEntity) {
+        if ((Object) this instanceof LocalPlayer clientPlayerEntity && checkClientPlayer()) {
             ClientPlayerAccess.of(clientPlayerEntity)
                     .getLegalMovementManager()
                     .postTravelTick(clientPlayerEntity, new Event<>(movementInput, false, false, clientPlayerEntity));
