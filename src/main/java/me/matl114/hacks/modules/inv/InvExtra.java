@@ -9,7 +9,6 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.OptionalInt;
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.access.HandledScreenAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
@@ -128,6 +127,26 @@ public class InvExtra extends BaseModule {
     public void onCloseScreen(Event<ServerboundContainerClosePacket> closeS2C) {
         if (expandInventory.get() && closeS2C.context.getContainerId() == mc.player.inventoryMenu.containerId) {
             closeS2C.cancel();
+        }
+    }
+
+    public void clearKeepedInventory() {
+        LocalPlayer player = mc.player;
+        if (player == null) {
+            return;
+        }
+        InventoryManager manager = InvTasks.getInventoryManager();
+        try {
+            int syncId = manager != null && manager.currentOpenScreenHandler != null
+                    ? manager.currentOpenScreenHandler.containerId
+                    : player.containerMenu.containerId;
+            if (mc.getConnection() != null) {
+                mc.getConnection().send(new ServerboundContainerClosePacket(syncId));
+            }
+        } catch (Throwable e) {
+            e.printStackTrace();
+        } finally {
+            player.clientSideCloseContainer();
         }
     }
 
@@ -382,7 +401,7 @@ public class InvExtra extends BaseModule {
 
     public Runnable swapScreenSlots(int armorSlot, int targetSlot) {
         if (armorSlot == targetSlot) return Runnables.doNothing();
-        var handler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        var handler = InvTasks.getCurrentServerScreenHandler(mc.player);
         var slots = handler.slots;
         if (slots.size() <= armorSlot || slots.size() <= targetSlot) {
             return null;
@@ -418,7 +437,7 @@ public class InvExtra extends BaseModule {
 
     public void mergeScreenSlotTo(int from, int to) {
         if (from == to) return;
-        var handler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        var handler = InvTasks.getCurrentServerScreenHandler(mc.player);
         var slots = handler.slots;
         if (slots.size() <= from || slots.size() <= to) {
             return;
@@ -527,8 +546,7 @@ public class InvExtra extends BaseModule {
     public void clearKeep() {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player != null) {
-            ClientPlayerAccess access = ClientPlayerAccess.of(player);
-            access.clearKeepedInventory(true);
+            clearKeepedInventory();
             Debug.chat(Component.literal("已清除界面历史记录"));
         }
     }

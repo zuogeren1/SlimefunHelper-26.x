@@ -7,11 +7,11 @@ import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.datafixers.util.Pair;
 import java.util.Objects;
 import javax.annotation.Nullable;
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.hacks.CombatTasks;
 import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.inv.InventoryManager;
 import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.utils.enums.GhostHandMode;
@@ -742,7 +742,9 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                             target =
                                     "Lnet/minecraft/world/entity/player/Player;containerMenu:Lnet/minecraft/world/inventory/AbstractContainerMenu;"))
     public AbstractContainerMenu onClickSlot(AbstractContainerMenu original, @Local(argsOnly = true) Player player) {
-        return player instanceof ClientPlayerAccess clientPlayer ? clientPlayer.getServerScreenHandler() : original;
+        return player instanceof LocalPlayer clientPlayer
+                ? InventoryManager.INSTANCE.getCurrentServerScreenHandler(clientPlayer)
+                : original;
     }
 
     @Inject(method = "sameDestroyTarget", at = @At("HEAD"), cancellable = true)

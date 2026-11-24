@@ -12,7 +12,6 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import javax.annotation.Nonnull;
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.hacks.InvTasks;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.utils.inventory.*;
@@ -300,12 +299,15 @@ public class InventoryUtils {
             }
         }
         // while player is open Screen
-        if (doNotFSearchWhenOpenOtherScreen
-                && ClientPlayerAccess.of(mc.player).getServerScreenHandler().containerId
-                        != mc.player.inventoryMenu.containerId) {
+        boolean openScreen =
+                InvTasks.getCurrentServerScreenHandler(mc.player).containerId != mc.player.inventoryMenu.containerId;
+        if (doNotFSearchWhenOpenOtherScreen && openScreen) {
             return result;
         }
         for (var i = 0; i < searchTo; ++i) {
+            if (openScreen && i >= 36 && i < 40) {
+                continue;
+            }
             ItemStack stack = pinv.getItem(i);
             test = new IndexEntry<>(i, stack);
             if ((acceptEmpty || !stack.isEmpty()) && predicate.test(test)) {
@@ -412,14 +414,17 @@ public class InventoryUtils {
                 result = test;
             }
         }
-        if (doNotFSearchWhenOpenOtherScreen
-                && ClientPlayerAccess.of(mc.player).getServerScreenHandler().containerId
-                        != mc.player.inventoryMenu.containerId) {
+        boolean openScreen =
+                InvTasks.getCurrentServerScreenHandler(mc.player).containerId != mc.player.inventoryMenu.containerId;
+        if (doNotFSearchWhenOpenOtherScreen && openScreen) {
             return result;
         }
 
         Double currentValue;
         for (var i = 0; i < searchTo; ++i) {
+            if (openScreen && i >= 36 && i < 40) {
+                continue;
+            }
             ItemStack stack = pinv.getItem(i);
             test = new IndexEntry<>(i, stack);
             if ((acceptEmpty || !stack.isEmpty()) && (currentValue = maxFunction.apply(test)) != null) {
@@ -452,7 +457,7 @@ public class InventoryUtils {
     public static IndexEntry<Slot> findPlayerBackpackSlot(
             Predicate<Slot> predicate, boolean acceptEmpty, boolean includeCraft) {
         var handler = mc.player.inventoryMenu;
-        var serverHandler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        var serverHandler = InvTasks.getCurrentServerScreenHandler(mc.player);
         if (serverHandler.containerId == handler.containerId) {
             if (includeCraft) {
                 for (var i = 1; i < 5; ++i) {
@@ -463,19 +468,19 @@ public class InventoryUtils {
                     }
                 }
             }
-            var pinv = mc.player.getInventory();
-            for (var i = 0; i < getPlayerInvSize(); ++i) {
-                int slotIndex = InvTasks.getScreenSlotByInventoryIndex(i);
-                var slot = handler.slots.get(slotIndex);
+        }
+        var pinv = mc.player.getInventory();
+        for (var i = 0; i < getPlayerInvSize(); ++i) {
+            OptionalInt slotIndex = serverHandler.findSlot(pinv, i);
+            if (slotIndex.isPresent()) {
+                var slot = handler.slots.get(slotIndex.getAsInt());
                 if (!acceptEmpty && slot.getItem().isEmpty()) continue;
                 if (predicate.test(slot)) {
-                    return new IndexEntry<>(slotIndex, slot);
+                    return new IndexEntry<>(slotIndex.getAsInt(), slot);
                 }
             }
-            return null;
-        } else {
-            return null;
         }
+        return null;
     }
 
     public static IndexEntry<Slot> findBestScreenSlot(
@@ -597,6 +602,10 @@ public class InventoryUtils {
 
     public static int getSelectedSlot() {
         return mc.player.getInventory().getSelectedSlot();
+    }
+
+    public static void setSelectedSlot(int val) {
+        mc.player.getInventory().setSelectedSlot(val);
     }
 
     @Nonnull

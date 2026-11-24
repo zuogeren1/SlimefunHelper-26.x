@@ -6,11 +6,12 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.platform.Window;
 import me.matl114.accessors.access.ClientAccess;
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.hacks.InteractionTasks;
+import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.modules.combat.CombatExtra;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.inv.InventoryManager;
 import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.render.RenderExtra;
 import me.matl114.hacks.utils.ClientUtils;
@@ -93,12 +94,13 @@ public abstract class MinecraftClientMixin implements Cloneable, ClientAccess {
     public Screen onRedirectInventoryKeyPress(Screen screen) {
         if (InvExtra.INSTANCE.enableKeepInv.get()) {
             LocalPlayer player = Minecraft.getInstance().player;
+            InventoryManager manager = InvTasks.getInventoryManager();
             if (player != null
-                    && ClientPlayerAccess.of(player).getKeepedInvHandler() != null
-                    && ClientPlayerAccess.of(player).getKeepedInv() != null) {
-                AbstractContainerScreen screen1 = ClientPlayerAccess.of(player).getKeepedInv();
-                player.containerMenu = ClientPlayerAccess.of(player).getKeepedInvHandler();
-                ClientPlayerAccess.of(player).clearKeepedInventory(false);
+                    && manager != null
+                    && manager.currentOpenScreenHandler != null
+                    && manager.currentOpenScreen != null) {
+                AbstractContainerScreen screen1 = manager.currentOpenScreen;
+                player.containerMenu = manager.currentOpenScreenHandler;
                 return screen1;
             }
         }

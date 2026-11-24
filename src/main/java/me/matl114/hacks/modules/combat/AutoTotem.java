@@ -2,7 +2,6 @@ package me.matl114.hacks.modules.combat;
 
 import java.util.List;
 import java.util.Random;
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -222,7 +221,7 @@ public class AutoTotem extends BaseModule {
     }
 
     private void swapTo(int toSlot) {
-        AbstractContainerMenu handled = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        AbstractContainerMenu handled = InvTasks.getCurrentServerScreenHandler(mc.player);
         List<Slot> slots = handled.slots;
         for (var i = 0; i < slots.size(); ++i) {
             if ((slots.get(i).container instanceof Inventory || handled == mc.player.inventoryMenu)
@@ -249,7 +248,7 @@ public class AutoTotem extends BaseModule {
             int consumeSlot =
                     stackInMainHand.getItem() == Items.TOTEM_OF_UNDYING ? InventoryUtils.getSelectedSlot() : 40;
             mc.player.getInventory().setItem(consumeSlot, ItemStack.EMPTY);
-            AbstractContainerMenu handled = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+            AbstractContainerMenu handled = InvTasks.getCurrentServerScreenHandler(mc.player);
             List<Slot> slots = handled.slots;
             // revert usage to avoid conflict
             for (var i = slots.size() - 1; i >= 0; --i) {

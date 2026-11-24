@@ -10,7 +10,6 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 import lombok.Getter;
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.interfaces.TileInventory;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -31,7 +30,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponentType;
@@ -40,13 +38,11 @@ import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
-import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
@@ -71,25 +67,17 @@ public class InvTasks {
 
     @ApiMethod
     public static Screen getCurrentServerScreen(Player player) {
-        if (player == null) {
-            return null;
-        }
-        Screen nowScreen = null;
-        if (player instanceof ClientPlayerAccess access) {
-            nowScreen = access.getServerOpeningScreen();
-        } else {
-            nowScreen = ClientUtils.getScreen();
-        }
-        // ignore Creative screen as it is not handled by server
-        if (nowScreen instanceof CreativeModeInventoryScreen) {
-            return null;
-        }
-        return nowScreen;
+        return player instanceof LocalPlayer lp ? inventoryManager.getCurrentServerScreen(lp) : null;
     }
 
     @ApiMethod
     public static AbstractContainerMenu getCurrentServerScreenHandler(LocalPlayer player) {
-        return player == null ? null : ClientPlayerAccess.of(player).getServerScreenHandler();
+        return inventoryManager.getCurrentServerScreenHandler(player);
+    }
+
+    @ApiMethod
+    public static AbstractContainerScreen<?> getCurrentServerOpeningScreen(LocalPlayer player) {
+        return inventoryManager.getCurrentServerOpeningScreen(player);
     }
 
     @ApiMethod
@@ -789,7 +777,7 @@ public class InvTasks {
         if (mc.player == null) return;
         // handler or player inv
 
-        AbstractContainerMenu screenHandler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        AbstractContainerMenu screenHandler = InvTasks.getCurrentServerScreenHandler(mc.player);
         AbstractContainerMenu currentHandler = mc.player.containerMenu;
 
         int syncId = screenHandler.containerId;
@@ -809,15 +797,9 @@ public class InvTasks {
         return;
     }
 
-    // track screen syncId
-    public static int LAST_SYNC_ID = 0;
     // for screen desync fix
     public static final int MAX_DEQUE_SIZE = 8;
     public static Deque<AbstractContainerMenu> historyScreens = new ArrayDeque<>();
-
-    public static void onOpenScreen(Event<ClientboundOpenScreenPacket> packet) {
-        LAST_SYNC_ID = packet.context.getContainerId();
-    }
 
     public static void onOpenScreenCreate(Event<AbstractContainerScreen<?>> eventScreen) {
         if (eventScreen.context != null && eventScreen.context.getMenu() != null) {
@@ -832,7 +814,7 @@ public class InvTasks {
         if (mc.player == null || mc.level == null) return;
         int syncId = invS2CPacket.context.getContainerId();
         if (mc.gameMode.getPlayerMode().isSurvival()
-                && ClientPlayerAccess.of(mc.player).getServerScreenHandler().containerId != syncId
+                && InvTasks.getCurrentServerScreenHandler(mc.player).containerId != syncId
                 && mc.player.containerMenu.containerId != syncId
                 && syncId != 0) {
             // maybe we click too fast that we miss something
@@ -850,7 +832,7 @@ public class InvTasks {
         if (mc.player == null || mc.level == null) return;
         int syncId = eventInv.context.containerId();
         if (mc.gameMode.getPlayerMode().isSurvival()
-                && ClientPlayerAccess.of(mc.player).getServerScreenHandler().containerId != syncId
+                && InvTasks.getCurrentServerScreenHandler(mc.player).containerId != syncId
                 && mc.player.containerMenu.containerId != syncId
                 && syncId != 0) {
             // maybe we click too fast that we miss something
@@ -865,7 +847,6 @@ public class InvTasks {
     }
 
     public static void onGameJoin(Event<LocalPlayer> gameJoin) {
-        LAST_SYNC_ID = 0;
         historyScreens.clear();
     }
 
@@ -913,22 +894,7 @@ public class InvTasks {
     }
 
     public static void executePredictInventoryAction(Container topInventory, Consumer<AbstractContainerMenu> callback) {
-        // todo fix prediction initialization
-        int nextPredictedIndex = (InvTasks.LAST_SYNC_ID % 100) + 1;
-        AbstractContainerMenu fakeScreenHandler = new ChestMenu(
-                ScreenUtils.getGenericScreenType(topInventory.getContainerSize()),
-                nextPredictedIndex,
-                mc.player.getInventory(),
-                topInventory,
-                ((topInventory.getContainerSize() - 1) / 9) + 1);
-        ChestMenu.sixRows(nextPredictedIndex, mc.player.getInventory());
-        AbstractContainerMenu handler = mc.player.containerMenu;
-        try {
-            mc.player.containerMenu = fakeScreenHandler;
-            callback.accept(fakeScreenHandler);
-        } finally {
-            mc.player.containerMenu = handler;
-        }
+        inventoryManager.executePredictInventoryAction(topInventory, callback);
     }
 
     @Getter
@@ -1025,7 +991,6 @@ public class InvTasks {
             InvTasks.unlimitedClickExecutor.reset();
         });
 
-        Listener.getPacketPoint().getChannel(ClientboundOpenScreenPacket.class).registerHandler(InvTasks::onOpenScreen);
         Listener.getGameJoinPoint().registerHandler(InvTasks::onGameJoin);
         Listener.getPostOpenHandledScreen().registerHandler(InvTasks::onOpenScreenCreate);
         Listener.getPacketPostHandlePoint()

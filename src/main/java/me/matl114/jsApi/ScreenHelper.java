@@ -4,7 +4,7 @@ import me.matl114.hacks.utils.ClientUtils;
 
 import java.util.List;
 import javax.annotation.Nonnull;
-import me.matl114.accessors.access.ClientPlayerAccess;
+import me.matl114.hacks.InvTasks;
 import me.matl114.utils.ApiMethod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -60,7 +60,7 @@ public class ScreenHelper {
     @Nonnull
     public static Object createServerInventoryView() {
         LocalPlayer player = mc.player;
-        AbstractContainerScreen<?> handledScreen = ClientPlayerAccess.of(player).getServerOpeningScreen();
+        AbstractContainerScreen<?> handledScreen = InvTasks.getCurrentServerOpeningScreen(player);
         // create backpack inventory if null
         return handledScreen != null
                 ? createInventoryView(handledScreen)

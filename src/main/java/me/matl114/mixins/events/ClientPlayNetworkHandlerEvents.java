@@ -67,6 +67,13 @@ public abstract class ClientPlayNetworkHandlerEvents {
         }
     }
 
+    @Inject(method = "handleMountScreenOpen", at = @At("RETURN"))
+    private void onPostMountInventoryOpen(ClientboundMountScreenOpenPacket packet, CallbackInfo ci) {
+        if (ClientUtils.getScreen() instanceof AbstractContainerScreen<?> screen) {
+            Listener.getPostOpenHandledScreen().broadcast(screen);
+        }
+    }
+
     @Unique
     boolean escapeSendEvent = false;
 

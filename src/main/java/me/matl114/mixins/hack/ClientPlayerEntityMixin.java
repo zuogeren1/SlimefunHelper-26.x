@@ -7,12 +7,12 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.authlib.GameProfile;
 import java.util.Objects;
-import lombok.Getter;
 import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.events.Event;
 import me.matl114.hacks.*;
 import me.matl114.hacks.modules.extra.BadPacketsFix;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.inv.InventoryManager;
 import me.matl114.hacks.modules.move.MoveTimer;
 import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.modules.move.Sprint;
@@ -111,35 +111,6 @@ public abstract class ClientPlayerEntityMixin extends AbstractClientPlayer imple
     @Shadow
     private boolean crouching;
 
-    @Getter
-    @Unique
-    public AbstractContainerScreen keepedInv = null;
-
-    @Getter
-    @Unique
-    public AbstractContainerMenu keepedInvHandler = null;
-
-    @Unique
-    boolean forceCloseInv = false;
-
-    @Unique
-    public void clearKeepedInventory(boolean closeInv) {
-        // todo closeInv log
-        keepedInv = null;
-        AbstractContainerMenu handler = keepedInvHandler;
-        keepedInvHandler = null;
-        if (closeInv) {
-            forceCloseInv = true;
-            try {
-                ((LocalPlayer) (Object) this).closeContainer();
-            } catch (Throwable e) {
-                e.printStackTrace();
-            } finally {
-                forceCloseInv = false;
-            }
-        }
-    }
-
     @Override
     public float getEffectBlendFactor(Holder<MobEffect> effect, float tickProgress) {
         if (NoRender.INSTANCE.noNausea() && Objects.equals(effect, MobEffects.NAUSEA)) {
@@ -154,13 +125,12 @@ public abstract class ClientPlayerEntityMixin extends AbstractClientPlayer imple
 
     @Inject(method = "closeContainer", at = @At(value = "HEAD"), cancellable = true)
     public void closeHandledScreen(CallbackInfo ci) {
-        if (!this.forceCloseInv && InvExtra.INSTANCE.enableKeepInv.get()) {
-            // do not keep the inventory handler because we can get accessed to it any time
+        InventoryManager manager = InvTasks.getInventoryManager();
+        if (manager != null && InvExtra.INSTANCE.enableKeepInv.get()) {
+            // The manager retains the server handler; close only the client screen.
             if (ClientUtils.getScreen(minecraft) instanceof AbstractContainerScreen handled
                     && !(handled.getMenu() instanceof InventoryMenu)
                     && !(handled.getMenu() instanceof CreativeModeInventoryScreen.ItemPickerMenu)) {
-                keepedInv = handled;
-                this.keepedInvHandler = ((LocalPlayer) (Object) this).containerMenu;
                 this.clientSideCloseContainer();
                 ci.cancel();
             }

@@ -1,11 +1,11 @@
 package me.matl114.hacks.modules.inv;
 
-import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.access.LivingEntityAccess;
 import me.matl114.accessors.access.PlayerInteractItemC2SPacketAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.PacketManager;
+import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
@@ -61,12 +61,12 @@ public class InvDesyncFix extends BaseModule {
     }
 
     private void nextRevision() {
-        var serverHandler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        var serverHandler = InvTasks.getCurrentServerScreenHandler(mc.player);
         serverHandler.incrementStateId();
     }
 
     private void makeDesync() {
-        var serverHandler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+        var serverHandler = InvTasks.getCurrentServerScreenHandler(mc.player);
         serverHandler.stateId = (serverHandler.stateId - 2) & 32767;
     }
 
@@ -115,7 +115,7 @@ public class InvDesyncFix extends BaseModule {
             if (syncId == 0) {
                 syncPlayerInventoryRevision(eventUpdate.context.getStateId());
             } else {
-                AbstractContainerMenu handler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+                AbstractContainerMenu handler = InvTasks.getCurrentServerScreenHandler(mc.player);
                 if (handler.containerId == syncId) {
                     handler.stateId = eventUpdate.context.getStateId();
                 }
@@ -132,7 +132,7 @@ public class InvDesyncFix extends BaseModule {
             if (syncId == 0) {
                 syncPlayerInventoryRevision(eventUpdate.context.stateId());
             } else {
-                AbstractContainerMenu handler = ClientPlayerAccess.of(mc.player).getServerScreenHandler();
+                AbstractContainerMenu handler = InvTasks.getCurrentServerScreenHandler(mc.player);
                 if (handler.containerId == syncId) {
                     handler.stateId = eventUpdate.context.stateId();
                 }
