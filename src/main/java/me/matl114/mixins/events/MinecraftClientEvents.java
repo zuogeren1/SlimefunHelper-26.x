@@ -456,4 +456,17 @@ public abstract class MinecraftClientEvents {
                         false,
                         false));
     }
+
+    @Inject(
+            method = "tick",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lnet/minecraft/client/multiplayer/ClientLevel;tickBlockEntities()V",
+                            shift = At.Shift.BEFORE))
+    private void onPostPlayerUpdate(CallbackInfo ci) {
+        if (this.player != null) {
+            Listener.getClientPlayerPostUpdatePoint().broadcast(this.player);
+        }
+    }
 }
