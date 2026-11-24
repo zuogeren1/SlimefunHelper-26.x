@@ -505,12 +505,20 @@ public class Listener {
 
     // client player behaviours
     @Getter
+    @Broadcast
+    private static final EventChannel<LocalPlayer> clientPlayerPreTickPoint = new EventChannel<>();
+
+    @Getter
     @Cancelable
     private static final EventChannel<LocalPlayer> clientPlayerSendMovementPoint = new EventChannel<>();
 
     @Getter
     @Broadcast
     private static final EventChannel<LocalPlayer> clientPlayerPostSendMovementPoint = new EventChannel<>();
+
+    @Getter
+    @Broadcast
+    private static final EventChannel<LocalPlayer> clientPlayerPostUpdatePoint = new EventChannel<>();
 
     @Getter
     @Cancelable
