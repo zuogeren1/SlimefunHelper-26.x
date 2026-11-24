@@ -155,6 +155,15 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
     //$$         ItemActivation itemActivation,
     //$$         CallbackInfo ci) {
     //#else
+    /** 下一次位置包发送时强制补发一次最小更新，用于取消移动包后让服务端重新同步位置。 */
+    public boolean forceSendPacket;
+
+    @Override
+    @Unique
+    public void setForceSendPacketUpdate(boolean force) {
+        this.forceSendPacket = force;
+    }
+
     @Inject(method = "<init>", at = @At("RETURN"))
     private void onClientPlayerInitConfiguration(
             Minecraft client,
