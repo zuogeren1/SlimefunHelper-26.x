@@ -11,8 +11,6 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.mine.FakeBlockManager;
-import me.matl114.hacks.modules.task.MovementManager;
-import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
@@ -28,13 +26,12 @@ import net.minecraft.network.protocol.game.ClientboundDamageEventPacket;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.server.RunningOnDifferentThreadException;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.phys.Vec3;
 
-public class Velocity extends BaseModule implements LegalMovementManager.MovementModifier {
+public class Velocity extends BaseModule {
     // 还没想好 先新建文件夹
     public static Velocity INSTANCE;
     public final ModulePath velocityManagement = makePath(Configs.MOV_CONFIG, "velocity-management");
@@ -117,7 +114,6 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
         super("Velocity");
         INSTANCE = this;
         bindFlag(enable);
-        MovementManager.registerMovementPipeline(this);
     }
 
     @Override
@@ -128,11 +124,9 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
         registerListener(Listener.getPlayerExplosionVelocity(), this::onExplosion);
         registerListener(
                 Listener.getPacketPoint().getChannel(ClientboundDamageEventPacket.class), this::onEntityDamage);
-        registerListener(Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class), this::onSendMove);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
         registerListener(
                 Listener.getPacketPoint().getChannel(ClientboundPlayerPositionPacket.class), this::onSetPosition);
-        registerListener(Listener.getPacketPoint().getChannel(ClientboundPingPacket.class), this::onPing);
         registerListener(Listener.getPreGameTick(), this::onPreTick);
         registerListener(
                 Listener.getPacketPostHandlePoint().getChannel(ClientboundBlockUpdatePacket.class),
@@ -325,6 +319,7 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
                     FloatingUtils.INSTANCE.setGrimFloatingTick(true);
                     FloatingUtils.INSTANCE.setSendPacketIgnoreRotation(true);
                     mc.player.setOnGround(true);
+                    PlayerInputManager.INSTANCE.addSprintModifier(0, false, 0);
                 } else {
                     ClientPlayerAccess.of(mc.player).resyncPos();
                     mc.player.setOnGround(true);
@@ -354,8 +349,6 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
         //        }
     }
 
-    public void onPing() {}
-
     public void onSetPosition() {
         lastSetBackNS = System.nanoTime();
     }
@@ -364,43 +357,6 @@ public class Velocity extends BaseModule implements LegalMovementManager.Movemen
     //            skipCount = 3;
     //        }
     //    }
-
-    public void onSendMove() {}
-
-    @Override
-    public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {}
-
-    boolean skipTick = false;
-
-    @Override
-    public void applyAfterInputTick(Event<LegalMovementManager> movementManagerEvent) {}
-
-    @Override
-    public void applyBeforeTravelTick(Event<LegalMovementManager> movementManagerEvent, Event<Vec3> moveEvent) {}
-
-    @Override
-    public void applyAfterTravelTick(Event<LegalMovementManager> movementManagerEvent, Event<Vec3> moveEvent) {
-        if (skipTick) {
-            sendFallFlying();
-        }
-    }
-
-    private void sendFallFlying() {
-        var packet =
-                new ServerboundPlayerCommandPacket(mc.player, ServerboundPlayerCommandPacket.Action.START_FALL_FLYING);
-
-        mc.getConnection().send(packet);
-    }
-
-    @Override
-    public void applyBeforeMovementPacketModify(Event<LegalMovementManager> movementManagerEvent) {
-        //        if(skipTick){
-        //            lastFakeGroundTick = Tasks.getTick();
-        //            mc.player.setPosition(movementManagerEvent.context.playerStatus.pos.withAxis(Direction.Axis.Y,
-        // movementManagerEvent.context.playerStatus.pos.y + 8E-8));
-        //            skipTick = false;
-        //        }
-    }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
         if (event.context().getValue().isOptionPreset()) return;

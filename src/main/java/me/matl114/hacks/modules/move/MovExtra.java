@@ -18,6 +18,7 @@ import me.matl114.utils.Debug;
 import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.versioned.api.VDataFlag;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.protocol.common.ServerboundPongPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.phys.Vec3;
 
@@ -131,7 +132,7 @@ public class MovExtra extends BaseModule {
     }
     // mostly same as InventoryAction packets
     public void sendPacketsForPreStartFallFlying() {
-        if (DisablerManager.INSTANCE.isInventoryWalkFix() && ViaFabricPlusHooks.isSupportEndTick()) {
+        if (DisablerManager.INSTANCE.isElytraInputFix() && ViaFabricPlusHooks.isSupportEndTick()) {
             if (PlayerStateManager.INSTANCE.lastInput.jump()) {
                 var input = PlayerInputUtils.of(mc.player).jump(false);
                 input.sendPlayerInputPacket();
@@ -141,11 +142,14 @@ public class MovExtra extends BaseModule {
     }
 
     public void sendPacketsForPostStartFallFlying() {
-        if (DisablerManager.INSTANCE.isInventoryWalkFix() && ViaFabricPlusHooks.isSupportEndTick()) {
-            if (!PlayerStateManager.INSTANCE.lastInput.jump()) {
+        if (DisablerManager.INSTANCE.isElytraInputFix() && ViaFabricPlusHooks.isSupportEndTick()) {
+            if (!PlayerStateManager.INSTANCE.lastInput.jump() && mc.options.keyJump.isDown()) {
                 var input = PlayerInputUtils.of(mc.player).jump(true);
                 input.sendPlayerInputPacket();
                 input.applyInput(mc.player);
+                if (DisablerManager.INSTANCE.isGrimBadPacketsFix()) {
+                    mc.getConnection().send(new ServerboundPongPacket(Integer.MIN_VALUE));
+                }
             }
         }
     }

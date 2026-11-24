@@ -110,7 +110,6 @@
 		"hack.ItemInHandRendererMixin",
 		"hack.LightMapTextureMixin",
 		"hack.LivingEntityMixin",
-		"hack.PlayerAbilityMixin",
 		"hack.PlayerEntityMixin",
 		"hack.PowderSnowBlockMixin",
 		"hack.ClientPlayerInteractionManagerMixin",

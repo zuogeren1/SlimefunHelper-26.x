@@ -53,7 +53,6 @@ import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket;
 import net.minecraft.network.protocol.game.ServerboundAttackPacket;
-import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
 import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
@@ -88,6 +87,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.AbstractThrownPotion;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.alchemy.PotionContents;
+import net.minecraft.world.item.component.AttackRange;
 import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.component.ConsumableListener;
 import net.minecraft.world.item.consume_effects.ApplyStatusEffectsConsumeEffect;
@@ -121,13 +121,19 @@ public class PlayerStateManager extends BaseModule {
     public double lastY;
     public float lastPitch;
     public float lastYaw;
+    public float lastServerSidePitch;
+    public float lastServerSideYaw;
     public boolean lastOnGround;
     public boolean lastPlayerOnGround;
     public boolean lastSprint;
+    // include all movement packets , including setback and teleport
     public Vec3 lastKnownMovementSpeed = Vec3.ZERO;
     public Vec3 lastKnownChangePosMovementSpeed = Vec3.ZERO;
+    // will be written in server lastKnownMovement
     public Vec3 lastKnownRealMovementSpeed = Vec3.ZERO;
+    // will be written in Grim clientVelocity
     public Vec3 lastKnownClientVelocity = Vec3.ZERO;
+    // used for average calculation
     public Vec3 lastAverageMovementSpeed = Vec3.ZERO;
     public Vec3 lastSetBackPosition = Vec3.ZERO;
     public int lastAttackStrengthResetTick = 0;
@@ -159,6 +165,7 @@ public class PlayerStateManager extends BaseModule {
     public int glidingTicks;
     public int lastActiveTicks;
     public ItemStack lastItemInMainHand = ItemStack.EMPTY;
+    public AttackRange lastUsingRayCastAttackComponent;
     private static final int MAX_SIZE = 20;
 
     {
@@ -174,10 +181,6 @@ public class PlayerStateManager extends BaseModule {
     public PlayerStateManager() {
         super("PlayerStateManager");
         INSTANCE = this;
-    }
-
-    public boolean hasResistance() {
-        return mc.player != null && mc.player.hasEffect(MobEffects.RESISTANCE);
     }
 
     @Override
@@ -209,7 +212,7 @@ public class PlayerStateManager extends BaseModule {
                 Integer.MAX_VALUE);
         registerListener(Listener.getPlayerSlowedByBlockPoint(), this::handleInWeb);
         registerListener(Listener.getPlayerFluidVelocityPoint(), this::handleInFluid);
-        registerListener(Listener.getPreGameTick(), this::handleTick);
+        registerListener(Listener.getPreTick(), this::handleTick, Integer.MIN_VALUE + 1);
         registerListener(
                 Listener.getClientPlayerSendMovementPoint(), this::onPrePlayerSendMovePacket, Integer.MAX_VALUE);
         registerListener(
@@ -221,12 +224,8 @@ public class PlayerStateManager extends BaseModule {
                 this::onPlayerCommand,
                 Integer.MAX_VALUE);
         registerListener(Listener.getPlayerInitConfiguration(), this::onPlayerReset);
-        registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundClientTickEndPacket.class),
-                this::onTickEnd,
-                Integer.MAX_VALUE,
-                true);
-        registerListener(Listener.getPreGameTick(), this::updateOtherPlayers);
+        registerListener(Listener.getPostGameTick(), this::onTickEnd, Integer.MAX_VALUE, true);
+        registerListener(Listener.getPreTick(), this::updateOtherPlayers, Integer.MIN_VALUE);
         registerListener(Listener.getPacketPoint().getChannel(ClientboundEntityEventPacket.class), this::onTotemPop);
         registerListener(Listener.getServerLeavePoint(), this::onLeave);
         registerListener(
@@ -275,6 +274,10 @@ public class PlayerStateManager extends BaseModule {
                 Integer.MAX_VALUE);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundUseItemOnPacket.class), this::updateAFK);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundUseItemPacket.class), this::updateAFK);
+        registerListener(
+                Listener.getPacketPoint().getChannel(ServerboundUseItemPacket.class),
+                this::onUseItem,
+                Integer.MAX_VALUE);
 
         registerListener(
                 Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class),
@@ -329,7 +332,11 @@ public class PlayerStateManager extends BaseModule {
                     lastKnownRealMovementSpeed = Vec3.ZERO;
                 } else {
                     lastKnownRealMovementSpeed = lastKnownMovementSpeed;
-                    lastKnownClientVelocity = lastKnownRealMovementSpeed;
+                    // only when tick movement packet should lastKnownClientVelocity written in
+                    if (packet.hasPosition()) {
+                        lastKnownClientVelocity = lastKnownRealMovementSpeed;
+                    }
+                    onTickPacket();
                 }
             }
             lastTickHasMovement = true;
@@ -347,6 +354,20 @@ public class PlayerStateManager extends BaseModule {
                 updateAFK();
             }
         }
+    }
+
+    public void onUseItem(Event<ServerboundUseItemPacket> event) {
+        if (event.isCancelled()
+                || !ViaFabricPlusHooks.getInstance().getCurrentVersion().isHigherOrEqualTo(21, 1)) {
+            return;
+        }
+        //#if MC >= 260300
+        //$$ lastServerSidePitch = event.context.xRot();
+        //$$ lastServerSideYaw = event.context.yRot();
+        //#else
+        lastServerSidePitch = event.context.getXRot();
+        lastServerSideYaw = event.context.getYRot();
+        //#endif
     }
 
     public void onVehicleMove(Event<ServerboundMoveVehiclePacket> event) {
@@ -624,6 +645,7 @@ public class PlayerStateManager extends BaseModule {
     private int cooldownInvSummary = 0;
 
     public void handleTick() {
+        if (checkNull()) return;
         if (mc.player.isPassenger()) {
             lastX = mc.player.getX();
             lastY = mc.player.getY();
@@ -770,6 +792,7 @@ public class PlayerStateManager extends BaseModule {
     }
 
     public void detectEquipmentChanges() {
+        if (checkNull()) return;
         if (!ServerFeature.INSTANCE.attributeSwap.get() && ServerFeature.INSTANCE.trackClientAttrUpdate.get()) {
             AttributeUtils.updateAttribute(mc.player);
         }
@@ -840,6 +863,8 @@ public class PlayerStateManager extends BaseModule {
         lastRealMovementPacketTick = Integer.MIN_VALUE;
         lastPitch = 0.0F;
         lastYaw = 0.0F;
+        lastServerSidePitch = 0.0F;
+        lastServerSideYaw = 0.0F;
         lastSprint = false;
         lastInput = PlayerInputUtils.EMPTY.clone();
         lastVelocityAffectingPos = BlockPos.ZERO;
@@ -855,12 +880,16 @@ public class PlayerStateManager extends BaseModule {
     public void onTickEnd() {
         if (!lastTickHasMovement) {
             lastKnownMovementSpeed = Vec3.ZERO;
+            lastKnownRealMovementSpeed = lastKnownMovementSpeed;
             lastMovementContainsPosition = false;
+            onTickPacket();
         } else {
             lastKnownChangePosMovementSpeed = lastKnownMovementSpeed;
         }
         lastTickHasMovement = false;
     }
+
+    public void onTickPacket() {}
 
     // api methods
 
@@ -930,7 +959,7 @@ public class PlayerStateManager extends BaseModule {
 
     private PlayerStatus getOrCreateStatus(Player pl) {
         MetaData data = ((MetadataHolder) pl).getMetadata();
-        return data.getOrPut(this, KEY_RENDER_CONTROL, PlayerStatus::new);
+        return data.getOrPut(this, KEY_RENDER_CONTROL, () -> new PlayerStatus(pl));
     }
 
     private PlayerStatus getPlayerStatus0(Player entity) {
@@ -941,11 +970,12 @@ public class PlayerStateManager extends BaseModule {
     }
 
     public PlayerStatus getPlayerStatus(Player entity) {
-        var re = getPlayerStatus0(entity);
-        if (re != null && re.lastUpdate < Tasks.getTick() - 10) {
-            re = null;
-        }
-        return re;
+        return getPlayerStatus0(entity);
+    }
+
+    public PlayerStatus getOrCreatePlayerStatus(Player entity) {
+        PlayerStatus status = getPlayerStatus(entity);
+        return status != null ? status : getOrCreateStatus(entity);
     }
 
     private final Map<UUID, Integer> popMap = new ConcurrentHashMap<>();
@@ -1320,9 +1350,15 @@ public class PlayerStateManager extends BaseModule {
     }
 
     public static class PlayerStatus {
+        public PlayerStatus(Player player) {
+            this.player = player;
+            tickUpdate(player);
+        }
 
+        public final Player player;
         public int lastUpdate;
         public AttributeMap attributeSnapShot = null;
+        private ItemStack mainHandSnapshot = ItemStack.EMPTY;
         // public int popCount;
         public int protection;
         public int blastProtection;
@@ -1332,8 +1368,18 @@ public class PlayerStateManager extends BaseModule {
         public boolean lastUnderBlock;
         public final Map<Holder<MobEffect>, EffectTracker> visibleStatusEffects = new ConcurrentHashMap<>();
         public final Set<ItemStackSample> trackedInventoryItems = new HashSet<>();
+
+        public AttributeMap getAttribute() {
+            return attributeSnapShot != null ? attributeSnapShot : AttributeUtils.getAttributeWith(player, Map.of());
+        }
+
+        public ItemStack getMainHandSnapshot() {
+            return mainHandSnapshot;
+        }
+
         // todo: add more shit
         public void tickUpdate(Player player) {
+            this.mainHandSnapshot = player.getMainHandItem().copy();
             AttributeMap container = AttributeUtils.getAttributeWith(player, Map.of());
             this.attributeSnapShot = container;
             int protection = 0;
@@ -1360,7 +1406,7 @@ public class PlayerStateManager extends BaseModule {
                 lastUsingHand = null;
             }
             lastInBlock = MovTasks.isCollidingWithEnvironment(player);
-            AABB box = mc.player.getBoundingBox();
+            AABB box = player.getBoundingBox();
             lastUnderBlock = MovTasks.isCollidingWithEnvironment(
                     player, box.setMinY(box.maxY).setMaxY(box.maxY + 0.42));
             this.lastUpdate = Tasks.getTick();

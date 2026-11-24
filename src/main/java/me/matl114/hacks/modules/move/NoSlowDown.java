@@ -340,6 +340,7 @@ public class NoSlowDown extends BaseModule implements LegalMovementManager.Movem
                         Entity target = Objects.requireNonNull(entity);
                         PlayerInputUtils.Input input = PlayerInputUtils.of(mc.player);
                         RotationManager.INSTANCE.request(RotationManager.ofEntity(() -> target)
+                                .applyMoveFix(true)
                                 .postTickTask(() -> Tasks.scheduleDelayedPre(
                                         () -> {
                                             // to trigger plugin events

@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import javax.annotation.Nullable;
+import me.matl114.hacks.modules.move.PlayerStateManager;
 //#if MC >= 260200
 import net.minecraft.advancements.predicates.*;
 import net.minecraft.advancements.predicates.DamageSourcePredicate;
@@ -62,10 +63,31 @@ public class DamageUtils {
 
     public static float getMaxRealAttackDamage(
             Player player, Entity livingEntity, ItemStack stack, double fallDistance, boolean attributeSwap) {
-        var attribute = AttributeUtils.getAttributeWith(
-                player, attributeSwap ? Map.of() : Map.of(EquipmentSlot.MAINHAND, stack));
-        float f = (float) attribute.getValue(Attributes.ATTACK_DAMAGE);
-        return getAttackDamage(player, livingEntity, stack, fallDistance, f, 1.0F);
+        return getAttackDamage(
+                player,
+                livingEntity,
+                stack,
+                fallDistance,
+                getAttackDamageAttribute(player, stack, attributeSwap),
+                1.0F);
+    }
+
+    public static float getAttackDamageAttribute(Player player, ItemStack stack, boolean attributeSwap) {
+        var attribute = attributeSwap
+                ? PlayerStateManager.INSTANCE.getOrCreatePlayerStatus(player).getAttribute()
+                : AttributeUtils.getAttributeWith(player, Map.of(EquipmentSlot.MAINHAND, stack));
+        return (float) attribute.getValue(Attributes.ATTACK_DAMAGE);
+    }
+
+    public static float getAttackProgress(Player player, ItemStack stack, int cooldownTicks, boolean attributeSwap) {
+        var attribute = attributeSwap
+                ? PlayerStateManager.INSTANCE.getOrCreatePlayerStatus(player).getAttribute()
+                : AttributeUtils.getAttributeWith(player, Map.of(EquipmentSlot.MAINHAND, stack));
+        return (float) Mth.clamp(
+                ((float) cooldownTicks + 0.5)
+                        / (float) (1.0 / attribute.getValue(Attributes.ATTACK_SPEED) * 20.0),
+                0.0F,
+                1.0F);
     }
 
     public static float getRealAttackDamage(
@@ -75,15 +97,13 @@ public class DamageUtils {
             double fallDistance,
             int cooldownTicks,
             boolean attributeSwap) {
-        var attribute = AttributeUtils.getAttributeWith(
-                player, attributeSwap ? Map.of() : Map.of(EquipmentSlot.MAINHAND, stack));
-        float f = (float) attribute.getValue(Attributes.ATTACK_DAMAGE);
-        float g = (float) Mth.clamp(
-                ((float) cooldownTicks + 0.5)
-                        / (float) (1.0 / attribute.getValue(Attributes.ATTACK_SPEED) * 20.0),
-                0.0F,
-                1.0F);
-        return getAttackDamage(player, livingEntity, stack, fallDistance, f, g);
+        return getAttackDamage(
+                player,
+                livingEntity,
+                stack,
+                fallDistance,
+                getAttackDamageAttribute(player, stack, attributeSwap),
+                getAttackProgress(player, stack, cooldownTicks, attributeSwap));
     }
 
     private static float getAttackDamage(
@@ -101,7 +121,7 @@ public class DamageUtils {
         if (stack.getItem() instanceof MaceItem mace) {
             f += (float) getSmashDamageBonus(stack, entity, damageSource, fallDistance);
         }
-        if (canDealCritical(player, fallDistance)) {
+        if (canDealCriticalProgress(g) && canDealCritical(player, fallDistance)) {
             f *= 1.5F;
         }
         return f + h;
@@ -176,8 +196,11 @@ public class DamageUtils {
                 && !attacker.onClimbable()
                 && !attacker.isInWater()
                 && !attacker.hasEffect(MobEffects.BLINDNESS)
-                && !attacker.isPassenger()
-                && !attacker.isSprinting();
+                && !attacker.isPassenger();
+    }
+
+    public static boolean canDealCriticalProgress(float g) {
+        return g > 0.9;
     }
 
     public static double getSmashDamageBonus(ItemStack stack, Entity target, DamageSource source, double f) {

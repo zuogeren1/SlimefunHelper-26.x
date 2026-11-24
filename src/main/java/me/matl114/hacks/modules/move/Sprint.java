@@ -99,8 +99,9 @@ public class Sprint extends BaseModule implements LegalMovementManager.MovementM
                 && strafeSprint.get()) {
             var input = PlayerInputUtils.of(mc.options);
             if (input.forwardSpeed() > 0 && input.sidewaysSpeed() == 0) {
-                RotationManager.INSTANCE.request(
+                RotationManager.INSTANCE.push(
                         RotationManager.ofDirection(Optional.empty(), Optional.of(mc.player.getYRot() - 45))
+                                .applyMoveFix(true)
                                 .priority(0));
             }
         }
@@ -119,7 +120,7 @@ public class Sprint extends BaseModule implements LegalMovementManager.MovementM
                     yaw = 180 + input.sidewaysSpeed() * 90;
                 }
                 if (yaw != 0.0F) {
-                    RotationManager.INSTANCE.request(
+                    RotationManager.INSTANCE.push(
                             RotationManager.ofDirection(Optional.empty(), Optional.of(mc.player.getYRot() + yaw))
                                     .preTickTask(() -> {
                                         PlayerInputManager.INSTANCE.addSprintModifier(0, true, 0);

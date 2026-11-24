@@ -33,6 +33,9 @@ import net.minecraft.world.phys.Vec3;
 
 public class Flight extends BaseModule implements LegalMovementManager.MovementModifier {
     private Vec3 pendingFlightVelocity;
+    private float serverFlySpeed = 0.05F;
+    private Abilities modifiedAbilities;
+    private float originalFlySpeed;
     public final ModulePath moveSafety = makePath(Configs.MOV_CONFIG, "move-safety");
     public final ModulePath flight = moveSafety.add("flight");
     public final ModulePath moveSpeed = makePath(Configs.MOV_CONFIG, "move-speed");
@@ -84,7 +87,7 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
             .defaultValue(false)
             .build();
 
-    public final KeyBindRef overridingSpeedKeybind = moduleEntry(
+    public final KeyBindRef overridingSpeedKeybind = toggleHotkey(
                     moveSpeed.add("toggle-flight-speed"), new MultiKeyBind(), moveSpeed.add("fly-speed"))
             .build();
 
@@ -99,7 +102,7 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     public final FlagRef overrideWalkSpeed =
             flagBuilder(moveSpeed.add("walk-speed")).build();
 
-    public final KeyBindRef overridingWalkSpeedKeybind = moduleEntry(
+    public final KeyBindRef overridingWalkSpeedKeybind = toggleHotkey(
                     moveSpeed.add("toggle-walk-speed"), new MultiKeyBind(), moveSpeed.add("walk-speed"))
             .build();
     public final DoubleRef overridingWalkSpeedAll = builder(moveSpeed.add("walk-speed-override"), Double.class)
@@ -153,6 +156,7 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     public void onAbility(Event<ClientboundPlayerAbilitiesPacket> event) {
         var packet1 = event.context();
         serverSideCanFly = packet1.canFly();
+        serverFlySpeed = packet1.getFlyingSpeed();
         if (mc.player != null) {
             Abilities abilities = mc.player.getAbilities();
             // abilities.allowFlying = abilities.allowFlying;
@@ -161,8 +165,10 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
             if (!isActive()) {
                 abilities.mayfly = packet1.canFly();
             }
-            if (!overrideFlySpeed.get()) {
-                abilities.setFlyingSpeed(packet1.getFlyingSpeed());
+            if (abilities == modifiedAbilities) {
+                originalFlySpeed = serverFlySpeed;
+            } else if (!overrideFlySpeed.get() || isActive()) {
+                abilities.setFlyingSpeed(serverFlySpeed);
             }
             abilities.setWalkingSpeed(packet1.getWalkingSpeed());
             // mc.player.getAbilities().flying = isFly;
@@ -207,6 +213,15 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {
         LocalPlayer player = movementManagerEvent.context.playerStatus.entity;
         pendingFlightVelocity = null;
+        Abilities abilities = player.getAbilities();
+        if (isActive() || overrideFlySpeed.get()) {
+            if (modifiedAbilities != null) {
+                modifiedAbilities.setFlyingSpeed(originalFlySpeed);
+            }
+            modifiedAbilities = abilities;
+            originalFlySpeed = abilities.getFlyingSpeed();
+            abilities.setFlyingSpeed(isActive() ? serverFlySpeed : (float) getOverridingFlySpeed());
+        }
         if (isActive()) {
             if (!player.getAbilities().mayfly) {
                 player.getAbilities().mayfly = true;
@@ -359,6 +374,10 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
 
     @Override
     public void postModify(Event<LegalMovementManager> movementManagerEvent) {
+        if (modifiedAbilities != null) {
+            modifiedAbilities.setFlyingSpeed(originalFlySpeed);
+            modifiedAbilities = null;
+        }
         // do not restore, because client need this to calculate mining speed
         //        if(lastTimeModifyOnGround > 0){
         //            movementManagerEvent.context.playerStatus.entity.setOnGround(lastTimeModifyOnGround == 1);

@@ -66,7 +66,6 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
 
     boolean forceFloatingThisTick = false;
     boolean forceOnGroundVia1205 = false;
-    boolean useSnapPacket = false;
 
     public void setGrimFloatingTick(boolean t) {
         forceFloatingThisTick = t;
@@ -82,10 +81,6 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
 
     public void setSendPacketIgnoreRotation(boolean t) {
         forceNotSilentThisTick = t;
-    }
-
-    public void setUseSnapRotPacket(boolean t) {
-        useSnapPacket = t;
     }
 
     @Override
@@ -115,7 +110,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
         if (!workGrimFloatingThisTick() && enableElytraSlowFall.get()) {
             if (mc.player.isFallFlying() && !mc.player.onGround()) {
                 boolean rotateYaw = Tasks.getTick() % 2 == 0;
-                RotationManager.INSTANCE.request(RotationManager.ofDirection(
+                RotationManager.INSTANCE.push(RotationManager.ofDirection(
                                 Optional.of(0.0F),
                                 rotateYaw ? Optional.of(mc.player.getYRot() + 180.0F) : Optional.empty())
                         .applyMoveFix(false)
@@ -137,12 +132,16 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
     public void applyBeforeMovementPacketModify(Event<LegalMovementManager> movementManagerEvent) {
         boolean conditionalFreeze = false;
         if (!conditionalFreeze && freezeVoid.get().isPresent()) {
-            if (mc.player.getY() <= mc.level.getMinY() + freezeVoid.get().getValue()) {
+            // falling
+            if (mc.player.getY() <= mc.level.getMinY() + freezeVoid.get().getValue()
+                    && mc.player.getY() <= movementManagerEvent.context.playerStatus.pos.y + 1E-7) {
                 conditionalFreeze = true;
             }
         }
         if (!conditionalFreeze && freezeAbsoluteY.get().isPresent()) {
-            if (mc.player.getY() <= freezeAbsoluteY.get().getValue()) {
+            // falling
+            if (mc.player.getY() <= freezeAbsoluteY.get().getValue()
+                    && mc.player.getY() <= movementManagerEvent.context.playerStatus.pos.y + 1E-7) {
                 conditionalFreeze = true;
             }
         }
@@ -152,7 +151,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
 
         if (workGrimFloatingThisTick()) {
             movementManagerEvent.cancel();
-            movementManagerEvent.context.playerStatus.restorePos();
+            movementManagerEvent.context.resetPos();
             // also reset onground status to avoid false flag
             boolean useOnGroundFloat = ((onGroundFloat.get()) || (forceOnGroundVia1205));
             if (useOnGroundFloat) {
@@ -171,7 +170,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
                             mc.player.getXRot(),
                             mc.player.onGround(),
                             mc.player.horizontalCollision);
-                    if (useSnapPacket) {
+                    if (useSnap.get()) {
                         storedPacket = LegacySnapRotManager.INSTANCE.createAsSnap(storedPacket);
                     }
                 }
@@ -183,7 +182,6 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
 
     @Override
     public void postModify(Event<LegalMovementManager> movementManagerEvent) {
-        useSnapPacket = useSnap.get();
         if (storedPacket != null) {
             // optimize current, only if rotation different, or has No Position packet, send duplicate packet
             if (!forceSilentThisTick) {

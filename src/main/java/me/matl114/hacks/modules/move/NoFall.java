@@ -568,7 +568,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                 // wait for set back packets to do jump
                 movementManagerEvent.cancel();
                 // restore pos
-                movementManagerEvent.context.playerStatus.restorePos();
+                movementManagerEvent.context.resetPos();
                 return;
             }
             if (module.isActive()) {
@@ -986,7 +986,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                 var entity = movementManagerEvent.context.playerStatus;
                 // check Y after fall
                 if (step == Step.REAPPLY_MOVEMENT) {
-                    movementManagerEvent.context.playerStatus.restorePos();
+                    movementManagerEvent.context.resetPos();
                     ClientPlayerAccess.of(entity.entity).resyncPos();
                     step = Step.WAIT_FOR_RESYNC;
                 } else {
@@ -1514,7 +1514,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                     nextTickReset = false;
                 }
                 if (needOnGround && !args.onGround()) {
-                    movementManagerEvent.context.playerStatus.restorePos();
+                    movementManagerEvent.context.resetPos();
                     nextTickReset = true;
                     module.lastOnGroundHeight = args.getY();
                     Vec3 look = args.getLookAngle();
