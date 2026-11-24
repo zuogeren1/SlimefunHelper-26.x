@@ -3,24 +3,18 @@ package me.matl114.gui.presets.single;
 import java.util.function.Consumer;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.WidgetUtils;
-import me.matl114.gui.basic.DisplayWidget;
 import me.matl114.gui.basic.ExecutableWidget;
 import me.matl114.gui.basic.InputHandler;
-import me.matl114.gui.interfaces.DefaultElementFactory;
 import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.utils.collections.FPoint;
-import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
+import net.minecraft.ChatFormatting;
 
 public class WidgetPosSelectScreen extends GenericScreen {
     Consumer<FPoint> predicate;
     FPoint selected;
     ElementFactory elementFactory;
-
-    public WidgetPosSelectScreen(int backgroundWidth, FPoint initializePoint, Consumer<FPoint> pointAcceptor) {
-        this(backgroundWidth, initializePoint, pointAcceptor, DefaultElementFactory.INSTANCE);
-    }
 
     public WidgetPosSelectScreen(
             int backgroundWidth,

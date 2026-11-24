@@ -19,6 +19,11 @@ public class DoubleRef extends NumberRef<Double> {
     }
 
     @Override
+    public void setFromNumber(Number number) {
+        set(number.doubleValue());
+    }
+
+    @Override
     public Double getValue() {
         return get();
     }
@@ -30,11 +35,6 @@ public class DoubleRef extends NumberRef<Double> {
     @Override
     public void setValue(Double value) {
         set(value);
-    }
-
-    @Override
-    public void setFromNumber(Number number) {
-        set(number.doubleValue());
     }
 
     @Override

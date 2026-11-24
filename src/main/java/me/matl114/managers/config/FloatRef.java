@@ -16,6 +16,11 @@ public class FloatRef extends NumberRef<Float> {
     }
 
     @Override
+    public void setFromNumber(Number number) {
+        set(number.floatValue());
+    }
+
+    @Override
     public Float getValue() {
         return value;
     }
@@ -23,11 +28,6 @@ public class FloatRef extends NumberRef<Float> {
     @Override
     public void setValue(Float value) {
         set(value);
-    }
-
-    @Override
-    public void setFromNumber(Number number) {
-        set(number.floatValue());
     }
 
     public float get() {

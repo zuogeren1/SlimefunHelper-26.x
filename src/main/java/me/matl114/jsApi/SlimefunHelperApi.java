@@ -9,6 +9,7 @@ import java.lang.reflect.Modifier;
 import java.util.*;
 import me.matl114.hacks.*;
 import me.matl114.hacks.modules.HackModules;
+import me.matl114.hacks.utils.*;
 import me.matl114.managers.Tasks;
 import me.matl114.utils.*;
 import org.objectweb.asm.*;
@@ -18,11 +19,6 @@ import xyz.wagyourtail.jsmacros.core.Core;
 import xyz.wagyourtail.jsmacros.core.library.BaseLibrary;
 import xyz.wagyourtail.jsmacros.core.library.Library;
 import xyz.wagyourtail.jsmacros.core.library.LibraryRegistry;
-import me.matl114.hacks.utils.ClientUtils;
-import me.matl114.hacks.utils.CommonUtils;
-import me.matl114.hacks.utils.NetworkUtils;
-import me.matl114.hacks.utils.RaycastUtils;
-import me.matl114.hacks.utils.RenderUtils;
 
 /**
  * this utility class is created for JsMacros invocation
