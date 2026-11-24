@@ -32,7 +32,6 @@ import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.multiplayer.chat.ChatListener;
 import net.minecraft.core.Holder;
-import net.minecraft.core.Registry;
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketListener;
 import net.minecraft.network.chat.Component;
@@ -48,8 +47,6 @@ import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.tags.TagKey;
-import net.minecraft.tags.TagLoader;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
@@ -394,24 +391,6 @@ public abstract class ClientPlayNetworkHandlerEvents {
         Listener.callPacketHandleEvent(instance, t, original::call);
     }
 
-    @ModifyExpressionValue(
-            method = "updateTags",
-            at =
-                    @At(
-                            value = "INVOKE",
-                            target =
-                                    "Lnet/minecraft/tags/TagNetworkSerialization$NetworkPayload;resolve(Lnet/minecraft/core/Registry;)Lnet/minecraft/tags/TagLoader$LoadResult;"))
-    private <T> TagLoader.LoadResult<T> onRegistryTagReload(
-            TagLoader.LoadResult<T> original,
-            @Local(argsOnly = true) ResourceKey<? extends Registry<? extends T>> registryKey) {
-        Map<TagKey<T>, List<Holder<T>>> tagMap = original.tags();
-        Event<Map<TagKey<T>, List<Holder<T>>>> event = new Event<>(tagMap, false, true, original.key());
-        Listener.getRegistryTagKeyReload().handleValue((Event) event);
-        if (event.context != tagMap) {
-            return new TagLoader.LoadResult<>(original.key(), event.context);
-        }
-        return original;
-    }
 
     @Inject(
             method = "handleLevelChunkWithLight",

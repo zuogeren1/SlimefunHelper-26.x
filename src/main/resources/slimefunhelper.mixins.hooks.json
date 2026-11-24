@@ -5,6 +5,7 @@
 	"compatibilityLevel": "JAVA_21",
 	"client": [
 		"baritone.BaritoneChunkPackerFixMixin",
+		"baritone.BaritoneClientPlayerEntityRotFixMixin",
 		"baritone.BaritoneInputOverrideHandlerMixin",
 		"baritone.BaritoneMiningHelperMixin",
 		"baritone.BaritoneWorldSaveMixin",

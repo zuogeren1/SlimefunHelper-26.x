@@ -141,6 +141,15 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
         this.positionReminder = ticks;
     }
 
+    /** 下一次位置包发送时强制补发一次最小更新，用于取消移动包后让服务端重新同步位置。 */
+    public boolean forceSendPacket;
+
+    @Override
+    @Unique
+    public void setForceSendPacketUpdate(boolean force) {
+        this.forceSendPacket = force;
+    }
+
     //#if MC >= 260300
     //$$ @Inject(method = "<init>", at = @At("RETURN"))
     //$$ private void onClientPlayerInitConfiguration(
@@ -155,15 +164,6 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
     //$$         ItemActivation itemActivation,
     //$$         CallbackInfo ci) {
     //#else
-    /** 下一次位置包发送时强制补发一次最小更新，用于取消移动包后让服务端重新同步位置。 */
-    public boolean forceSendPacket;
-
-    @Override
-    @Unique
-    public void setForceSendPacketUpdate(boolean force) {
-        this.forceSendPacket = force;
-    }
-
     @Inject(method = "<init>", at = @At("RETURN"))
     private void onClientPlayerInitConfiguration(
             Minecraft client,
@@ -245,6 +245,17 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayer impl
             if (!this.movementManager.preMovementProgress((LocalPlayer) (AbstractClientPlayer) this)
                     || event.isCancelled()) {
                 lastCancelTick = Tasks.getTick();
+            }
+        }
+        if (lastCancelTick != Tasks.getTick()) {
+            if (forceSendPacket) {
+                forceSendPacket = false;
+                // 取消过移动包之后，服务端认为玩家还停在旧位置；
+                // 这里翻转一次 onGround 标记，让下一次位置包带上最小但非零的差异，
+                // 从而触发一次真正的同步而不是被原版的「无变化」判定吞掉。
+                if (!isPassenger()) {
+                    lastOnGround = !this.onGround();
+                }
             }
         }
     }

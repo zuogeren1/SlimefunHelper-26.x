@@ -30,10 +30,17 @@ public abstract class DrawContextEvents {
             int y,
             ClientTooltipPositioner positioner,
             @Nullable Identifier texture,
+            //#if MC >= 260300
+            //$$ boolean extraSpaceAfterFirstLine,
+            //#endif
             Operation<Void> original) {
         TooltipsRender tooltipRender = new TooltipsRender(
                 VDrawContext.of((GuiGraphicsExtractor) (Object) this), components, x, y, positioner, texture);
         RenderListener.getRenderTooltipEvent().broadcast(tooltipRender);
+        //#if MC >= 260300
+        //$$ original.call(font, components, tooltipRender.x, tooltipRender.y, positioner, texture, extraSpaceAfterFirstLine);
+        //#else
         original.call(font, components, tooltipRender.x, tooltipRender.y, positioner, texture);
+        //#endif
     }
 }
