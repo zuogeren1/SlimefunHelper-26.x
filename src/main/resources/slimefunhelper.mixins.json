@@ -37,6 +37,7 @@
 		"events.ClientWorldEvents",
 		"events.ConnectScreenEvents",
 		"events.DataTrackerEvents",
+		"events.DrawContextEvents",
 		"events.EntityEvents",
 		"events.EntityTypeEvents",
 		"events.FluidInteractionMixin",

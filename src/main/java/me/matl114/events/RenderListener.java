@@ -14,6 +14,7 @@ import me.matl114.events.impl.Render2D;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.impl.RenderScreen;
 import me.matl114.events.impl.RenderSlot;
+import me.matl114.events.impl.TooltipsRender;
 import me.matl114.events.model.GuiModel;
 import me.matl114.utils.Debug;
 import net.minecraft.ReportedException;
@@ -157,6 +158,10 @@ public class RenderListener {
             value = {ItemStack.class, boolean.class, boolean.class},
             names = {"itemStack", "advance", "creative"})
     private static final EventChannel<List<Component>> tooltipShow = new EventChannel<>();
+
+    @Getter
+    @Broadcast
+    private static final EventChannel<TooltipsRender> renderTooltipEvent = new EventChannel<>();
 
     @Getter
     @Cancelable
