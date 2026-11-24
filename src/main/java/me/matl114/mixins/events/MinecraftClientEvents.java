@@ -10,6 +10,7 @@ import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import com.mojang.blaze3d.platform.Window;
 import java.io.File;
 import java.util.Objects;
+import me.matl114.accessors.events.ClientPlayerEntityAccess;
 import me.matl114.events.Event;
 import me.matl114.events.GlobalEventVars;
 import me.matl114.events.Listener;
@@ -469,6 +470,7 @@ public abstract class MinecraftClientEvents {
     private void onPostPlayerUpdate(CallbackInfo ci) {
         if (this.player != null) {
             Listener.getClientPlayerPostUpdatePoint().broadcast(this.player);
+            ClientPlayerEntityAccess.of(this.player).getLegalMovementManager().postTickEntities();
         }
     }
 }

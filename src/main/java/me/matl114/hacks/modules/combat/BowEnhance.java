@@ -19,6 +19,7 @@ import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.modules.move.RotationManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
+import me.matl114.hacks.utils.move.Rotation;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
@@ -367,9 +368,9 @@ public class BowEnhance extends BaseModule {
                         Debug.chat("[Bow Aim] Arrow failed to reach the target");
                         return null;
                     }
-                    return pitchYaw;
+                    return Rotation.from(pitchYaw);
                 })
-                .postTick(() -> Tasks.scheduleDelayedPre(() -> Listener.sendPacketNoEvents(delayedPacket), 0)));
+                .postTickTask(() -> Tasks.scheduleDelayedPre(() -> Listener.sendPacketNoEvents(delayedPacket), 0)));
     }
 
     public void bowActionInteractItem(

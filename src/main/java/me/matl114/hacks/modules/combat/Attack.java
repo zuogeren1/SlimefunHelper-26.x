@@ -649,8 +649,8 @@ public class Attack extends BaseModule {
             distancePassAttack = true;
             return RotationManager.INSTANCE.request(
                     RotationManager.ofEntity(() -> runThisTick && distancePassAttack ? target : null)
-                            .preTick(this::preTick)
-                            .postTick(this::postTick));
+                            .preTickTask(this::preTick)
+                            .postTickTask(this::postTick));
         }
 
         private void preTick() {

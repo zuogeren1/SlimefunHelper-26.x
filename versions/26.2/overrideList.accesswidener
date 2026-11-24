@@ -108,3 +108,8 @@ accessible	field	net/minecraft/client/renderer/rendertype/RenderSetup	textures	L
 accessible	class	net/minecraft/client/renderer/rendertype/RenderSetup$TextureBinding
 accessible	field	net/minecraft/client/Minecraft	fontManager	Lnet/minecraft/client/gui/font/FontManager;
 accessible	method	net/minecraft/client/gui/font/FontManager	getFontSetRaw	(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/gui/font/FontSet;
+accessible	method	net/minecraft/world/entity/player/Player	maybeBackOffFromEdge	(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/entity/MoverType;)Lnet/minecraft/world/phys/Vec3;
+accessible	class	net/minecraft/world/entity/InterpolationHandler$InterpolationData
+accessible	field	net/minecraft/world/entity/InterpolationHandler	interpolationData	Lnet/minecraft/world/entity/InterpolationHandler$InterpolationData;
+accessible	field	net/minecraft/world/entity/InterpolationHandler	previousTickPosition	Lnet/minecraft/world/phys/Vec3;
+accessible	field	net/minecraft/world/entity/InterpolationHandler$InterpolationData	steps	I

@@ -2034,7 +2034,7 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
     }
 
     @Override
-    public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
+    public void postModify(Event<LegalMovementManager> movementManagerEvent) {
         if (storedNoFallPacket != null) {
             mc.getConnection().send(storedNoFallPacket);
             storedNoFallPacket = null;
@@ -2069,8 +2069,6 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
         //        if(canContinueArmorGliding()){
         //            flushRockets();
         //        }
-
-        return true;
     }
 
     int nextLandingSneak;

@@ -260,7 +260,7 @@ public class BaritoneFix extends BaseModule implements LegalMovementManager.Move
     public void onBaritoneMoveRot() {}
 
     @Override
-    public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
+    public void postModify(Event<LegalMovementManager> movementManagerEvent) {
         if (this.baritoneExperimental2.get()
                 && mc.player.isFallFlying()
                 && BaritoneHooks.getInstance().isBaritoneElytraProcessing()
@@ -272,7 +272,6 @@ public class BaritoneFix extends BaseModule implements LegalMovementManager.Move
                 ElytraExtra.INSTANCE.startArmorFlyTransaction(-1);
             }
         }
-        return true;
     }
 
     public void onBaritoneComplete(Event<BaritoneFuture> event) {

@@ -211,7 +211,7 @@ public class AutoSurround extends BaseModule {
                     Vec3 lookHorizontal = Vec3.atCenterOf(blockPos).subtract(mc.player.position());
                     float yaw = EntityUtils.rotationToYaw(lookHorizontal);
                     RotationManager.INSTANCE.request(RotationManager.ofDirection(Optional.empty(), Optional.of(yaw))
-                            .preTick(() -> {
+                            .preTickTask(() -> {
                                 PlayerInputManager.INSTANCE.addForwardModifier(0, true, 0);
                                 PlayerInputManager.INSTANCE.addBackwardModifier(0, false, 0);
                             })

@@ -148,7 +148,7 @@ public class StepHeight extends BaseModule implements LegalMovementManager.Movem
     }
 
     @Override
-    public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
+    public void postModify(Event<LegalMovementManager> movementManagerEvent) {
         if (isActive()) {
             if (runTicks < -1145) {
                 //                        if(runTicks == -114514){
@@ -158,7 +158,5 @@ public class StepHeight extends BaseModule implements LegalMovementManager.Movem
                 toggleRunning = false;
             }
         }
-
-        return true;
     }
 }

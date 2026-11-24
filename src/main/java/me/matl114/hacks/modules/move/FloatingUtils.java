@@ -182,10 +182,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
     }
 
     @Override
-    public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
-        forceFloatingThisTick = false;
-        forceOnGroundVia1205 = false;
-
+    public void postModify(Event<LegalMovementManager> movementManagerEvent) {
         useSnapPacket = useSnap.get();
         if (storedPacket != null) {
             // optimize current, only if rotation different, or has No Position packet, send duplicate packet
@@ -204,6 +201,17 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
             // Listener.sendPacketNoEvents(storedPacket);
             storedPacket = null;
         }
+    }
+
+    @Override
+    public boolean postTick(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
+        if (workGrimFloatingThisTick()) {
+            // revert the collision/velocity that other entities give to player
+            movementManagerEvent.context.playerStatus.restore();
+            movementManagerEvent.context.playerStatus.restoreVelocity();
+        }
+        forceFloatingThisTick = false;
+        forceOnGroundVia1205 = false;
         forceSilentThisTick = false;
         forceNotSilentThisTick = false;
         return true;

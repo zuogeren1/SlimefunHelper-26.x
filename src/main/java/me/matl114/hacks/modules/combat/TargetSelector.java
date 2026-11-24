@@ -38,6 +38,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.InterpolationHandler;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -178,10 +179,59 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
 
     @Override
     public AABB getEffectiveBox(Entity entity) {
-        if (grimInterpolateBox.get() && entity instanceof RemotePlayer) {
+        if (entity instanceof Player && !(entity instanceof RemotePlayer)) {
+            return entity.getBoundingBox();
+        }
+        if (grimInterpolateBox.get() && entity instanceof LivingEntity) {
             return CombatExtra.INSTANCE.getTracker(entity).getInteractBox(entity);
         }
         return entity.getBoundingBox();
+    }
+
+    public AABB getEffectiveBox(Entity entity, int ticksLater) {
+        if (ticksLater <= 0 || entity instanceof Player && !(entity instanceof RemotePlayer)) {
+            return getEffectiveBox(entity);
+        }
+        if (grimInterpolateBox.get() && entity instanceof LivingEntity) {
+            return CombatExtra.INSTANCE
+                    .getTracker(entity)
+                    .getNextInterpolatedBox(entity, ticksLater, CombatExtra.INSTANCE.maySkipInterpolationTick());
+        }
+        return grimInterpolateBox.get() ? entity.getBoundingBox() : getVanillaInterpolatedBox(entity, ticksLater);
+    }
+
+    private AABB getVanillaInterpolatedBox(Entity entity, int ticksLater) {
+        InterpolationHandler interpolator = entity.getInterpolation();
+        //#if MC >= 260300
+        //$$ net.minecraft.core.PositionAndRotation targetRot = interpolator.target();
+        //$$ if (targetRot == null || !interpolator.hasActiveInterpolation()) return entity.getBoundingBox();
+        //$$ Vec3 target = targetRot.position();
+        //$$ int remaining = 0;
+        //$$ Vec3 lastPos = null;
+        //$$ if (interpolator instanceof net.minecraft.world.entity.LinearInterpolationHandler linear) {
+        //$$     remaining = linear.interpolationData.remainingSteps;
+        //$$     lastPos = linear.lastPositionAndRotation.position();
+        //$$ } else if (interpolator instanceof net.minecraft.world.entity.SteppedInterpolationHandler stepped) {
+        //$$     remaining = Math.max(1, (int) Math.ceil(stepped.interpolationData.remainingTicks));
+        //$$     lastPos = stepped.lastPositionAndRotation.position();
+        //$$ }
+        //#else
+        if (interpolator == null || !interpolator.hasActiveInterpolation()) return entity.getBoundingBox();
+        int remaining = interpolator.interpolationData.steps;
+        Vec3 target = interpolator.position();
+        Vec3 lastPos = interpolator.previousTickPosition;
+        //#endif
+        Vec3 pos = entity.position();
+        if (lastPos != null) {
+            Vec3 delta = pos.subtract(lastPos);
+            if (entity.level().noCollision(entity, entity.dimensions.makeBoundingBox(target.add(delta)))) {
+                target = target.add(delta);
+            }
+        }
+        for (int i = 0; i < ticksLater && remaining > 0; i++, remaining--) {
+            pos = pos.add(target.subtract(pos).scale(1.0 / remaining));
+        }
+        return entity.getBoundingBox().move(pos.subtract(entity.position()));
     }
 
     public Stream<Vec3> getPotentialEyeHeights(Vec3 pos) {

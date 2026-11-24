@@ -18,18 +18,19 @@ import me.matl114.managers.Tasks;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.Debug;
+import me.matl114.versioned.SupportVersion;
 import me.matl114.versioned.api.VDataFlag;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundCooldownPacket;
+import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
-import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.InterpolationHandler;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -92,10 +93,10 @@ public class CombatExtra extends BaseModule {
         registerListener(Listener.getAttackAction(), this::onUseAttackNoSlow);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class), this::onMovementPacket);
+        registerListener(Listener.getPostGameTick(), this::onClientTickEndPacket);
+        registerListener(Listener.getEntityTrackedPositionUpdate(), this::onTrackedPosition);
         registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundClientTickEndPacket.class), this::onClientTickEndPacket);
-        registerListener(
-                Listener.getEntityTrackedPositionUpdate().getChannel(EntityTypes.PLAYER), this::onTrackedPosition);
+                Listener.getPacketPostHandlePoint().getChannel(ClientboundMoveEntityPacket.class), this::onEntityPacket);
     }
 
     public int shieldExceptionspam = 0;
@@ -196,52 +197,80 @@ public class CombatExtra extends BaseModule {
         var access = PlayerMoveC2SPacketAccess.of(packetEvent.context);
         if (access.getCause() != PlayerMoveC2SPacketAccess.Cause.SET_BACK
                 && access.getCause() != PlayerMoveC2SPacketAccess.Cause.LEGACY_SNAP) {
-            mc.level.players().forEach(s -> {
-                if (s instanceof RemotePlayer) {
-                    tickEntity(s);
+            mc.level.entitiesForRendering().forEach(entity -> {
+                if (entity instanceof LivingEntity) {
+                    tickEntity(entity);
                 }
             });
         }
     }
 
     private void tickEntity(Entity entity) {
+        getTracker(entity).onMovement(maySkipInterpolationTick());
+    }
+
+    public boolean maySkipInterpolationTick() {
         boolean tickReliable = !DisablerManager.INSTANCE.isGrimSelfCheckDisabled()
                 && (ViaFabricPlusHooks.isSupportEndTick() || mc.player.isPassenger());
-        getTracker(entity).onMovement(!tickReliable);
+        return !tickReliable;
     }
 
     public void onClientTickEndPacket() {
         if (ViaFabricPlusHooks.isSupportEndTick() && !PlayerStateManager.INSTANCE.lastTickHasMovement) {
-            mc.level.players().forEach(s -> {
-                if (s instanceof RemotePlayer) {
-                    tickEntity(s);
+            mc.level.entitiesForRendering().forEach(entity -> {
+                if (entity instanceof LivingEntity) {
+                    tickEntity(entity);
                 }
             });
         }
     }
 
     public void onTrackedPosition(Event<PosUpdate> event) {
-        if (event.context.entity() instanceof RemotePlayer entities) {
-            getTracker(entities)
+        if (event.context.entity() instanceof LivingEntity living) {
+            getTracker(living)
                     .onEntityPos(
-                            event.context.newPos(), !entities.isPassenger() && !ViaFabricPlusHooks.isSupportEndTick());
+                            living,
+                            event.context.newPos(),
+                            !living.isPassenger() && !ViaFabricPlusHooks.isSupportEndTick());
         }
+    }
+
+    public void onEntityPacket(Event<ClientboundMoveEntityPacket> event) {
+        ClientboundMoveEntityPacket packet = event.context;
+        if (packet.hasPosition() || !packet.hasRotation() || mc.level == null) return;
+        if (!(packet.getEntity(mc.level) instanceof LivingEntity living) || living.isLocalInstanceAuthoritative())
+            return;
+        getTracker(living).onRotationOnly(living, !living.isPassenger() && !ViaFabricPlusHooks.isSupportEndTick());
     }
 
     private static final String KEY_TRACKER = "slimefunhelper:combat_extra/position_tracker";
 
-    public PlayerPositionTracker getTracker(Entity player) {
-        return ((MetadataHolder) player).getMetadata().getOrPut(this, KEY_TRACKER, PlayerPositionTracker::new);
+    public LivingPositionTracker getTracker(Entity entity) {
+        return ((MetadataHolder) entity).getMetadata().getOrPut(this, KEY_TRACKER, LivingPositionTracker::new);
     }
 
-    public static class PlayerPositionTracker {
-        private static final int interpolationSteps = 3;
-
+    public static class LivingPositionTracker {
         private InterpolationData oldPacketLocation;
         private InterpolationData newPacketLocation;
         private Vec3 trackedPosition;
 
-        public void onEntityPos(Vec3 pos, boolean maySkipTick) {
+        private static boolean hasNoInterpolator(LivingEntity entity) {
+            //#if MC >= 260300
+            //$$ return entity.getInterpolation() == InterpolationHandler.NO_OP;
+            //#else
+            return entity.getInterpolation() == null;
+            //#endif
+        }
+
+        public void onEntityPos(LivingEntity entity, Vec3 pos, boolean maySkipTick) {
+            boolean instant = hasNoInterpolator(entity);
+            int interpolationSteps = instant ? 1 : 3;
+            if (instant) {
+                trackedPosition = pos;
+                oldPacketLocation = null;
+                newPacketLocation = new InterpolationData(pos, interpolationSteps, false);
+                return;
+            }
             if (trackedPosition == null || newPacketLocation == null) {
                 trackedPosition = pos;
                 oldPacketLocation = null;
@@ -254,6 +283,20 @@ public class CombatExtra extends BaseModule {
                 PostManager.INSTANCE.addNextTransactionAction((ch) -> oldPacketLocation = null);
             }
         }
+
+        public void onRotationOnly(LivingEntity entity, boolean maySkipTick) {
+            if (hasNoInterpolator(entity) || trackedPosition == null || newPacketLocation == null) return;
+            SupportVersion protocol = ViaFabricPlusHooks.getInstance().getCurrentVersion();
+            oldPacketLocation = newPacketLocation;
+            AABB possible = oldPacketLocation.possiblePositions();
+            boolean freeze = (protocol.isHigherOrEqualTo(21, 5) && protocol.isLowerOrEqualTo(21, 8))
+                    || (protocol.isHigherOrEqualTo(15, 1) && protocol.isLowerOrEqualTo(20, 1));
+            newPacketLocation = freeze
+                    ? InterpolationData.frozen(possible)
+                    : new InterpolationData(possible, trackedPosition, 3, maySkipTick);
+            PostManager.INSTANCE.addNextTransactionAction((ch) -> oldPacketLocation = null);
+        }
+
         // 傻逼grim又发力了。依旧跳刻大法
         public void onMovement(boolean maySkipTick) {
             if (newPacketLocation == null) return;
@@ -276,6 +319,41 @@ public class CombatExtra extends BaseModule {
             }
         }
 
+        public AABB getNextInterpolatedBox(Entity entity, int ticksLater, boolean maySkipTick) {
+            if (ticksLater <= 0) return getInteractBox(entity);
+            if (newPacketLocation == null) return entity.getBoundingBox();
+            return predictInterpolation(entity, ticksLater, maySkipTick);
+        }
+
+        public Vec3 getNextInterpolatedPosition(Entity entity, int ticksLater, boolean maySkipTick) {
+            if (ticksLater <= 0) return entity.position();
+            if (newPacketLocation == null) {
+                Vec3 tracked = entity.trackingPosition();
+                return tracked.equals(Vec3.ZERO) ? entity.position() : tracked;
+            }
+            return getNextInterpolatedBox(entity, ticksLater, maySkipTick)
+                    .getCenter()
+                    .subtract(0.0, entity.dimensions.height() / 2.0, 0.0);
+        }
+
+        private AABB predictInterpolation(Entity entity, int ticksLater, boolean maySkipTick) {
+            InterpolationData predictedOld = oldPacketLocation == null ? null : oldPacketLocation.copy();
+            InterpolationData predictedNew = newPacketLocation.copy();
+            for (int i = 0; i < ticksLater; i++) {
+                predictedNew.step(predictedOld == null, maySkipTick);
+                if (predictedOld != null) {
+                    predictedOld.step(true, maySkipTick);
+                    predictedNew.includePossibleStartingRange(predictedOld.possiblePositions());
+                }
+            }
+
+            AABB predictedBox = expand(predictedNew.possiblePositions(), entity).minmax(entity.getBoundingBox());
+            if (predictedOld != null) {
+                predictedBox = predictedBox.minmax(expand(predictedOld.possiblePositions(), entity));
+            }
+            return predictedBox;
+        }
+
         private AABB expand(AABB box, Entity entity) {
             return box.inflate(entity.dimensions.width() / 2, 0, entity.dimensions.width() / 2)
                     .expandTowards(0, entity.dimensions.height(), 0);
@@ -286,6 +364,7 @@ public class CombatExtra extends BaseModule {
         private final int steps;
         private final Vec3 target;
         private AABB startRange;
+        private boolean frozen;
         private int lowStep;
         private int highStep;
 
@@ -305,6 +384,12 @@ public class CombatExtra extends BaseModule {
             this.highStep = maySkipTicks ? steps : 0;
         }
 
+        public static InterpolationData frozen(AABB location) {
+            InterpolationData data = new InterpolationData(location, location.getCenter(), 1, false);
+            data.frozen = true;
+            return data;
+        }
+
         public AABB possiblePositions() {
             return interpolate(lowStep).minmax(interpolate(highStep));
         }
@@ -321,6 +406,7 @@ public class CombatExtra extends BaseModule {
         }
 
         public void step(boolean increase, boolean maySkipTick) {
+            if (frozen) return;
             if (maySkipTick) this.highStep = steps;
             if (increase) {
                 lowStep = Math.min(lowStep + 1, steps);
@@ -330,6 +416,14 @@ public class CombatExtra extends BaseModule {
 
         public void includePossibleStartingRange(AABB previousRange) {
             startRange = startRange.minmax(previousRange);
+        }
+
+        private InterpolationData copy() {
+            InterpolationData copy = new InterpolationData(startRange, target, steps, false);
+            copy.frozen = frozen;
+            copy.lowStep = lowStep;
+            copy.highStep = highStep;
+            return copy;
         }
 
         private static double lerp(double from, double to, double t) {

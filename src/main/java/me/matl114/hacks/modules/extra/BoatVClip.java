@@ -122,15 +122,4 @@ public class BoatVClip extends BaseModule implements LegalMovementManager.Moveme
             }
         }
     }
-
-    @Override
-    public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
-        if (enable.get()) {
-            //            for(var pos : blockStateMap.entrySet()){
-            //                mc.level.setBlockState(pos.getKey(), pos.getValue());
-            //            }
-            //            blockStateMap.clear();
-        }
-        return true;
-    }
 }

@@ -391,7 +391,7 @@ public class Interact extends BaseModule {
         Vec3[] teleportedPosition = {null};
         boolean[] distancePassInteract = {true};
         return !RotationManager.INSTANCE.request(RotationManager.ofEntity(() -> distancePassInteract[0] ? target : null)
-                .preTick(() -> {
+                .preTickTask(() -> {
                     LocalPlayer player = mc.player;
                     Vec3 originalPosition = player.position();
                     if (!TargetSelector.INSTANCE.isWithinAttackRange(originalPosition, target, interactRange)
@@ -407,7 +407,7 @@ public class Interact extends BaseModule {
                         teleportedPosition[0] = null;
                     }
                 })
-                .postTick(() -> {
+                .postTickTask(() -> {
                     LocalPlayer player = mc.player;
                     if (distancePassInteract[0] && !interactBeforeMovement) {
                         InteractionTasks.interactEntity(player, target, InteractionHand.MAIN_HAND, swingHandEntity.get());

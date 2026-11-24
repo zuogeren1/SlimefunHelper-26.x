@@ -121,7 +121,7 @@ public class Sprint extends BaseModule implements LegalMovementManager.MovementM
                 if (yaw != 0.0F) {
                     RotationManager.INSTANCE.request(
                             RotationManager.ofDirection(Optional.empty(), Optional.of(mc.player.getYRot() + yaw))
-                                    .preTick(() -> {
+                                    .preTickTask(() -> {
                                         PlayerInputManager.INSTANCE.addSprintModifier(0, true, 0);
                                     })
                                     .priority(0));
@@ -181,12 +181,11 @@ public class Sprint extends BaseModule implements LegalMovementManager.MovementM
     }
 
     @Override
-    public boolean postModify(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
+    public void postModify(Event<LegalMovementManager> movementManagerEvent) {
         if (fakeSprintThisTick) {
             movementManagerEvent.context.playerStatus.entity.setSprinting(true);
             fakeSprintThisTick = false;
         }
-        return true;
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {

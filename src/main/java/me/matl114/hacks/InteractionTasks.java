@@ -150,7 +150,7 @@ public class InteractionTasks {
     }
 
     public static void addPostRotationCorrectTask(BlockPos pos, Runnable callback) {
-        RotationManager.INSTANCE.request(RotationManager.ofBlock(() -> pos).postTick(callback));
+        RotationManager.INSTANCE.request(RotationManager.ofBlock(() -> pos).postTickTask(callback));
     }
 
     public static Vec3 createBlockRayCastDirection(BlockPos pos) {

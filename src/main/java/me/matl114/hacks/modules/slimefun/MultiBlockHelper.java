@@ -23,6 +23,7 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.RotationManager;
+import me.matl114.hacks.utils.move.Rotation;
 import me.matl114.hacks.utils.multiblock.BlockMatcher;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
@@ -253,7 +254,7 @@ public class MultiBlockHelper extends BaseModule {
 
     public void clickDelayMovement(BlockHitResult result, Vec2 pitchYaw, int clickRate) {
         RotationManager.INSTANCE.request(
-                RotationManager.ofDirection(() -> pitchYaw).applyMoveFix(false).postTick(() -> {
+                RotationManager.ofDirection(() -> Rotation.from(pitchYaw)).applyMoveFix(false).postTickTask(() -> {
                     for (int i = 0; i < clickRate; ++i) {
                         mc.gameMode.startPrediction(
                                 mc.level,
