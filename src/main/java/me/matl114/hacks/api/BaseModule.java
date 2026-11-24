@@ -203,6 +203,9 @@ public abstract class BaseModule implements ModuleListProvider {
     // this is managed by ModuleManager
     @MustBeInvokedByOverriders
     public void onCreate() {
+        if (removed) {
+            throw new IllegalStateException("Created after removed");
+        }
         registerAll();
     }
 
