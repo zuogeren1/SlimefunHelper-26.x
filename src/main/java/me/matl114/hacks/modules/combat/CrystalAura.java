@@ -71,6 +71,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.DamageUtils;
+import me.matl114.hacks.utils.ExplosionUtils;
+import me.matl114.hacks.utils.InteractUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class CrystalAura extends BaseModule {
     private static final int CRYSTAL_SEARCH_RADIUS = 5;

@@ -1,6 +1,6 @@
 package me.matl114.accessors.access;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;

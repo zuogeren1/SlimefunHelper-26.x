@@ -1,7 +1,7 @@
 package me.matl114.mixins.access;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import me.matl114.accessors.hacks.KeyBindAccess;
+import me.matl114.accessors.access.KeyBindAccess;
 import me.matl114.managers.input.KeyCode;
 import net.minecraft.client.KeyMapping;
 import org.spongepowered.asm.mixin.Mixin;

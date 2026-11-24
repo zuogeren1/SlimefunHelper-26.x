@@ -1,6 +1,6 @@
 package me.matl114.hacks.modules.render;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import net.minecraft.client.player.LocalPlayer;
 import static me.matl114.utils.ColorUtils.*;
@@ -24,7 +24,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.ColorUtils;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;

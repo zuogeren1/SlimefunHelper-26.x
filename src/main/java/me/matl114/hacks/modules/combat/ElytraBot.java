@@ -50,7 +50,7 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.algorithms.StateMachine;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.versioned.api.VDataFlag;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.core.BlockPos;
@@ -68,6 +68,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.DamageUtils;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class ElytraBot extends BaseModule {
     public final ModulePath combatBot = makePath(Configs.COMBAT_CONFIG, "combat-bot");

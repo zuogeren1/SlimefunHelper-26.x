@@ -1,6 +1,6 @@
 package me.matl114.mixins.events;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import java.util.ArrayList;
 import java.util.List;

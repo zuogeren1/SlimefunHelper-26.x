@@ -1,7 +1,7 @@
 package me.matl114.hacks.modules.slimefun;
 
 import me.matl114.hacks.utils.enums.LegalInteractMode;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.mojang.datafixers.util.Pair;
 import java.util.*;
@@ -16,7 +16,7 @@ import me.matl114.events.Listener;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.gui.basic.ContentDelegateWidget;
-import me.matl114.gui.complex.slimefun.SlimefunDispensorSuggestBookWidget;
+import me.matl114.hacks.utils.gui.slimefun.SlimefunDispensorSuggestBookWidget;
 import me.matl114.hacks.SlimefunTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -31,8 +31,8 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
 import me.matl114.utils.Debug;
 import me.matl114.hacks.utils.EntityUtils;
-import me.matl114.utils.RaycastUtils;
-import me.matl114.utils.containers.MetaData;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.utils.collections.MetaData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;

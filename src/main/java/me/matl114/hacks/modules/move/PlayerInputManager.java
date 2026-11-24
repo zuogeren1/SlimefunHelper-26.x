@@ -9,7 +9,7 @@ import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.managers.Tasks;
 import me.matl114.hacks.utils.EntityUtils;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import net.minecraft.client.player.LocalPlayer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;

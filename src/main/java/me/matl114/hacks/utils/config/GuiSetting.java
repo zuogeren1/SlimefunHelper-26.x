@@ -32,6 +32,12 @@ import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.utils.config.ValueAccessor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import me.matl114.hacks.utils.widgets.AlignConfig;
+import me.matl114.hacks.utils.widgets.AlignType;
+import me.matl114.hacks.utils.widgets.CustomGuiConfig;
+import me.matl114.hacks.utils.widgets.GuiColorSamplier;
+import me.matl114.hacks.utils.widgets.GuiStyle;
+import me.matl114.hacks.utils.widgets.TextConfig;
 
 @With
 public record GuiSetting(

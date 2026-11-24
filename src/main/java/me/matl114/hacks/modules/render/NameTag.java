@@ -23,6 +23,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector2d;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class NameTag extends INameTag {
     public NameTag() {

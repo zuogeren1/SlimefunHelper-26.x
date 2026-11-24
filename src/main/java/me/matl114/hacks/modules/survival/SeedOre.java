@@ -92,6 +92,8 @@ import net.minecraft.world.level.levelgen.placement.RarityFilter;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.CommonUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class SeedOre extends BaseModule {
     public static SeedOre INSTANCE;

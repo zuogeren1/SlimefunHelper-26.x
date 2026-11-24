@@ -5,7 +5,7 @@ import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.vertex.PoseStack;
 import me.matl114.events.Event;
 import me.matl114.events.RenderListener;
-import me.matl114.utils.render.MaskPostRenderer;
+import me.matl114.hacks.utils.render.MaskPostRenderer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.DeltaTracker;

@@ -1,6 +1,6 @@
 package me.matl114.jsApi;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import java.util.List;
 import javax.annotation.Nonnull;

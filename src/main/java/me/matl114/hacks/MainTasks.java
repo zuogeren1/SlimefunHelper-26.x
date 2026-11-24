@@ -5,7 +5,7 @@ import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.modules.task.PacketOrderManager;
 import me.matl114.hacks.modules.task.PostManager;
 import me.matl114.hacks.utils.config.NBTTypes;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;

@@ -35,7 +35,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.file.FileStorage;
 import me.matl114.utils.CollectionUtils;
-import me.matl114.utils.CommonUtils;
+import me.matl114.hacks.utils.CommonUtils;
 import me.matl114.utils.Debug;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;

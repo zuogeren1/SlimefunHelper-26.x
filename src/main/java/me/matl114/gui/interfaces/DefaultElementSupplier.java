@@ -11,7 +11,7 @@ import me.matl114.gui.basic.InputHandler;
 import me.matl114.gui.basic.RenderHandler;
 import me.matl114.gui.basic.TextAlign;
 import me.matl114.gui.basic.TextProvider;
-import me.matl114.gui.complex.RawTextElement;
+import me.matl114.gui.elements.RawTextElement;
 import me.matl114.gui.elements.ButtonElement;
 import me.matl114.gui.elements.IconElement;
 import me.matl114.gui.elements.TextFieldElement;

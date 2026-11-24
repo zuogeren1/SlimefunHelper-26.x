@@ -73,6 +73,8 @@ import net.minecraft.world.level.block.state.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.RenderUtils;
+import me.matl114.hacks.utils.WorldUtils;
 
 public class ChestHistory extends BaseModule {
     public final ModulePath invCache = makePath(Configs.INV_CONFIG, "inv-cache");

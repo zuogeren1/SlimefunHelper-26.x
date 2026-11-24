@@ -1,6 +1,6 @@
 package me.matl114.hacks.modules.inv;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.Runnables;
@@ -22,7 +22,7 @@ import me.matl114.events.Listener;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.*;
 import me.matl114.gui.complex.config.ListModifyWidget;
-import me.matl114.gui.complex.invcache.InventoryViewScreen;
+import me.matl114.hacks.utils.gui.InventoryViewScreen;
 import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.gui.presets.lists.ListEntryWidgetController;
 import me.matl114.gui.presets.single.CenterScreen;
@@ -95,6 +95,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.function.Consumers;
 import org.apache.commons.lang3.mutable.MutableObject;
+import me.matl114.hacks.utils.InteractUtils;
 
 public class KitReplenish extends BaseModule {
     // todo: ktiManager

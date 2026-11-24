@@ -38,6 +38,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import me.matl114.hacks.utils.ClientUtils;
 
 @ApiMethod
 public class ScreenUtils {

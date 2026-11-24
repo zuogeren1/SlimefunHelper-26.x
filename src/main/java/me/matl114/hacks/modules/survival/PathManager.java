@@ -52,6 +52,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.CommonUtils;
+import me.matl114.hacks.utils.RenderUtils;
+import me.matl114.hacks.utils.WorldUtils;
 
 public class PathManager extends BaseModule {
     public static PathManager INSTANCE;

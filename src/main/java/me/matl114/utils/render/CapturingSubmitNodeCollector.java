@@ -1,5 +1,7 @@
 package me.matl114.utils.render;
 
+import me.matl114.hacks.utils.render.EntityModelCollector;
+
 //#if MC >= 260200
 //#if MC >= 260300
 //$$ import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;

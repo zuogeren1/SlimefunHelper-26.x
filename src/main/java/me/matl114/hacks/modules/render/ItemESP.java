@@ -1,6 +1,6 @@
 package me.matl114.hacks.modules.render;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.*;
@@ -23,7 +23,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.ItemStackUtils;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import me.matl114.versioned.api.VDataFlag;
 import me.matl114.versioned.api.VItem;

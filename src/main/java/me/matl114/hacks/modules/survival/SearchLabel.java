@@ -23,7 +23,7 @@ import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.MathUtils;
-import me.matl114.utils.WorldUtils;
+import me.matl114.hacks.utils.WorldUtils;
 import me.matl114.versioned.api.VDataFlag;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;

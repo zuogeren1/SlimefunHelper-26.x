@@ -1,6 +1,6 @@
 package me.matl114.hooks.mixin.xaero;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import me.matl114.accessors.access.GuiScreenAccess;
 import me.matl114.hacks.modules.survival.XaeroHelper;

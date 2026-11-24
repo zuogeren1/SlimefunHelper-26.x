@@ -5,7 +5,7 @@ import java.util.function.Consumer;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 import me.matl114.gui.basic.*;
-import me.matl114.gui.complex.RawTextElement;
+import me.matl114.gui.elements.RawTextElement;
 import me.matl114.gui.elements.ButtonElement;
 import me.matl114.gui.elements.IconElement;
 import me.matl114.gui.elements.PlateElement;

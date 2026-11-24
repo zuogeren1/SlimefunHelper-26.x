@@ -77,6 +77,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec2;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.InteractUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class PrinterRewrite extends BaseModule {
     public final ModulePath blockRotate = makePath(Configs.INTERACT_CONFIG, "block-rotate");

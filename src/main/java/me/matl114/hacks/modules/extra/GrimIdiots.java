@@ -30,7 +30,7 @@ import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.Debug;
-import me.matl114.utils.InteractUtils;
+import me.matl114.hacks.utils.InteractUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.collections.FlagEntry;
 import net.minecraft.ChatFormatting;

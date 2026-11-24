@@ -25,7 +25,7 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.collections.IndexEntry;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -37,6 +37,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import me.matl114.hacks.utils.InteractUtils;
 
 public class SelfTrap extends BaseModule {
     public static SelfTrap INSTANCE;

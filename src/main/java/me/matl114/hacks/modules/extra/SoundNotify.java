@@ -26,7 +26,7 @@ import me.matl114.hooks.impl.baritone.BaritoneLanding;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.utils.ChatUtils;
-import me.matl114.utils.DamageUtils;
+import me.matl114.hacks.utils.DamageUtils;
 import me.matl114.versioned.api.VDataFlag;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;

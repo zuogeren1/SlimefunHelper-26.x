@@ -15,7 +15,7 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.ChatUtils;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.multiplayer.chat.GuiMessage;
 import net.minecraft.network.chat.Component;

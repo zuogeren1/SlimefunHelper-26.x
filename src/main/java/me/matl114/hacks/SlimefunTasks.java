@@ -1,6 +1,6 @@
 package me.matl114.hacks;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.google.common.base.Preconditions;
 import java.util.*;
@@ -8,8 +8,8 @@ import java.util.stream.Stream;
 import lombok.Getter;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.managers.command.MainCommand;
-import me.matl114.gui.complex.slimefun.SlimefunChoiceScreen;
-import me.matl114.gui.complex.slimefun.SlimefunEntryListScreen;
+import me.matl114.hacks.utils.gui.slimefun.SlimefunChoiceScreen;
+import me.matl114.hacks.utils.gui.slimefun.SlimefunEntryListScreen;
 import me.matl114.hacks.api.ModuleGroup;
 import me.matl114.hacks.api.ModuleManager;
 import me.matl114.hacks.modules.HackModules;

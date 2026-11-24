@@ -45,6 +45,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class SpearAttack extends BaseModule implements LegalMovementManager.MovementModifier {
     public final ModulePath spearModule = makePath(Configs.COMBAT_CONFIG, "spear-module");

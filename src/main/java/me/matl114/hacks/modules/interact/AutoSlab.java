@@ -47,6 +47,9 @@ import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import me.matl114.hacks.utils.InteractUtils;
+import me.matl114.hacks.utils.RenderUtils;
+import me.matl114.hacks.utils.WorldUtils;
 
 public class AutoSlab extends BaseModule {
     public AutoSlab() {

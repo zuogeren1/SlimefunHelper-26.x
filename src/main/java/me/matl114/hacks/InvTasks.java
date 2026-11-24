@@ -1,6 +1,6 @@
 package me.matl114.hacks;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.google.common.base.Preconditions;
 import com.mojang.serialization.Codec;
@@ -61,6 +61,8 @@ import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.*;
 import net.minecraft.world.level.block.state.BlockState;
+import me.matl114.hacks.modules.inv.InvTooltips;
+import me.matl114.hacks.utils.InteractUtils;
 
 public class InvTasks {
     public static void init() {}
@@ -980,7 +982,7 @@ public class InvTasks {
     private static SaveItem saveItem;
 
     @Getter
-    private static NbtTooltips nbtTooltips;
+    private static InvTooltips nbtTooltips;
 
     @Getter
     //
@@ -1014,7 +1016,7 @@ public class InvTasks {
         itemEditor = new ItemEditor().register(m);
         quickButton = new QuickButton().register(m);
         saveItem = new SaveItem().register(m);
-        nbtTooltips = new NbtTooltips().register(m);
+        nbtTooltips = new InvTooltips().register(m);
     }
 
     static {

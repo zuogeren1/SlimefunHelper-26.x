@@ -3,7 +3,7 @@ package me.matl114.gui.complex.other;
 import java.util.function.Consumer;
 import me.matl114.gui.basic.RenderHandler;
 import me.matl114.managers.input.KeyCode;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import me.matl114.utils.config.ValueAccessor;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.client.Minecraft;

@@ -17,7 +17,7 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.Packet;

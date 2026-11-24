@@ -18,6 +18,11 @@ import xyz.wagyourtail.jsmacros.core.Core;
 import xyz.wagyourtail.jsmacros.core.library.BaseLibrary;
 import xyz.wagyourtail.jsmacros.core.library.Library;
 import xyz.wagyourtail.jsmacros.core.library.LibraryRegistry;
+import me.matl114.hacks.utils.ClientUtils;
+import me.matl114.hacks.utils.CommonUtils;
+import me.matl114.hacks.utils.NetworkUtils;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 /**
  * this utility class is created for JsMacros invocation

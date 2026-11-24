@@ -29,7 +29,7 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.ChatUtils;
-import me.matl114.utils.CommonUtils;
+import me.matl114.hacks.utils.CommonUtils;
 import me.matl114.utils.MathUtils;
 import me.matl114.utils.ScreenUtils;
 import net.minecraft.ChatFormatting;

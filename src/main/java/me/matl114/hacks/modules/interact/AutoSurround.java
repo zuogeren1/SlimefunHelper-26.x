@@ -31,7 +31,7 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.collections.IndexEntry;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -53,6 +53,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.InteractUtils;
 
 public class AutoSurround extends BaseModule {
     public static AutoSurround INSTANCE;

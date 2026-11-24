@@ -54,7 +54,7 @@ import me.matl114.utils.config.AttrKeyValue;
 import me.matl114.utils.config.BaseAttrKeyValue;
 import me.matl114.utils.config.ValueAccessor;
 import me.matl114.versioned.api.VDrawContext;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;

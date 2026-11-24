@@ -27,7 +27,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.utils.RaycastUtils;
+import me.matl114.hacks.utils.RaycastUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;

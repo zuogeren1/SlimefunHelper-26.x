@@ -26,7 +26,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.core.*;
 import net.minecraft.core.BlockPos;
@@ -40,6 +40,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class PearlFly extends BaseModule {
     public PearlFly() {

@@ -9,7 +9,7 @@ import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
-import me.matl114.utils.DamageUtils;
+import me.matl114.hacks.utils.DamageUtils;
 import net.minecraft.network.protocol.game.ClientboundDamageEventPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.damagesource.DamageType;

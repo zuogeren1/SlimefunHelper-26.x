@@ -75,6 +75,10 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.InteractUtils;
+import me.matl114.hacks.utils.NetworkUtils;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.WorldUtils;
 
 public class BlockRotate extends BaseModule {
     public final ModulePath blockRotate = makePath(Configs.INTERACT_CONFIG, "block-rotate");

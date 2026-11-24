@@ -7,7 +7,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.AllArgsConstructor;
 import me.matl114.accessors.access.PlayerMoveC2SPacketAccess;
-import me.matl114.accessors.hacks.KeyBindAccess;
+import me.matl114.accessors.access.KeyBindAccess;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.api.ModulePreset;
@@ -68,6 +68,7 @@ import org.apache.commons.lang3.stream.Streams;
 import org.joml.Vector2f;
 import org.joml.Vector3d;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.InteractUtils;
 
 public class InteractManager extends BaseModule {
     public static InteractManager INSTANCE;

@@ -7,7 +7,7 @@ import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
-import me.matl114.utils.NetworkUtils;
+import me.matl114.hacks.utils.NetworkUtils;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;

@@ -1,7 +1,7 @@
 package me.matl114.hacks.modules.chat;
 
 import me.matl114.gui.Constants;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import io.github.reserveword.imblocker.common.gui.FocusableObject;
 import java.util.List;

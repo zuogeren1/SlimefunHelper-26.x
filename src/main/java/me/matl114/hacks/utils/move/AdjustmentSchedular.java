@@ -12,7 +12,7 @@ import me.matl114.hacks.modules.survival.SchedularSettings;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.utils.MathUtils;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;

@@ -30,7 +30,7 @@ import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.versioned.api.VPacket;
 import net.minecraft.core.*;
 import net.minecraft.core.BlockPos;
@@ -52,6 +52,8 @@ import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.ClientUtils;
+import me.matl114.hacks.utils.RaycastUtils;
 
 public class Criticals extends BaseModule implements LegalMovementManager.MovementModifier {
     public final ModulePath attBot = makePath(Configs.COMBAT_CONFIG, "att-bot");

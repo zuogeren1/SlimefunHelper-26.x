@@ -7,7 +7,7 @@ import me.matl114.managers.command.MainCommand;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.utils.ChatUtils;
-import me.matl114.utils.WorldUtils;
+import me.matl114.hacks.utils.WorldUtils;
 import me.matl114.utils.commands.commandGroup.CommandContext;
 import me.matl114.utils.commands.commandGroup.SubCommand;
 import me.matl114.utils.commands.commandGroup.TreeSubCommand;

@@ -27,7 +27,7 @@ import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ColorUtils;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import me.matl114.versioned.api.VDrawContext;
 import me.matl114.versioned.impl.Render_v1_21_11;
@@ -42,6 +42,9 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2d;
+import me.matl114.hacks.utils.render.EntityBoundaryCollector;
+import me.matl114.hacks.utils.render.EntityFaceCollector;
+import me.matl114.utils.collections.MetaData;
 
 /**
  * 实体 ESP。

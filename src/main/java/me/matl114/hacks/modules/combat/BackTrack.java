@@ -18,7 +18,7 @@ import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.network.protocol.PacketType;
 import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;

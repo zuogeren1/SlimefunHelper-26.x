@@ -1,7 +1,7 @@
 package me.matl114.hacks.utils.move;
 
 import me.matl114.hacks.modules.interact.SequencedActionManager;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.mojang.datafixers.util.Pair;
 import java.util.*;
@@ -30,7 +30,7 @@ import me.matl114.managers.Tasks;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.ItemStackUtils;
 import me.matl114.utils.MathUtils;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.utils.algorithms.StateMachine;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.utils.config.ValueAccessor;

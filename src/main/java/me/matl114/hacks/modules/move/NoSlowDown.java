@@ -23,7 +23,7 @@ import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.versioned.api.VDataFlag;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -50,6 +50,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.NetworkUtils;
 
 public class NoSlowDown extends BaseModule implements LegalMovementManager.MovementModifier {
     public final ModulePath moveSpeed = makePath(Configs.MOV_CONFIG, "move-speed");

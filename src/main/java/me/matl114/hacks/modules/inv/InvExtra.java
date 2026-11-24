@@ -1,6 +1,6 @@
 package me.matl114.hacks.modules.inv;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.google.common.util.concurrent.Runnables;
 import java.util.ArrayDeque;

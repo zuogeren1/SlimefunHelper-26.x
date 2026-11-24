@@ -8,7 +8,7 @@ import me.matl114.accessors.access.ClientAccess;
 import me.matl114.accessors.access.FireworkRocketEntityAccess;
 import me.matl114.accessors.access.HitResultAccess;
 import me.matl114.accessors.events.EntityAccess;
-import me.matl114.accessors.hacks.KeyBindAccess;
+import me.matl114.accessors.access.KeyBindAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.EventContainer;
@@ -55,6 +55,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.ExplosionUtils;
+import me.matl114.hacks.utils.InteractUtils;
+import me.matl114.hacks.utils.RaycastUtils;
 
 public class AntiCrystal extends BaseModule {
     public AntiCrystal() {

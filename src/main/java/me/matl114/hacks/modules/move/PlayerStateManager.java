@@ -23,8 +23,8 @@ import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Tasks;
 import me.matl114.utils.*;
 import me.matl114.utils.commands.params.api.CommandExecution;
-import me.matl114.utils.containers.MetaData;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.utils.collections.MetaData;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.utils.inventory.ItemStackSample;
 import me.matl114.versioned.api.VDataFlag;
 import me.matl114.versioned.api.VPacket;
@@ -109,6 +109,8 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Vector2f;
 import org.joml.Vector3d;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.AttributeUtils;
+import me.matl114.hacks.utils.DamageUtils;
 
 public class PlayerStateManager extends BaseModule {
     public static PlayerStateManager INSTANCE;

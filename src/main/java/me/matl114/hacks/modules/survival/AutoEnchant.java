@@ -15,7 +15,7 @@ import me.matl114.hacks.utils.survival.ToolCategory;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import me.matl114.utils.ItemStackUtils;
 import me.matl114.utils.RegistryUtils;
 import me.matl114.versioned.api.VItem;

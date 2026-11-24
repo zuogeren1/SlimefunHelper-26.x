@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.function.Consumer;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.render.EntityModelCollector;
 
 /**
  * 捕获式 {@link VertexConsumer}：不写显存，只把顶点抄进内存，够四个就还原成一个面。

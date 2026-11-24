@@ -9,6 +9,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import me.matl114.hacks.utils.ClientUtils;
 
 @ApiMethod
 public class Debug {

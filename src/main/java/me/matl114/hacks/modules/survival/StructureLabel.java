@@ -30,17 +30,17 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.Debug;
 import me.matl114.utils.render.RenderCollector;
-import me.matl114.utils.structures.ChunkRange;
-import me.matl114.utils.structures.CubiomesNetherBiomeSampler;
-import me.matl114.utils.structures.CubiomesOverworldBiomeSampler;
-import me.matl114.utils.structures.EndCityResult;
-import me.matl114.utils.structures.LootVersion;
-import me.matl114.utils.structures.Populator;
-import me.matl114.utils.structures.PredictedChest;
-import me.matl114.utils.structures.PredictedChestAlternatives;
-import me.matl114.utils.structures.StructureConfig;
-import me.matl114.utils.structures.StructureDecorationIndex;
-import me.matl114.utils.structures.StructurePosition;
+import me.matl114.utils.worldgen.structures.ChunkRange;
+import me.matl114.utils.worldgen.structures.CubiomesNetherBiomeSampler;
+import me.matl114.utils.worldgen.structures.CubiomesOverworldBiomeSampler;
+import me.matl114.utils.worldgen.structures.EndCityResult;
+import me.matl114.utils.worldgen.loot.LootVersion;
+import me.matl114.utils.worldgen.structures.Populator;
+import me.matl114.utils.worldgen.structures.PredictedChest;
+import me.matl114.utils.worldgen.structures.PredictedChestAlternatives;
+import me.matl114.utils.worldgen.structures.StructureConfig;
+import me.matl114.utils.worldgen.structures.StructureDecorationIndex;
+import me.matl114.utils.worldgen.structures.StructurePosition;
 import me.matl114.utils.world.ContainerPosition;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -58,6 +58,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class StructureLabel extends BaseModule {
     private static final long CACHE_BLOCK_SIZE = 1024L;
@@ -1483,12 +1484,12 @@ public class StructureLabel extends BaseModule {
         if (checkNull() || !enable.get()) {
             return;
         }
-        me.matl114.utils.RenderUtils.startDrawVirtual(event.context().stack());
+        RenderUtils.startDrawVirtual(event.context().stack());
         try {
             boxCollector.render3D(event.context().stack(), event.context.partialTicks());
             tracerCollector.render3D(event.context().stack(), event.context.partialTicks());
         } finally {
-            me.matl114.utils.RenderUtils.stopDrawVirtual(event.context().stack());
+            RenderUtils.stopDrawVirtual(event.context().stack());
         }
     }
 

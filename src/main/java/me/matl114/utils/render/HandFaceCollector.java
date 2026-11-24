@@ -26,6 +26,7 @@ import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector3fc;
+import me.matl114.hacks.utils.render.EntityModelCollector;
 //#if MC >= 260200
 import net.minecraft.client.renderer.gizmos.DrawableGizmoPrimitives;
 import net.minecraft.client.renderer.state.level.QuadParticleRenderState;

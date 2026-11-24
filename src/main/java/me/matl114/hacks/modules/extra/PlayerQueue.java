@@ -17,7 +17,7 @@ import me.matl114.managers.command.MainCommand;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.Debug;
-import me.matl114.utils.WorldUtils;
+import me.matl114.hacks.utils.WorldUtils;
 import me.matl114.utils.commands.commandGroup.CommandContext;
 import me.matl114.utils.commands.commandGroup.SubCommand;
 import me.matl114.utils.commands.commandGroup.TreeSubCommand;

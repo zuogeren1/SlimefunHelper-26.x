@@ -1,7 +1,7 @@
 package me.matl114.gui.complex.config;
 
 import me.matl114.gui.Constants;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import java.util.List;
 import me.matl114.events.Listener;

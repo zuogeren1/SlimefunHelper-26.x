@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import me.matl114.accessors.access.HandledScreenAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.gui.complex.other.BeaconEffectSelectButton;
+import me.matl114.hacks.utils.gui.BeaconEffectSelectButton;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;

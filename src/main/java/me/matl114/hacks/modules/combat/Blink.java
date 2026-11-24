@@ -24,7 +24,7 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.Debug;
 import me.matl114.utils.MathUtils;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.versioned.api.VDataFlag;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.PacketType;

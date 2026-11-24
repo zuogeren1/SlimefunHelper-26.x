@@ -14,7 +14,7 @@ import me.matl114.hacks.modules.move.TravellingControl;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.ConfigLoader;
 import me.matl114.plugins.api.PluginContext;
-import me.matl114.utils.CommonUtils;
+import me.matl114.hacks.utils.CommonUtils;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.phys.Vec3;
 

@@ -19,7 +19,7 @@ import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
-import me.matl114.utils.containers.MetaData;
+import me.matl114.utils.collections.MetaData;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -47,6 +47,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.function.BooleanConsumer;
+import me.matl114.hacks.utils.CommonUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class RenderOptimize extends BaseModule {
     public final ModulePath renderOptimize = makePath(Configs.RENDER_CONFIG, "render-optimize");

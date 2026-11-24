@@ -13,7 +13,6 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.interact.InteractExtra;
-import me.matl114.hacks.modules.combat.CombatManager;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.PacketMine;
@@ -47,6 +46,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.DamageUtils;
+import me.matl114.hacks.utils.ExplosionUtils;
+import me.matl114.hacks.utils.InteractUtils;
+import me.matl114.hacks.utils.RaycastUtils;
 
 public class AnchorAura extends BaseModule {
     private static final float ANCHOR_POWER = 5.0F;

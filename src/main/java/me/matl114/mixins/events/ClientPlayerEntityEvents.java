@@ -12,7 +12,7 @@ import me.matl114.events.Listener;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Tasks;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.ClientRecipeBook;

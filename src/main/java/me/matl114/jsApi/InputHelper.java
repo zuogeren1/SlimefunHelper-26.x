@@ -1,7 +1,7 @@
 package me.matl114.jsApi;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.SimpleInputManager;

@@ -46,6 +46,8 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.ClientUtils;
+import me.matl114.hacks.utils.WorldUtils;
 
 public class MineBot extends BaseModule {
     public static MineBot INSTANCE;

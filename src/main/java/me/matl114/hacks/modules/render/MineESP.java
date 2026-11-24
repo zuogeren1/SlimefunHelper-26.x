@@ -23,7 +23,7 @@ import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.ColorUtils;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.ChatFormatting;

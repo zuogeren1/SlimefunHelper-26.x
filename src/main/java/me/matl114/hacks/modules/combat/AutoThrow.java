@@ -23,7 +23,7 @@ import me.matl114.hacks.utils.tasks.TimerExecutor;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import me.matl114.utils.CollisionUtil;
 import me.matl114.utils.InventoryUtils;
 import net.minecraft.core.component.DataComponents;

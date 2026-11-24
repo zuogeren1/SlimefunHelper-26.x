@@ -2,7 +2,7 @@ package me.matl114.hacks.modules.survival;
 
 import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.utils.enums.GhostHandMode;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.mojang.datafixers.util.Pair;
 import java.util.*;
@@ -71,6 +71,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class AutoLibrarian extends BaseModule {
 

@@ -28,6 +28,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.DamageUtils;
+import me.matl114.hacks.utils.ExplosionUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class ExplosiveESP extends BaseModule {
     public ExplosiveESP() {

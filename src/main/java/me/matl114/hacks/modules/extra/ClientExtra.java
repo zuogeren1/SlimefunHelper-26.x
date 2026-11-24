@@ -1,6 +1,6 @@
 package me.matl114.hacks.modules.extra;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import com.google.common.util.concurrent.Runnables;
 //#if MC >= 260300
 //$$ import com.mojang.blaze3d.Blaze3D;

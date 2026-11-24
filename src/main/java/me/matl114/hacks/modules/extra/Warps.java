@@ -14,7 +14,7 @@ import me.matl114.hacks.modules.survival.XaeroHelper;
 import me.matl114.managers.FileManager;
 import me.matl114.managers.file.FileStorage;
 import me.matl114.utils.ChatUtils;
-import me.matl114.utils.CommonUtils;
+import me.matl114.hacks.utils.CommonUtils;
 import me.matl114.utils.Debug;
 import me.matl114.utils.commands.commandGroup.CommandContext;
 import me.matl114.utils.commands.commandGroup.SubCommand;

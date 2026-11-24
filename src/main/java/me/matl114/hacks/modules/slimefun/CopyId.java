@@ -1,6 +1,6 @@
 package me.matl114.hacks.modules.slimefun;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import static me.matl114.utils.ItemStackUtils.getSfId;
 

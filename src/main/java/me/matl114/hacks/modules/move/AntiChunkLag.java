@@ -11,7 +11,7 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.MathUtils;
-import me.matl114.utils.WorldUtils;
+import me.matl114.hacks.utils.WorldUtils;
 import net.minecraft.core.*;
 import net.minecraft.core.Direction;
 import net.minecraft.util.*;

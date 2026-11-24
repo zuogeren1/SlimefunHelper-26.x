@@ -25,7 +25,7 @@ import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.modules.task.ClickGui;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.config.StringFormat;
-import me.matl114.hacks.utils.gui.CustomGuiConfig;
+import me.matl114.hacks.utils.widgets.CustomGuiConfig;
 import me.matl114.managers.*;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.IHotKey;
@@ -40,7 +40,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.MustBeInvokedByOverriders;
 import org.jetbrains.annotations.Nullable;
-import me.matl114.gui.complex.BoxElement;
+import me.matl114.gui.elements.BoxElement;
 import me.matl114.gui.elements.ColorBoxElement;
 import me.matl114.utils.config.ValueAccessor;
 

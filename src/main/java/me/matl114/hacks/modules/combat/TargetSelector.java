@@ -52,6 +52,8 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.PlayerTeam;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.WorldUtils;
 
 public class TargetSelector extends BaseModule implements RayCastCalculator<Entity> {
     public static TargetSelector INSTANCE;

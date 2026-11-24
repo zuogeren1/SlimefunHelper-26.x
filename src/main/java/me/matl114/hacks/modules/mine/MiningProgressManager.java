@@ -20,7 +20,7 @@ import net.minecraft.world.level.Level;
 import java.util.Comparator;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.move.PlayerStateManager;
-import me.matl114.utils.WorldUtils;
+import me.matl114.hacks.utils.WorldUtils;
 import me.matl114.utils.inventory.ItemStackSample;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;

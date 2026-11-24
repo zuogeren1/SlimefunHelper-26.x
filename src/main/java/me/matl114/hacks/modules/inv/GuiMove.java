@@ -1,7 +1,7 @@
 package me.matl114.hacks.modules.inv;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import me.matl114.events.Event;
 import me.matl114.events.Listener;

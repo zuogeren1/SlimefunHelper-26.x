@@ -2,7 +2,7 @@ package me.matl114.utils;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import me.matl114.utils.structures.DefaultWorldgenRegistryManager;
+import me.matl114.utils.worldgen.DefaultWorldgenRegistryManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.component.DataComponentInitializers;
 import net.minecraft.core.registries.BuiltInRegistries;

@@ -22,7 +22,7 @@ import me.matl114.managers.Tasks;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.*;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import me.matl114.utils.Debug;
 import me.matl114.utils.ScreenUtils;
 import me.matl114.utils.collections.Point;

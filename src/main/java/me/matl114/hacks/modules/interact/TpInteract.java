@@ -33,6 +33,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class TpInteract extends BaseModule {
     public final ModulePath tpInteract = makePath(Configs.INTERACT_CONFIG, "tp-interact");

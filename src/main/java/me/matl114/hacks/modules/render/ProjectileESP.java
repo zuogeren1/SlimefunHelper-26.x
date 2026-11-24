@@ -18,7 +18,7 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.utils.*;
-import me.matl114.utils.containers.MetaData;
+import me.matl114.utils.collections.MetaData;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -45,6 +45,8 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2d;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class ProjectileESP extends BaseModule {
     private static final double MAX_PROJECTILE_DISTANCE_SQUARED = 256.0 * 256.0;

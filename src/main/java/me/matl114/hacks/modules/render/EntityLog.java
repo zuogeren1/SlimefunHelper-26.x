@@ -46,6 +46,7 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class EntityLog extends BaseModule {
     public final ModulePath entityLog = makePath(Configs.RENDER_CONFIG, "detect-entity.entity-log");

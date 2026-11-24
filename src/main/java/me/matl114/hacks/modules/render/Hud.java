@@ -18,6 +18,7 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.CommonUtils;
 
 public class Hud extends IRender2DColoredModule {
     public final ModulePath hudRoot = makePath(Configs.RENDER_CONFIG, "in-game-hud");

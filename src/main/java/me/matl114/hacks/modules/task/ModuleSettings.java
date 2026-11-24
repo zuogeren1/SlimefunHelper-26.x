@@ -3,7 +3,7 @@ package me.matl114.hacks.modules.task;
 import java.util.List;
 import me.matl114.accessors.events.ChatHudAccess;
 import me.matl114.accessors.gui.TextFieldAccess;
-import me.matl114.hacks.utils.gui.ClassicClickGuiScreen;
+import me.matl114.hacks.utils.clickgui.ClassicClickGuiScreen;
 import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.DrawableWidget;
@@ -13,7 +13,7 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.StringFormat;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import me.matl114.utils.Debug;
 import net.minecraft.network.chat.Component;
 

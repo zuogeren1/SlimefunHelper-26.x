@@ -21,7 +21,7 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.CollisionUtil;
-import me.matl114.utils.InteractUtils;
+import me.matl114.hacks.utils.InteractUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.collections.FlagEntry;
 import me.matl114.utils.collections.IndexEntry;

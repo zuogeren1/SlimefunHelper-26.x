@@ -23,7 +23,7 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.utils.RenderUtils;
+import me.matl114.hacks.utils.RenderUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;

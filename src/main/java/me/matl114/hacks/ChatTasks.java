@@ -1,6 +1,6 @@
 package me.matl114.hacks;
 
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.google.common.base.Predicates;
 import com.mojang.brigadier.tree.CommandNode;
@@ -17,7 +17,7 @@ import me.matl114.managers.command.MainCommand;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.EventContainer;
-import me.matl114.gui.complex.invcache.InventoryViewScreen;
+import me.matl114.hacks.utils.gui.InventoryViewScreen;
 import me.matl114.hacks.api.*;
 import me.matl114.hacks.modules.HackModules;
 import me.matl114.hacks.modules.chat.*;
@@ -60,6 +60,8 @@ import net.minecraft.world.scores.PlayerTeam;
 import org.apache.commons.lang3.mutable.MutableInt;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.CommonUtils;
+import me.matl114.hacks.utils.WorldUtils;
 
 public class ChatTasks {
     private static final int CALLBACK_SESSION_TTL_TICKS = 1200;

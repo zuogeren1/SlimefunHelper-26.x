@@ -1,7 +1,7 @@
 package me.matl114.hacks.modules.extra;
 
 import me.matl114.renderer.TextRenderers;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.google.gson.*;
 import com.mojang.blaze3d.platform.NativeImage;
@@ -20,7 +20,7 @@ import me.matl114.events.Listener;
 import me.matl114.gui.GenericScreen;
 import me.matl114.gui.McWidgetHelpers;
 import me.matl114.gui.basic.*;
-import me.matl114.gui.complex.RawTextElement;
+import me.matl114.gui.elements.RawTextElement;
 import me.matl114.gui.complex.config.KeyValueInputWidget;
 import me.matl114.gui.complex.config.ListModifyWidget;
 import me.matl114.gui.elements.ButtonElement;

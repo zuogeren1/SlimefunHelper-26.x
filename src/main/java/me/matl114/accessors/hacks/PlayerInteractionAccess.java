@@ -1,7 +1,7 @@
 package me.matl114.accessors.hacks;
 
 import javax.annotation.Nullable;
-import me.matl114.utils.WorldUtils;
+import me.matl114.hacks.utils.WorldUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.core.BlockPos;

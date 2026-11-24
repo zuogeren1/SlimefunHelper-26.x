@@ -33,7 +33,7 @@ import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.collections.FlagEntry;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.player.LocalPlayer;
@@ -57,6 +57,9 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import me.matl114.hacks.utils.InteractUtils;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class Interact extends BaseModule {
     public static Interact INSTANCE;

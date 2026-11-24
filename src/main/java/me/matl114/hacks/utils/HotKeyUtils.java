@@ -1,6 +1,5 @@
 package me.matl114.hacks.utils;
 
-import me.matl114.utils.ClientUtils;
 
 import java.util.function.BooleanSupplier;
 import me.matl114.hacks.modules.task.ModuleSettings;

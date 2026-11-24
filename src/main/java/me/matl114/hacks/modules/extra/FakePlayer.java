@@ -57,6 +57,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.stream.Streams;
+import me.matl114.hacks.utils.DamageUtils;
+import me.matl114.hacks.utils.ExplosionUtils;
 
 public class FakePlayer extends BaseModule {
     public FakePlayer() {

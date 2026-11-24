@@ -3,7 +3,7 @@ package me.matl114.hacks.modules.chat;
 import java.util.function.Consumer;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.gui.interfaces.ElementFactory;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 
 import com.google.common.hash.Hashing;
 import java.math.BigInteger;

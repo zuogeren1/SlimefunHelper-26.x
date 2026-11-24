@@ -9,7 +9,7 @@ import me.matl114.gui.presets.index.IndexedScreen;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.config.Config;
 import me.matl114.managers.config.StringRef;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 

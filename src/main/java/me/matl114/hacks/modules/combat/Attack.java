@@ -37,7 +37,7 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.collections.IndexEntry;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import me.matl114.utils.render.RenderCollector;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.ChatFormatting;
@@ -72,6 +72,11 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.AttributeUtils;
+import me.matl114.hacks.utils.ClientUtils;
+import me.matl114.hacks.utils.DamageUtils;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.RenderUtils;
 
 public class Attack extends BaseModule {
     public static Attack INSTANCE;

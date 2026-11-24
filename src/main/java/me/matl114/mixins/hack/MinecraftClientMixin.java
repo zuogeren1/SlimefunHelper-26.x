@@ -13,7 +13,7 @@ import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.render.RenderExtra;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.KeyMapping;

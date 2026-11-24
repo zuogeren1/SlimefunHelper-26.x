@@ -21,7 +21,7 @@ import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.Debug;
-import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.hacks.utils.PlayerInputUtils;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
 import net.minecraft.network.protocol.common.ClientboundPingPacket;

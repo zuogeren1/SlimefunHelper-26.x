@@ -22,7 +22,7 @@ import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.config.WidgetPos;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
-import me.matl114.utils.ClientUtils;
+import me.matl114.hacks.utils.ClientUtils;
 import me.matl114.utils.ColorUtils;
 import me.matl114.utils.inventory.ItemStackSample;
 import me.matl114.versioned.api.VDrawContext;

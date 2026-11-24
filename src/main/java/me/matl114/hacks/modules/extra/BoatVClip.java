@@ -15,7 +15,7 @@ import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.CollisionUtil;
 import me.matl114.hacks.utils.EntityUtils;
-import me.matl114.utils.InteractUtils;
+import me.matl114.hacks.utils.InteractUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.world.entity.Entity;
@@ -25,6 +25,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.NetworkUtils;
 
 public class BoatVClip extends BaseModule implements LegalMovementManager.MovementModifier {
     private static LegalMovementManager.DelegateMovementModifier instance;

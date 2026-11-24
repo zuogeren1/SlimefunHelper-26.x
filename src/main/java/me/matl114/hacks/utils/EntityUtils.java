@@ -6,7 +6,6 @@ import java.util.stream.Stream;
 import javax.annotation.Nullable;
 import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.utils.ItemStackUtils;
-import me.matl114.utils.entity.PlayerInputUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.*;
