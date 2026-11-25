@@ -167,11 +167,6 @@ public class RotationManager extends BaseModule implements LegalMovementManager.
         LegalMovementManager manager = event.context();
         LocalPlayer player = manager.playerStatus.entity;
 
-        if (ElytraExtra.INSTANCE != null && ElytraExtra.INSTANCE.hasFireworkVelocityOverrides()) {
-            clearRequests();
-            return;
-        }
-
         Vec3 pos = player.position();
         List<RotationRequest> accepted = new ArrayList<>();
         Rotation expected = combineRotations(currentTickRequests, pos, player, accepted);

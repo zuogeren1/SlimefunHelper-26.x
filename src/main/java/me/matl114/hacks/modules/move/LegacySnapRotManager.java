@@ -4,42 +4,77 @@ import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.access.PlayerMoveC2SPacketAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
-import me.matl114.hooks.ViaFabricPlusHooks;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.entity.LegalMovementManager;
+import me.matl114.hacks.utils.move.Rotation;
+import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.versioned.api.VPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
-import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 
-public class LegacySnapRotManager extends BaseModule {
+public class LegacySnapRotManager extends BaseModule implements LegalMovementManager.MovementModifier {
     public static LegacySnapRotManager INSTANCE;
 
     public LegacySnapRotManager() {
         super("LegacySnapRotManager");
         INSTANCE = this;
+        MovementManager.registerMovementPipeline(this);
+    }
+
+    @Override
+    public int priority() {
+        return Integer.MAX_VALUE;
     }
 
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getEntityPreTickListener().getChannel(EntityTypes.PLAYER), this::onPrePlayerTick);
-        registerListener(Listener.getPacketPoint().getChannel(ServerboundUseItemPacket.class), this::onInteractItem);
         registerListener(
                 Listener.getPacketPoint().getChannel(ServerboundMovePlayerPacket.class),
                 this::onSendPlayerPosRotPacket,
                 Integer.MIN_VALUE);
     }
 
-    Vec2 lastSnapPitchYaw;
+    public void requestPostRotate(float pitch, float yaw) {
+        postPitchYaw = new Rotation(pitch, yaw);
+    }
 
-    public void onPrePlayerTick(Event<Player> eventPre) {
-        if (mc.player != null && eventPre.context == mc.player) {
-            resyncSnap();
+    public void requestPostRotateYaw(float yaw) {
+        postPitchYaw = postPitchYaw.withYaw(yaw);
+    }
+
+    public void requestPostRotatePitch(float pitch) {
+        postPitchYaw = postPitchYaw.withPitch(pitch);
+    }
+
+    Vec2 lastSnapPitchYaw;
+    Rotation postPitchYaw = Rotation.EMPTY;
+
+    @Override
+    public void applyBeforeMovementPacketModify(Event<LegalMovementManager> movementManagerEvent) {
+        resyncSnap();
+    }
+
+    @Override
+    public void applyBeforeInputPacketModify(Event<LegalMovementManager> movementManagerEvent) {
+        resyncSnap();
+    }
+
+    @Override
+    public boolean postTick(Event<LegalMovementManager> movementManagerEvent, boolean enabledThisTick) {
+        if (postPitchYaw.hasRotate()) {
+            Vec2 rotate = postPitchYaw.toPitchYaw();
+            if (rotate != null) {
+                InteractionTasks.interactItem(InteractionHand.OFF_HAND, rotate.x, rotate.y, false, false);
+            }
         }
+        postPitchYaw = Rotation.EMPTY;
+        return true;
     }
 
     public boolean betweenViaPacket;
@@ -54,22 +89,6 @@ public class LegacySnapRotManager extends BaseModule {
         // reset snap packets because there are other rot packets
         if (event.context.hasRotation()) {
             lastSnapPitchYaw = null;
-        }
-    }
-
-    public void onInteractItem(Event<ServerboundUseItemPacket> eventInteract) {
-        if (false && lastSnapPitchYaw != null) {
-            //#if MC >= 260300
-            //$$ float pitch = eventInteract.context.xRot();
-            //$$ float yaw = eventInteract.context.yRot();
-            //#else
-            float pitch = eventInteract.context.getXRot();
-            float yaw = eventInteract.context.getYRot();
-            //#endif
-            if (EntityUtils.isRotationDifferent(lastSnapPitchYaw.x, pitch, lastSnapPitchYaw.y, yaw)
-                    && PlayerStateManager.INSTANCE.isRotationDifferent(pitch, yaw)) {
-                snapAt(pitch, yaw, false);
-            }
         }
     }
 
@@ -136,8 +155,8 @@ public class LegacySnapRotManager extends BaseModule {
                 full.getX(PlayerStateManager.INSTANCE.lastX),
                 full.getY(PlayerStateManager.INSTANCE.lastY),
                 full.getZ(PlayerStateManager.INSTANCE.lastZ),
-                PlayerStateManager.INSTANCE.lastYaw,
-                PlayerStateManager.INSTANCE.lastPitch,
+                full.getYRot(PlayerStateManager.INSTANCE.lastYaw),
+                full.getXRot(PlayerStateManager.INSTANCE.lastPitch),
                 full.isOnGround(),
                 VPacket.getCollisionFlag(full));
         PlayerMoveC2SPacketAccess.of(pkt).setCause(PlayerMoveC2SPacketAccess.Cause.LEGACY_SNAP);
