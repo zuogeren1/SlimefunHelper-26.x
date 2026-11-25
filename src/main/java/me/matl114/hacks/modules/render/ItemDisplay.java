@@ -25,6 +25,7 @@ import me.matl114.managers.config.EnumRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.plugins.internal.MainPlugin;
 import me.matl114.utils.ItemStackUtils;
+import me.matl114.utils.RegistryUtils;
 import me.matl114.utils.ResourceUtils;
 import me.matl114.utils.inventory.ItemStackSample;
 import me.matl114.versioned.api.VItem;
@@ -156,7 +157,7 @@ public class ItemDisplay extends BaseModule {
         if (map == null) {
             map = new HashMap<>();
             for (EntityType<?> types : BuiltInRegistries.ENTITY_TYPE) {
-                Item optionalEgg = EntityUtils.entityToSpawnEgg(types);
+                Item optionalEgg = RegistryUtils.entityToSpawnEgg(types);
                 if (optionalEgg != null && optionalEgg != Items.AIR) {
                     map.put(types, NewStyleModel.ofNewVersion(new ItemStack(optionalEgg)));
                 }

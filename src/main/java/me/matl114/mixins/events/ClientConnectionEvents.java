@@ -120,6 +120,10 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
                             shift = At.Shift.BEFORE),
             cancellable = true)
     private void onChannelException(ChannelHandlerContext context, Throwable ex, CallbackInfo ci) {
+        // do not handle serverbound packet
+        if (this.receiving == PacketFlow.SERVERBOUND) {
+            return;
+        }
         if (ex instanceof DecoderException decodeExp && decodeExp.getMessage().contains("Failed to decode packet")) {
             if (!Listener.handleException(
                     ex, Listener.ExceptionType.PACKET_DECODE_EXCEPTION, this.packetListener, this)) {
@@ -268,6 +272,10 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
             boolean local,
             BandwidthDebugMonitor packetSizeLogger,
             CallbackInfo ci) {
+        // do not handle serverbound packet
+        if (side == PacketFlow.SERVERBOUND) {
+            return;
+        }
         Listener.getConnectionChannelInitialize().broadcast(pipeline, side, local);
     }
 

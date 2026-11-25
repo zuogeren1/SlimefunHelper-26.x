@@ -1,6 +1,5 @@
 package me.matl114.mixins.hack;
 
-import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import me.matl114.accessors.access.LivingEntityAccess;
 import me.matl114.accessors.hacks.EntityInternalAccess;
 import me.matl114.accessors.hacks.PlayerInternalAccess;
@@ -27,18 +26,6 @@ public abstract class PlayerEntityMixin extends LivingEntity
         implements LivingEntityAccess<Player>, EntityInternalAccess<Player>, PlayerInternalAccess {
     protected PlayerEntityMixin(EntityType<? extends LivingEntity> entityType, Level world) {
         super(entityType, world);
-    }
-
-    @ModifyExpressionValue(
-            method = "getDestroySpeed",
-            at =
-                    @At(
-                            value = "INVOKE",
-                            target =
-                                    "Lnet/minecraft/world/entity/player/Player;getAttributeValue(Lnet/minecraft/core/Holder;)D",
-                            ordinal = 1))
-    private double onBlockBreakingSpeedAttrWrongValueFix(double original) {
-        return original < 1E-5 ? 1.0F : original;
     }
 
     @Unique

@@ -20,7 +20,6 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.ApiStatus;
 import org.joml.Matrix3d;
 import org.joml.Vector3d;
-import me.matl114.hacks.utils.EntityUtils;
 
 public class MathUtils {
 
@@ -187,8 +186,13 @@ public class MathUtils {
             .sorted(Comparator.comparingInt(Direction::get2DDataValue))
             .toArray(Direction[]::new);
 
+    public static float rotationToYaw(Vec3 vec) {
+        vec = vec.normalize();
+        return (float) Math.toDegrees(Math.atan2(-vec.x, vec.z));
+    }
+
     public static Direction getHorizontalFacing(Vec3 vec3d) {
-        float yaw = EntityUtils.rotationToYaw(vec3d.normalize());
+        float yaw = rotationToYaw(vec3d.normalize());
         return Direction.fromYRot(yaw);
     }
 

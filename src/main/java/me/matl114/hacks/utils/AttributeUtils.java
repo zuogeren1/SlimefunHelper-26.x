@@ -22,6 +22,7 @@ import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import me.matl114.utils.ItemStackUtils;
+import me.matl114.utils.RegistryUtils;
 
 public class AttributeUtils {
     public static double getPlayerBlockInteractionRange(Player player) {
@@ -99,7 +100,10 @@ public class AttributeUtils {
 
     private static int getEquipmentLevel(
             ResourceKey<Enchantment> enchantment, Map<EquipmentSlot, ItemStack> equipmentOverrides) {
-        var entry = ItemStackUtils.registry().getOrThrow(enchantment);
+        var entry = RegistryUtils.getRegistryEntry(ItemStackUtils.registry(), enchantment);
+        if (entry == null) {
+            return 0;
+        }
         int i = 0;
         var var4 = equipmentOverrides.entrySet().iterator();
 

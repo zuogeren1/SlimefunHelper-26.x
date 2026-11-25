@@ -224,6 +224,14 @@ public class InteractUtils {
         return placement.getClickedPos();
     }
 
+    @Nullable
+    public static BlockPos getCurrentPlacePos(BlockItem blockItem, Player player, BlockHitResult blockHitResult) {
+        BlockPlaceContext placement =
+                new BlockPlaceContext(player, InteractionHand.MAIN_HAND, new ItemStack(blockItem), blockHitResult);
+        placement = blockItem.updatePlacementContext(placement);
+        return placement == null ? null : placement.getClickedPos();
+    }
+
     public static boolean canCubePlace(Player player, BlockHitResult state) {
         BlockPos pos = getCurrentPlacePos(player, state);
         return canCubePlace(player, pos);

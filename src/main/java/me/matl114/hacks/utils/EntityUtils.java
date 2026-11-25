@@ -32,7 +32,6 @@ import net.minecraft.world.item.FishingRodItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ProjectileWeaponItem;
-import net.minecraft.world.item.SpawnEggItem;
 import net.minecraft.world.item.ThrowablePotionItem;
 import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.item.component.TypedEntityData;
@@ -43,8 +42,6 @@ import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2d;
-import org.spongepowered.include.com.google.common.collect.BiMap;
-import org.spongepowered.include.com.google.common.collect.HashBiMap;
 
 public class EntityUtils {
     private static final Minecraft mc = Minecraft.getInstance();
@@ -112,31 +109,6 @@ public class EntityUtils {
         }
         // Debug.info("Using whitelist",set);
 
-    }
-
-    // 26.2: 建表过程要 new ItemStack，必须在组件绑定之后，改为首次访问时构建
-    private static BiMap<Item, EntityType<?>> ITEM2SPAWN_ENTITY = null;
-
-    private static BiMap<Item, EntityType<?>> spawnEggMap() {
-        BiMap<Item, EntityType<?>> map = ITEM2SPAWN_ENTITY;
-        if (map == null) {
-            map = HashBiMap.create();
-            for (Item item : BuiltInRegistries.ITEM) {
-                if (item instanceof SpawnEggItem egg) {
-                    map.put(item, egg.getType(new ItemStack(item)));
-                }
-            }
-            ITEM2SPAWN_ENTITY = map;
-        }
-        return map;
-    }
-
-    public static EntityType<?> spawnEggToEntity(Item spawner) {
-        return spawnEggMap().getOrDefault(spawner, null);
-    }
-
-    public static Item entityToSpawnEgg(EntityType<?> entityType) {
-        return spawnEggMap().inverse().getOrDefault(entityType, null);
     }
 
     public static EntityType<?> getStoredEntityType(ItemStack stack) {

@@ -16,15 +16,20 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.SpawnEggItem;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import org.spongepowered.include.com.google.common.collect.BiMap;
+import org.spongepowered.include.com.google.common.collect.HashBiMap;
 
 public class RegistryUtils {
     public static <T> Set<T> parseWhiteList(Registry<T> registry, Pattern regex) {
@@ -156,5 +161,30 @@ public class RegistryUtils {
         REGISTRY_KEY_TO_ICON = ImmutableMap.copyOf(clazzMap);
         ICON_TO_REGISTRY_KEY = new HashMap<>(REGISTRY_KEY_TO_ICON.entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey, (k, v) -> v)));
+    }
+
+    // 26.2: 建表过程要 new ItemStack，必须在组件绑定之后，改为首次访问时构建
+    private static BiMap<Item, EntityType<?>> ITEM2SPAWN_ENTITY = null;
+
+    private static BiMap<Item, EntityType<?>> spawnEggMap() {
+        BiMap<Item, EntityType<?>> map = ITEM2SPAWN_ENTITY;
+        if (map == null) {
+            map = HashBiMap.create();
+            for (Item item : BuiltInRegistries.ITEM) {
+                if (item instanceof SpawnEggItem egg) {
+                    map.put(item, egg.getType(new ItemStack(item)));
+                }
+            }
+            ITEM2SPAWN_ENTITY = map;
+        }
+        return map;
+    }
+
+    public static EntityType<?> spawnEggToEntity(Item spawner) {
+        return spawnEggMap().getOrDefault(spawner, null);
+    }
+
+    public static Item entityToSpawnEgg(EntityType<?> entityType) {
+        return spawnEggMap().inverse().getOrDefault(entityType, null);
     }
 }

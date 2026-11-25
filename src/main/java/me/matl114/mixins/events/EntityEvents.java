@@ -2,17 +2,22 @@ package me.matl114.mixins.events;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import me.matl114.accessors.events.EntityAccess;
+import me.matl114.accessors.events.TrackedPositionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.VecDeltaCodec;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -23,6 +28,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Environment(EnvType.CLIENT)
 @Mixin(Entity.class)
 public abstract class EntityEvents<T extends Entity> implements EntityAccess<T> {
+    @Shadow
+    @Final
+    private VecDeltaCodec packetPositionCodec;
+
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void trackedPositionMarkOwner(EntityType<?> type, Level world, CallbackInfo ci) {
+        ((TrackedPositionAccess) this.packetPositionCodec).setOwner((Entity) (Object) this);
+    }
+
     @ModifyExpressionValue(
             method = "moveRelative",
             at =
@@ -64,15 +78,12 @@ public abstract class EntityEvents<T extends Entity> implements EntityAccess<T> 
         return getSharedFlag(index);
     }
 
-    @Inject(method = "tick", at = @At("HEAD"))
-    public void onEntityTickUpdate(CallbackInfo ci) {
-        Entity entity = (Entity) (Object) (this);
-        Listener.getEntityMidTickListener().broadcast(entity);
-    }
-
     @Inject(method = "setRemoved", at = @At("RETURN"))
     public void onEntityRemoved(Entity.RemovalReason reason, CallbackInfo ci) {
-        Listener.getEntityRemoveListener().broadcast((Entity) (Object) this, reason);
+        // 本 mixin 不继承 Entity，取 level() 只能经 (Entity) (Object) this 转换
+        if (((Entity) (Object) this).level().isClientSide()) {
+            Listener.getEntityRemoveListener().broadcast((Entity) (Object) this, reason);
+        }
     }
 
     // TODO(26.2): 流体推动速度事件暂未适配。

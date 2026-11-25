@@ -634,11 +634,6 @@ public class Listener {
 
     @Getter
     @Broadcast
-    private static final EventChannelDispatcher<Entity> entityMidTickListener =
-            new EventChannelDispatcher<>(Entity::getType);
-
-    @Getter
-    @Broadcast
     private static final EventChannelDispatcher<Entity> entityPostTickListener =
             new EventChannelDispatcher<>(Entity::getType);
 
