@@ -242,7 +242,7 @@ public class MineExtra extends BaseModule {
         BlockState calculatingState =
                 (currentState.isAir() || currentState.liquid()) ? Blocks.OBSIDIAN.defaultBlockState() : currentState;
         double defaultSpeed = WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
-                mc.player, calculatingState, defaultEntry.val());
+                mc.player, calculatingState, defaultEntry.val(), false);
         // only select speed > handItem, in the case that player holding a low dur tool
         IndexEntry<ItemStack> result = InventoryUtils.findBestPlayerItem(
                 item -> {
@@ -251,7 +251,7 @@ public class MineExtra extends BaseModule {
                             || item.has(DataComponents.UNBREAKABLE)
                             || item.getDamageValue() < item.getMaxDamage() - 10) {
                         double speed = WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
-                                mc.player, calculatingState, item);
+                                mc.player, calculatingState, item, false);
                         if (speed >= defaultSpeed) {
                             return speed;
                         } else {
@@ -578,7 +578,7 @@ public class MineExtra extends BaseModule {
         // do not mine air, shit
         if (state.getBlock().defaultDestroyTime() >= 0.0F && !state.liquid() && !state.isAir()) {
             var access = PlayerInteractionAccess.of(mc.gameMode);
-            var speed = access.predictFailMiningProgressWithTool(tool, 0);
+            var speed = access.predictFailMiningProgressWithTool(tool, false);
             if (groundDeceive && !mc.player.onGround()) {
                 speed *= 5;
             }
@@ -962,7 +962,7 @@ public class MineExtra extends BaseModule {
                                                                 mc.level.getBlockState(doubleMinePos),
                                                                 GhostHandMode.INV_SWAP)
                                                         .val(),
-                                                0);
+                                                false);
                             } else {
                                 progressFail = PlayerInteractionAccess.of(mc.gameMode)
                                         .getFailBreakMiningProgress();
@@ -1007,7 +1007,8 @@ public class MineExtra extends BaseModule {
         if (mc.player.isCreative()) return 10000.0F;
         BlockState state = mc.level.getBlockState(pos);
         IndexEntry<ItemStack> stackEntry = getGhostHandMiningTool(state);
-        float speed1 = WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(mc.player, state, stackEntry.val());
+        float speed1 =
+                WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(mc.player, state, stackEntry.val(), false);
         return WorldUtils.calcBlockBreakingDelta(state, Minecraft.getInstance().level, pos, speed1);
     }
 

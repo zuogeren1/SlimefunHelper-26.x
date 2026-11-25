@@ -4,6 +4,7 @@ import com.google.common.util.concurrent.Runnables;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import me.matl114.accessors.access.HitResultAccess;
+import me.matl114.accessors.access.PendingUpdateManagerAccess;
 import me.matl114.accessors.access.PlayerInteractBlockC2SPacketAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -193,13 +194,23 @@ public class BlockRotate extends BaseModule {
                                 e.context.getHitResult().getBlockPos(), playerLookAt);
                                 //#endif
                     } else if (paccess.getUseContext().isAccepted()) {
-                        BlockState oldState = paccess.getUseContext().oldState();
                         //#if MC >= 260300
                         //$$ BlockPos interactState = e.context.hitResult().getBlockPos();
                         //#else
                         BlockPos interactState = e.context.getHitResult().getBlockPos();
                         //#endif
                         BlockState newState = mc.level.getBlockState(interactState);
+                        //#if MC >= 260300
+                        //$$ BlockState oldState =
+                        //$$         PendingUpdateManagerAccess.of(mc.level.getBlockStatePredictionHandler())
+                        //$$                 .getPendingBlockState(e.context.sequence(), interactState)
+                        //$$                 .orElse(newState);
+                        //#else
+                        BlockState oldState =
+                                PendingUpdateManagerAccess.of(mc.level.getBlockStatePredictionHandler())
+                                        .getPendingBlockState(e.context.getSequence(), interactState)
+                                        .orElse(newState);
+                        //#endif
                         if (oldState != newState) {
                             // handle yaw fix
                             handleInteractCorrectLitematica(interactState, newState, yawDeceive, playerLookAt);
@@ -275,11 +286,7 @@ public class BlockRotate extends BaseModule {
             BlockHitResult packetHitResult = packet.getHitResult();
             //#endif
             BlockState litematicaState;
-            //#if MC >= 260300
-            //$$ BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.hand(), packetHitResult);
-            //#else
-            BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.getHand(), packetHitResult);
-            //#endif
+            BlockPos modifyingBlockPos = useContext.placePos().orElseThrow();
             TemporarySchematic schematic = tempSchematics.remove(modifyingBlockPos);
             if (schematic == null || schematic.expire()) {
                 return;
@@ -323,11 +330,7 @@ public class BlockRotate extends BaseModule {
             BlockState litematicaState;
             Level litematicaWorld = LitematicaHooks.getInstance().getSchematicWorld();
 
-            //#if MC >= 260300
-            //$$ BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.hand(), packetHitResult);
-            //#else
-            BlockPos modifyingBlockPos = useContext.getPlaceBlockPos(packet.getHand(), packetHitResult);
-            //#endif
+            BlockPos modifyingBlockPos = useContext.placePos().orElseThrow();
             if (!LitematicaHooks.getInstance().isPositionWithinRange(modifyingBlockPos)) return;
 
             litematicaState = litematicaWorld.getBlockState(modifyingBlockPos);
@@ -336,7 +339,7 @@ public class BlockRotate extends BaseModule {
                     modifyingBlockPos,
                     litematicaState,
                     packet,
-                    useContext.oldState().isAir());
+                    useContext.placePos().isEmpty());
             if (newPacketHitResult != null) {
                 // wrong state, need correct
                 packetHitResult = newPacketHitResult;

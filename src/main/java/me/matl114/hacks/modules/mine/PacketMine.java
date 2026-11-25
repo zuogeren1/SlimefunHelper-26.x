@@ -352,7 +352,8 @@ public class PacketMine extends BaseModule {
             var re = InventoryUtils.findBestPlayerItem(
                     item -> {
                         return (double)
-                                WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(mc.player, calS, item);
+                                WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
+                                        mc.player, calS, item, false);
                     },
                     ghostHand.get().getSearchSize(false),
                     true,

@@ -142,7 +142,6 @@ public abstract class ClientPlayerInteractionManagerEvents {
             @Local(argsOnly = true) BlockHitResult hitResult,
             @Local MutableObject<InteractionResult> actionResult) {
         ItemStack stackCopy = minecraft.player.getItemInHand(hand).copy();
-        BlockState state = minecraft.level.getBlockState(hitResult.getBlockPos());
         MutableBoolean placeBlock = new MutableBoolean(false);
         // 床/告示牌/脚手架这类物品会在放置时改写落点，预测位置要跟 BlockItem 的修正走，否则坐标取错。
         BlockPlaceContext placeContext = new BlockPlaceContext(minecraft.player, hand, stackCopy, hitResult);
@@ -153,7 +152,6 @@ public abstract class ClientPlayerInteractionManagerEvents {
             }
         }
         BlockPos predictingPlace = placeContext.getClickedPos();
-        BlockState oldPlaceState = world.getBlockState(predictingPlace);
         original.call(instance, world, (PredictiveAction) (seq) -> {
             lastInteractCaptureBlockPlace.addLast(placeBlock);
             try {
@@ -161,10 +159,12 @@ public abstract class ClientPlayerInteractionManagerEvents {
                 if (packet instanceof PlayerInteractBlockC2SPacketAccess access) {
                     access.setUseContext(new PlayerInteractBlockC2SPacketAccess.UseContext(
                             stackCopy,
-                            state,
                             actionResult.getValue(),
-                            placeBlock.booleanValue() ? Optional.of(predictingPlace) : Optional.empty(),
-                            oldPlaceState));
+                            placeBlock.booleanValue()
+                                            && actionResult.getValue().consumesAction()
+                                            && stackCopy.getItem() instanceof BlockItem
+                                    ? Optional.of(predictingPlace)
+                                    : Optional.empty()));
                 }
                 return packet;
             } finally {

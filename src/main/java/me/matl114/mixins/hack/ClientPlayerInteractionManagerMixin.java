@@ -408,7 +408,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
                                     minecraft.level,
                                     pos,
                                     WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
-                                            minecraft.player, instance, bestTool.val()))
+                                            minecraft.player, instance, bestTool.val(), false))
                             > 1.01) {
                 GhostHandMode preferred = MineExtra.INSTANCE.ghostHandPreferredMode.get();
                 GhostHandMode modeSelect =

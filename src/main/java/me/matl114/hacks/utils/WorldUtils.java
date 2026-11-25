@@ -8,6 +8,10 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import me.matl114.accessors.access.PendingUpdateManagerAccess;
+import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.task.ServerFeature;
+import me.matl114.utils.collections.IndexEntry;
 import me.matl114.versioned.api.VRecord;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -34,6 +38,7 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.NaturalSpawner;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.material.FluidState;
@@ -46,6 +51,99 @@ public class WorldUtils {
     private static final Minecraft mc = Minecraft.getInstance();
 
     public static final int UPDATE_BLOCK_NO_PHYSICS = 2 | 16 | 512;
+
+    // The action must not destroy or replace existing block entities.
+    public static Map<BlockPos, BlockState> predictSequencedAction(Runnable action) {
+        ClientLevel world = mc.level;
+        var manager = world.getBlockStatePredictionHandler();
+        PendingUpdateManagerAccess access = PendingUpdateManagerAccess.of(manager);
+        int previousSequence = manager.currentSequence();
+        boolean previousPendingSequence = manager.isPredicting();
+        Map<BlockPos, IndexEntry<BlockState>> originalPending = access.getPendingBlockStates(Integer.MIN_VALUE);
+        int sequence = manager.startPredicting().currentSequence();
+        manager.close();
+        Map<BlockPos, BlockState> predictedStates = new HashMap<>();
+        try {
+            action.run();
+        } finally {
+            try {
+                Map<BlockPos, IndexEntry<BlockState>> pendingStates = access.getPendingBlockStates(sequence);
+                for (var entry : pendingStates.entrySet()) {
+                    BlockPos pos = entry.getKey();
+                    BlockState previousState = entry.getValue().val();
+                    BlockState predictedState = world.getBlockState(pos);
+                    if (predictedState != previousState) {
+                        predictedStates.put(pos, predictedState);
+                        BlockEntity blockEntity = world.getBlockEntity(pos);
+                        restorePredictedBlock(world, pos, previousState, blockEntity);
+                    }
+                }
+            } finally {
+                try {
+                    access.restorePendingUpdate(sequence, originalPending);
+                } finally {
+                    access.restorePredictionSequence(previousSequence, previousPendingSequence);
+                }
+            }
+        }
+        return predictedStates;
+    }
+
+    public static Map<BlockPos, BlockState> predictActionAtSequence(int sequence, Runnable action) {
+        ClientLevel world = mc.level;
+        var manager = world.getBlockStatePredictionHandler();
+        PendingUpdateManagerAccess access = PendingUpdateManagerAccess.of(manager);
+        int currentSequence = manager.currentSequence();
+        boolean currentPendingSequence = manager.isPredicting();
+        Map<BlockPos, IndexEntry<BlockState>> beforePrediction = access.getPendingBlockStates(sequence);
+        Map<BlockPos, BlockEntity> currentBlockEntities = captureBlockEntities(world, beforePrediction.keySet());
+        Map<BlockPos, BlockState> currentStates = new HashMap<>();
+        try {
+            for (var entry : beforePrediction.entrySet()) {
+                BlockPos pos = entry.getKey();
+                currentStates.put(pos, world.getBlockState(pos));
+                world.setBlock(pos, entry.getValue().val(), UPDATE_BLOCK_NO_PHYSICS);
+            }
+            access.restorePendingUpdate(sequence, beforePrediction);
+            return predictSequencedAction(action);
+        } finally {
+            try {
+                for (var entry : currentStates.entrySet()) {
+                    restorePredictedBlock(
+                            world, entry.getKey(), entry.getValue(), currentBlockEntities.get(entry.getKey()));
+                }
+            } finally {
+                try {
+                    access.restorePendingUpdate(sequence, beforePrediction);
+                } finally {
+                    access.restorePredictionSequence(currentSequence, currentPendingSequence);
+                }
+            }
+        }
+    }
+
+    private static Map<BlockPos, BlockEntity> captureBlockEntities(ClientLevel world, Collection<BlockPos> positions) {
+        Map<BlockPos, BlockEntity> blockEntities = new HashMap<>();
+        for (BlockPos pos : positions) {
+            BlockEntity blockEntity = world.getBlockEntity(pos);
+            if (blockEntity != null) {
+                blockEntities.put(pos.immutable(), blockEntity);
+            }
+        }
+        return blockEntities;
+    }
+
+    private static void restorePredictedBlock(
+            ClientLevel world, BlockPos pos, BlockState state, BlockEntity blockEntity) {
+        world.setBlock(pos, state, UPDATE_BLOCK_NO_PHYSICS);
+        if (blockEntity != null
+                && blockEntity.isValidBlockState(state)
+                && world.getBlockState(pos) == state
+                && (blockEntity.isRemoved() || world.getBlockEntity(pos) != blockEntity)) {
+            world.removeBlockEntity(pos);
+            world.setBlockEntity(blockEntity);
+        }
+    }
 
     public static boolean areWorldEquals(ClientLevel world1, ClientLevel world2) {
         return world1 == world2
@@ -160,12 +258,14 @@ public class WorldUtils {
                 .orElse(null);
     }
 
+    /** Uses the attribute snapshot when attributeSwap is true, otherwise the supplied tool's attributes. */
     public static float getPlayerBlockBreakingSpeedWithCanMineMultiply(
-            Player player, BlockState state, ItemStack stack) {
+            Player player, BlockState state, ItemStack stack, boolean attributeSwap) {
         float f = stack.getDestroySpeed(state);
+        AttributeMap attributeContainer = attributeSwap
+                ? PlayerStateManager.INSTANCE.getOrCreatePlayerStatus(player).getAttribute()
+                : AttributeUtils.getAttributeWith(player, Map.of(EquipmentSlot.MAINHAND, stack));
         if (f > 1.0F) {
-            AttributeMap attributeContainer =
-                    AttributeUtils.getAttributeWith(player, Map.of(EquipmentSlot.MAINHAND, stack));
             f += attributeContainer.getValue(Attributes.MINING_EFFICIENCY);
         }
 
@@ -186,9 +286,9 @@ public class WorldUtils {
             f *= g;
         }
 
-        f *= (float) player.getAttributeValue(Attributes.BLOCK_BREAK_SPEED);
+        f *= (float) attributeContainer.getValue(Attributes.BLOCK_BREAK_SPEED);
         if (player.isEyeInFluid(FluidTags.WATER)) {
-            f *= (float) player.getAttribute(Attributes.SUBMERGED_MINING_SPEED).getValue();
+            f *= (float) attributeContainer.getValue(Attributes.SUBMERGED_MINING_SPEED);
         }
 
         if (!player.onGround()) {
@@ -204,8 +304,19 @@ public class WorldUtils {
 
     public static float calcBlockBreakingDelta(
             BlockState state, BlockGetter world, BlockPos pos, Player player, ItemStack tool) {
+        return calcBlockBreakingDelta(
+                state, world, pos, player, tool, ServerFeature.INSTANCE.attributeSwap.get());
+    }
 
-        var playerBreakSpeed = getPlayerBlockBreakingSpeedWithCanMineMultiply(player, state, tool);
+    public static float calcBlockBreakingDelta(
+            BlockState state,
+            BlockGetter world,
+            BlockPos pos,
+            Player player,
+            ItemStack tool,
+            boolean attributeSwap) {
+        var playerBreakSpeed =
+                getPlayerBlockBreakingSpeedWithCanMineMultiply(player, state, tool, attributeSwap);
         return calcBlockBreakingDelta(state, world, pos, playerBreakSpeed);
     }
 

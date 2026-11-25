@@ -550,7 +550,7 @@ public class AutoMine extends BaseModule {
                             stack -> {
                                 if (isDurabilityOk(stack)) {
                                     return (double) WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
-                                            mc.player, mineState, stack);
+                                            mc.player, mineState, stack, false);
                                 }
                                 return null;
                             },

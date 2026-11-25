@@ -1,6 +1,7 @@
 package me.matl114.accessors.hacks;
 
 import javax.annotation.Nullable;
+import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.hacks.utils.WorldUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
@@ -108,16 +109,23 @@ public interface PlayerInteractionAccess {
         return predictCurrentMiningProgressWithTool(tool, 0);
     }
 
-    default float predictCurrentMiningProgressWithTool(ItemStack tool, int extraTicks) {
+    default float predictCurrentMiningProgressWithTool(ItemStack tool, int startTick) {
+        return predictCurrentMiningProgressWithTool(tool, startTick, ServerFeature.INSTANCE.attributeSwap.get());
+    }
+
+    default float predictCurrentMiningProgressWithTool(ItemStack tool, int extraTicks, boolean attributeSwap) {
         BlockPos currentBreakingPos = getCurrentMiningPos();
         BlockState block = Minecraft.getInstance().level.getBlockState(currentBreakingPos);
         if (block.isAir()) {
             return -1.0F;
         }
-        float miningSpeed =
-                WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(Minecraft.getInstance().player, block, tool);
         float speed = WorldUtils.calcBlockBreakingDelta(
-                block, Minecraft.getInstance().level, currentBreakingPos, miningSpeed);
+                block,
+                Minecraft.getInstance().level,
+                currentBreakingPos,
+                Minecraft.getInstance().player,
+                tool,
+                attributeSwap);
         int ticksSinceLastStart = getCurrentMiningTicks() + extraTicks;
         return speed * ticksSinceLastStart;
     }
@@ -130,11 +138,16 @@ public interface PlayerInteractionAccess {
      * 继续复用的一段服务端上下文”，其可信来源是 start tick 与当前方块速度。
      */
     default float getFailBreakMiningProgress() {
+        return getFailBreakMiningProgress(false);
+    }
+
+    default float getFailBreakMiningProgress(boolean nextTick) {
         BlockPos currentFailBreakPos = getCurrentFailBreakPos();
         if (currentFailBreakPos == null) {
             return -1.0F;
         }
-        return predictFailMiningProgressWithTool(Minecraft.getInstance().player.getMainHandItem(), 0);
+        return predictFailMiningProgressWithTool(
+                Minecraft.getInstance().player.getMainHandItem(), nextTick);
     }
 
     /**
@@ -142,17 +155,17 @@ public interface PlayerInteractionAccess {
      *
      * <p>主要用于切工具后的收益评估与策略决策，不会直接修改本地挖掘状态。
      */
-    default float predictFailMiningProgressWithTool(ItemStack tool, int extraTick) {
+    default float predictFailMiningProgressWithTool(ItemStack tool, boolean nextTick) {
         BlockPos currentBreakingPos = getCurrentFailBreakPos();
         BlockState block = Minecraft.getInstance().level.getBlockState(currentBreakingPos);
         if (block.isAir()) {
             return -1.0F;
         }
-        float miningSpeed =
-                WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(Minecraft.getInstance().player, block, tool);
+        float miningSpeed = WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
+                Minecraft.getInstance().player, block, tool, !nextTick);
         float speed = WorldUtils.calcBlockBreakingDelta(
                 block, Minecraft.getInstance().level, currentBreakingPos, miningSpeed);
-        int ticksSinceLastStart = getFailBreakMiningTicks() + extraTick;
+        int ticksSinceLastStart = getFailBreakMiningTicks() + (nextTick ? 1 : 0);
         return speed * ticksSinceLastStart;
     }
 

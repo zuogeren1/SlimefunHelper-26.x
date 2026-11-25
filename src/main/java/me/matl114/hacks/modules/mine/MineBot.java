@@ -298,7 +298,7 @@ public class MineBot extends BaseModule {
                 ? InventoryUtils.findBestPlayerItem(
                         item -> isDurabilityOk(item)
                                 ? (double) WorldUtils.getPlayerBlockBreakingSpeedWithCanMineMultiply(
-                                        mc.player, mineState, item)
+                                        mc.player, mineState, item, false)
                                 : null,
                         settings.ghostHand().getSearchSize(false),
                         true,

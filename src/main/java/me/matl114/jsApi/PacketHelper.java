@@ -138,10 +138,8 @@ public class PacketHelper {
                         mc.player
                                 .getItemInHand(offhand ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND)
                                 .copy(),
-                        mc.level.getBlockState(hitResult.getBlockPos()),
                         InteractionResult.SUCCESS,
-                        Optional.empty(),
-                        mc.level.getBlockState(hitResult.getBlockPos())));
+                        Optional.empty()));
             }
             return packet;
         });
