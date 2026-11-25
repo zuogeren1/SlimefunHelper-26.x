@@ -118,7 +118,7 @@ public class SpearEnhance extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreGameTick(), this::onPreTick);
-        registerListener(Listener.getPostGameTick(), this::updateKineticPlayerCollector);
+        registerListener(Listener.getPostTick(), this::updateKineticPlayerCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(RenderListener.getCustomModelOverride(), this::onReplaceSpearModel);
         registerListener(Listener.getClientPlayerPostSendMovementPoint(), this::onPostTick);
@@ -365,7 +365,9 @@ public class SpearEnhance extends BaseModule {
     }
 
     public boolean onPiercing(IntSupplier seq) {
-        if (VItem.getInstance().isSpear(mc.player.getItemInHand(InteractionHand.MAIN_HAND))
+        ItemStack stack = mc.player.getItemInHand(InteractionHand.MAIN_HAND);
+        if ((stack.has(DataComponents.PIERCING_WEAPON)
+                        || VItem.getInstance().isSpear(stack))
                 && ViaFabricPlusHooks.getInstance().isViaEnabled()) {
             if (SupportVersion.CURRENT.isHigherOrEqualTo(21, 6)) {
                 var wrapper = ViaFabricPlusHooks.getInstance().createViaPacket();

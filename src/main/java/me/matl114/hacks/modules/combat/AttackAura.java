@@ -20,6 +20,11 @@ import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.hacks.utils.AttributeUtils;
 import me.matl114.hacks.utils.DamageUtils;
+import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.RaycastUtils;
+import me.matl114.hacks.utils.config.NBTTypes;
+import me.matl114.hacks.utils.config.OptionalPrimitive;
+import me.matl114.managers.config.NBTRef;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.client.player.LocalPlayer;
@@ -33,10 +38,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ShieldItem;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 public class AttackAura extends BaseModule {
     public final ModulePath attBot = makePath(Configs.COMBAT_CONFIG, "att-bot");
-    public final ModulePath respectCooldown = attBot.add("respect-cooldown");
+
+    public final ModulePath triggerBot = makePath(Configs.COMBAT_CONFIG, "trigger-bot");
 
     public AttackAura() {
         super("AttackAura");
@@ -53,6 +62,41 @@ public class AttackAura extends BaseModule {
             .defaultValue(1)
             .validator(Configs.INT_POSITIVE)
             .build();
+
+    public final IntRef customRate = intBuilder(attBot.add("auto-att-rate"))
+            .defaultValue(0)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
+
+    public final NBTRef<OptionalPrimitive<Double>> onlyFront = builder(
+                    attBot.add("only-front"), OptionalPrimitive.DOUBLE_TYPE)
+            .defaultValue(new OptionalPrimitive<>(false, NBTTypes.DOUBLE_TYPE, 90.0D))
+            .validator(value -> value.getValue() >= 0.0D && value.getValue() <= 180.0D)
+            .build();
+
+    public final FlagRef enable2 = flagBuilder(triggerBot.addEnable()).build();
+
+    public final KeyBindRef triggerBotHotkey = moduleEntry(
+                    triggerBot.addHotkey(), new MultiKeyBind(), triggerBot.addEnable())
+            .build();
+
+    public final DoubleRef minRayCastLength = doubleBuilder(triggerBot.add("min-raycast-length"))
+            .defaultValue(3.0D)
+            .validator(Configs.doubleRange(0.0D, 200.0D))
+            .build();
+
+    public final FlagRef raycastIgnoreBlock =
+            flagBuilder(triggerBot.add("raycast-ignore-block")).build();
+
+    public final ModulePath multitask = attBot.add("multi-task");
+
+    public final FlagRef doNotAttackWhenEat =
+            flagBuilder(multitask.add("stop-attack-when-eat"), true).build();
+
+    public final FlagRef doNotAttackWhenSpear =
+            flagBuilder(multitask.add("stop-attack-when-spear"), true).build();
+
+    public final ModulePath respectCooldown = attBot.add("respect-cooldown");
 
     public final FlagRef cooldownWeapon = builder(respectCooldown.add("weapon"), Boolean.class)
             .defaultValue(true)
@@ -80,21 +124,16 @@ public class AttackAura extends BaseModule {
             .show(this.cooldownUsePacketTime::get)
             .build();
 
-    public final IntRef customRate = intBuilder(attBot.add("auto-att-rate"))
-            .defaultValue(0)
-            .validator(Configs.INT_NONNEGATIVE)
-            .build();
+    public final ModulePath critical = attBot.add("critical-settings");
 
-    public final FlagRef doNotAttackWhenEat =
-            flagBuilder(attBot.add("stop-attack-when-eat")).build();
-
-    public final FlagRef doNotAttackWhenSpear =
-            flagBuilder(attBot.add("stop-attack-when-spear")).build();
+    public final FlagRef considerJump =
+            flagBuilder(critical.add("consider-jump")).build();
 
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreGameTick(), this::onTick);
+        registerListener(Listener.getPlayerNotFlyJumpPoint(), this::onJumpEvent);
     }
 
     @Override
@@ -111,6 +150,8 @@ public class AttackAura extends BaseModule {
     private int interval;
     private int lastArua;
 
+    private int lastStartGroundJump = 0;
+
     public boolean checkEating() {
         return doNotAttackWhenEat.get()
                 && mc.player.isUsingItem()
@@ -125,6 +166,12 @@ public class AttackAura extends BaseModule {
 
     public boolean checkUsing() {
         return checkEating() || checkSpear();
+    }
+
+    public void onJumpEvent() {
+        if (mc.player.onGround()) {
+            lastStartGroundJump = Tasks.getTick();
+        }
     }
 
     private boolean isCooldown(Attack.AttackSettings settings, Entity entity) {
@@ -151,9 +198,6 @@ public class AttackAura extends BaseModule {
                         > 3.1F) {
             return true;
         }
-        if (cooldownUsePacketTime.get() && Tasks.getTick() - lastArua >= maxAttackInterval.get()) {
-            return true;
-        }
         int lastTime = cooldownUsePacketTime.get() ? PlayerStateManager.INSTANCE.lastAttackStrengthResetTick : lastArua;
         int strength = Tasks.getTick() - lastTime;
         if (settings.maceSwap()
@@ -170,6 +214,15 @@ public class AttackAura extends BaseModule {
                 }
             }
         }
+        if (considerJump.get() && DamageUtils.canDealCriticalEnvironmentSelf() && !mc.player.isFallFlying()) {
+            if (((Tasks.getTick() < lastStartGroundJump + 8) && (PlayerStateManager.INSTANCE.fallDistance == 0))) {
+                return false;
+            }
+        }
+        if (cooldownUsePacketTime.get() && Tasks.getTick() - lastArua >= maxAttackInterval.get()) {
+            return true;
+        }
+
         if (deathPredict.get()
                 && entity instanceof LivingEntity target
                 && canPredictLethalAttack(target)
@@ -201,6 +254,18 @@ public class AttackAura extends BaseModule {
         return status != null && status.visibleStatusEffects.isEmpty();
     }
 
+    private boolean isWithinAttackAngle(Entity target) {
+        OptionalPrimitive<Double> angleRange = onlyFront.get();
+        if (!angleRange.isPresent()) return true;
+        Entity camera = mc.getCameraEntity();
+        if (camera == null) return false;
+        Vec3 cameraToTarget = target.getBoundingBox().getCenter().subtract(camera.getEyePosition(1.0F));
+        if (cameraToTarget.lengthSqr() == 0.0D) return true;
+        double dot = camera.getViewVector(1.0F).dot(cameraToTarget.normalize());
+        double angle = Math.toDegrees(Math.acos(Math.clamp(dot, -1.0D, 1.0D)));
+        return angle <= angleRange.getValue();
+    }
+
     public void onTick() {
         if (mc.player == null) return;
         if (enable.get()) {
@@ -210,32 +275,30 @@ public class AttackAura extends BaseModule {
             interval += 1;
             int custom = customRate.get();
             if (custom <= interval) {
-
                 if (attack.legalTargetingMode.get().isLegal()
                         || ((holdingWeapon && cooldownWeapon.get()) || (!holdingWeapon && cooldownHand.get()))) {
-                    // do not attack because of legal mode
-                    if (checkUsing()) return;
-                    Entity entity = attack.getCurrentSelectTarget(true);
+                    int predictionTicks = Math.max(1, attack.getModePredictTicks());
+                    Entity entity = onlyFront.get().isPresent()
+                            ? CombatTasks.getTargetSelector()
+                                    .searchAttackEntity(
+                                            attack.getTpSelectRange(), true, predictionTicks, this::isWithinAttackAngle)
+                            : attack.getCurrentSelectTarget(true, predictionTicks);
                     if (entity == null) return;
-                    Attack.AttackSettings settings = attack.createAttackSettings();
-                    if (isCooldown(settings, entity)) {
-                        // ready for attack
-                        // force attack
-                        // 十分之七的概率当前攻击， 以此制作概率性的攻击时延
-                        interval = 0;
-                        attack.attackEntity(entity, settings);
-                        lastArua = Tasks.getTick();
-                        // 移除随机数,史
-                        //                        if (timeRandom.nextInt(10) > 6) {
-                        //
-                        //                        }
-                    }
+                    attack.submitCurrentTickAttackTarget(entity);
+                    tickAttack(entity);
+                    return;
                 } else {
                     // attack! attack! attack!
-
+                    if (checkUsing()) return;
                     List<Entity> targets = attack.getCurrentRangeEntities();
+                    if (onlyFront.get().isPresent()) {
+                        targets = targets.stream()
+                                .filter(this::isWithinAttackAngle)
+                                .toList();
+                    }
                     int max = maxTargetPerTick.get();
                     if (!targets.isEmpty()) {
+                        attack.submitCurrentTickAttackTarget(targets.get(0));
                         // attack this kick
                         interval = 0;
                         lastArua = Tasks.getTick();
@@ -245,9 +308,46 @@ public class AttackAura extends BaseModule {
                                 return;
                             }
                         }
+                        return;
                     }
                 }
             }
+        }
+        if (enable2.get()) {
+            Entity camera = mc.getCameraEntity();
+            if (mc.level == null || camera == null) return;
+            double length = Math.min(minRayCastLength.get(), CombatExtra.INSTANCE.getAttackRange());
+            HitResult hitResult = raycastIgnoreBlock.get()
+                    ? RaycastUtils.createEntityOnlyCrossHairResult(camera, length, 1.0F, null)
+                    : RaycastUtils.createCrossHairHitResult(camera, length, length, 1.0F);
+            if (hitResult instanceof EntityHitResult entityHit) {
+                Entity target = entityHit.getEntity();
+                if (EntityUtils.isEntityValid(target)
+                        && CombatTasks.getTargetSelector().canAttack(target)) {
+                    Attack.INSTANCE.submitCurrentTickAttackTarget(target);
+                    tickAttack(target);
+                }
+            }
+        }
+    }
+
+    public void tickAttack(Entity entity) {
+        Attack attack = Attack.INSTANCE;
+        attack.submitCurrentTickAttackTarget(entity);
+        // do not attack because of legal mode
+        if (checkUsing()) return;
+        Attack.AttackSettings settings = attack.createAttackSettings();
+        if (isCooldown(settings, entity)) {
+            // ready for attack
+            // force attack
+            // 十分之七的概率当前攻击， 以此制作概率性的攻击时延
+            interval = 0;
+            attack.attackEntity(entity, settings);
+            lastArua = Tasks.getTick();
+            // 移除随机数,史
+            //                        if (timeRandom.nextInt(10) > 6) {
+            //
+            //                        }
         }
     }
 }

@@ -19,6 +19,8 @@ import me.matl114.hacks.modules.move.FloatingUtils;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.modules.task.MovementManager;
+import me.matl114.hacks.modules.task.ServerFeature;
+import me.matl114.hacks.utils.DamageUtils;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.enums.GhostHandMode;
@@ -173,16 +175,26 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
         ;
     }
 
-    private boolean canNotCrit() {
-        return mc.player.isInWater()
-                || mc.player.isPassenger()
-                || PlayerStateManager.INSTANCE.lastInWeb
-                || PlayerStateManager.INSTANCE.lastSlowByBlock;
+    public static boolean canCritWithPlayerMovement() {
+        return DamageUtils.canDealCriticalEnvironmentSelf()
+                && isAttackStrengthEnoughForCritic(mc.player.getItemInHand(InteractionHand.MAIN_HAND));
+    }
+
+    public static boolean canCritWithPlayerMovement(ItemStack stack) {
+        return DamageUtils.canDealCriticalEnvironmentSelf() && isAttackStrengthEnoughForCritic(stack);
+    }
+
+    public static boolean isAttackStrengthEnoughForCritic(ItemStack stack) {
+        return DamageUtils.canDealCriticalProgress(DamageUtils.getAttackProgress(
+                mc.player,
+                stack,
+                PlayerStateManager.INSTANCE.getTicksSinceLastAttack(),
+                ServerFeature.INSTANCE.attributeSwap.get()));
     }
 
     public void onPlayerAttack(Event<ServerboundAttackPacket> event) {
         // can not crit in water or boat
-        if (checkNull() || event.isCancelled() || canNotCrit()) return;
+        if (checkNull() || event.isCancelled() || canCritWithPlayerMovement()) return;
         if (PlayerStateManager.INSTANCE.fallDistance > 1E-6) return;
         boolean canRun = cooldownTimer.canRun(cooldownCritical.get());
         cooldownTimer.mark();
@@ -389,7 +401,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
                         && !stack.isEmpty()
                         && !ItemStack.isSameItemSameComponents(weapon, stack)) {
                     var res = InventoryUtils.findPlayerItem(
-                            it -> ItemStack.isSameItemSameComponents(it, stack), true, false);
+                            it -> ItemStack.isSameItemSameComponents(it, stack), false, false);
                     if (res != null) {
                         callback = InvExtra.INSTANCE.swapItemToHand(res.index(), false, GhostHandMode.INV_SWAP);
                     }
@@ -453,7 +465,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
                     boolean realOnGround = moveDownWards.stream().anyMatch(pos -> !moveablePoses.contains(pos));
                     if (realOnGround) {
                         double yLevel = mc.player.getY() + jumpMin * 4;
-                        movementManagerEvent.context.playerStatus.restorePos();
+                        movementManagerEvent.context.resetPos();
                         mc.player.setPos(mc.player.position().with(Direction.Axis.Y, yLevel));
                         mc.player.setOnGround(false);
                         lastShiftUp = true;
@@ -465,7 +477,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
                             break how_to_apply;
                         } else if (lastShiftUp) {
                             lastShiftUp = false;
-                            movementManagerEvent.context.playerStatus.restorePos();
+                            movementManagerEvent.context.resetPos();
                             mc.player.setPos(mc.player.position().add(0, -jumpMin, 0));
                             mc.player.setOnGround(false);
                             break how_to_apply;
@@ -499,7 +511,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
         }
         if (enable.get()
                 && mode.get() == Mode.GRIM_GROUND_SIMULATION
-                && !canNotCrit()
+                && !canCritWithPlayerMovement()
                 && lastSetBackCriticalTick + 2 <= Tasks.getTick()
                 && shouldApplyGrimGroundSimulationAutoFakeGround()) {
             double yLevel = mc.player.getY();
@@ -532,7 +544,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
 
         if (fakeMovementThisTick) {
             movementManagerEvent.cancel();
-            movementManagerEvent.context.playerStatus.restorePos();
+            movementManagerEvent.context.resetPos();
             fakeMovementThisTick = false;
         }
     }

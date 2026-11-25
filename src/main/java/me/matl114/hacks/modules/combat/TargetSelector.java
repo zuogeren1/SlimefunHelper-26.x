@@ -4,12 +4,18 @@ import com.google.common.collect.ImmutableList;
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import java.awt.Color;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.DoubleStream;
 import java.util.stream.Stream;
 import lombok.Getter;
+import me.matl114.accessors.hacks.EntityInternalAccess;
+import me.matl114.events.Event;
+import me.matl114.events.Listener;
+import me.matl114.events.RenderListener;
+import me.matl114.events.impl.Render3D;
 import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.hacks.utils.RayCastCalculator;
 import me.matl114.managers.command.MainCommand;
@@ -18,8 +24,10 @@ import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.CombatTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
-import me.matl114.hacks.utils.HotKeyUtils;
+import me.matl114.hacks.utils.*;
 import me.matl114.hacks.utils.config.*;
+import me.matl114.hacks.utils.render.RenderCollectors;
+import me.matl114.hooks.MeteorHooks;
 import me.matl114.managers.Configs;
 import me.matl114.managers.FileManager;
 import me.matl114.managers.config.*;
@@ -31,19 +39,29 @@ import me.matl114.utils.commands.commandGroup.SubCommand;
 import me.matl114.utils.commands.commandGroup.TreeSubCommand;
 import me.matl114.utils.commands.params.ArgumentInputStream;
 import me.matl114.utils.commands.params.SimpleCommandArgs;
+import me.matl114.utils.render.RenderCollector;
+import me.matl114.versioned.api.VRecord;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.InterpolationHandler;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.animal.golem.IronGolem;
+import net.minecraft.world.entity.animal.polarbear.PolarBear;
 import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.monster.Shulker;
+import net.minecraft.world.entity.monster.zombie.ZombifiedPiglin;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
@@ -53,16 +71,189 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.PlayerTeam;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
-import me.matl114.hacks.utils.RaycastUtils;
-import me.matl114.hacks.utils.WorldUtils;
 
 public class TargetSelector extends BaseModule implements RayCastCalculator<Entity> {
     public static TargetSelector INSTANCE;
+    private static final int FAKE_PLAYER_MOVEMENT_CHECK_TICKS = 10;
+
+    private final Map<UUID, Integer> detectedFakePlayers = new HashMap<>();
+    private final Deque<PlayerListJoin> lastJoinedPlayerListEntries = new ArrayDeque<>();
+    private final Map<UUID, SuspectedFakePlayer> suspectedFakePlayers = new HashMap<>();
+    private final RenderCollector<List<Vec3>> fakePlayerLineCollector = RenderCollectors.createLinesCollector();
+
+    private record PlayerListJoin(PlayerInfo entry, int joinedAtAge) {}
+
+    private record SuspectedFakePlayer(int spawnedAtAge) {}
+
     public final ModulePath attack = makePath(Configs.COMBAT_CONFIG, "attack");
 
     public TargetSelector() {
         super("TargetSelector");
         INSTANCE = this;
+    }
+
+    private void onLocalPlayerSpawn(Event<LocalPlayer> event) {
+        clearFakePlayerTracking();
+    }
+
+    private void onPlayerListJoin(Event<PlayerInfo> event) {
+        if (!fakePlayerDetect.get()) return;
+
+        PlayerInfo entry = event.context;
+        UUID playerId = VRecord.getId(entry.getProfile());
+        if (mc.player != null && playerId.equals(mc.player.getUUID())) return;
+
+        int currentAge = getLocalPlayerAge();
+        evictExpiredPlayerListJoins(currentAge);
+        lastJoinedPlayerListEntries.removeIf(join -> playerId.equals(getPlayerId(join.entry())));
+        if (mc.level != null && mc.level.getEntity(playerId) instanceof Player) {
+            suspectedFakePlayers.remove(playerId);
+            detectedFakePlayers.remove(playerId);
+            return;
+        }
+
+        lastJoinedPlayerListEntries.addLast(new PlayerListJoin(entry, currentAge));
+    }
+
+    private void onPlayerListExit(Event<PlayerInfo> event) {
+        UUID playerId = VRecord.getId(event.context.getProfile());
+        detectedFakePlayers.remove(playerId);
+        suspectedFakePlayers.remove(playerId);
+        lastJoinedPlayerListEntries.removeIf(join -> playerId.equals(getPlayerId(join.entry())));
+    }
+
+    private void onPlayerSpawn(Event<ClientboundAddEntityPacket> event) {
+        ClientboundAddEntityPacket packet = event.context;
+        if (packet.getType() != EntityTypes.PLAYER || !fakePlayerDetect.get()) return;
+
+        UUID playerId = packet.getUUID();
+        int currentAge = getLocalPlayerAge();
+        evictExpiredPlayerListJoins(currentAge);
+        PlayerListJoin matchingJoin = null;
+        for (Iterator<PlayerListJoin> iterator = lastJoinedPlayerListEntries.iterator(); iterator.hasNext(); ) {
+            PlayerListJoin join = iterator.next();
+            if (playerId.equals(getPlayerId(join.entry()))) {
+                matchingJoin = join;
+                iterator.remove();
+                break;
+            }
+        }
+        if (matchingJoin == null || mc.player == null) return;
+
+        detectedFakePlayers.remove(playerId);
+        suspectedFakePlayers.remove(playerId);
+
+        Vec3 spawnPosition = new Vec3(packet.getX(), packet.getY(), packet.getZ());
+        double maxDistance = fakePlayerDetectDistance.get();
+        if (spawnPosition.distanceToSqr(mc.player.position()) > maxDistance * maxDistance) return;
+
+        Vec3 offsetFromPlayer = spawnPosition.subtract(mc.player.position());
+        Vec3 viewDirection = mc.player.getLookAngle();
+        double horizontalViewDot = offsetFromPlayer.x * viewDirection.x + offsetFromPlayer.z * viewDirection.z;
+        if (horizontalViewDot < 0) {
+            markDetectedFakePlayer(playerId, currentAge);
+        } else {
+            suspectedFakePlayers.put(playerId, new SuspectedFakePlayer(currentAge));
+        }
+    }
+
+    private UUID getPlayerId(PlayerInfo entry) {
+        return VRecord.getId(entry.getProfile());
+    }
+
+    private int getLocalPlayerAge() {
+        return mc.player == null ? 0 : EntityInternalAccess.of(mc.player).getLivingTicks();
+    }
+
+    private void markDetectedFakePlayer(UUID playerId, int detectedAtAge) {
+        detectedFakePlayers.put(playerId, detectedAtAge);
+    }
+
+    private void evictExpiredPlayerListJoins(int currentAge) {
+        int maxLiveTicks = fakePlayerMaxLiveTicks.get();
+        while (!lastJoinedPlayerListEntries.isEmpty()
+                && currentAge - lastJoinedPlayerListEntries.peekFirst().joinedAtAge() > maxLiveTicks) {
+            lastJoinedPlayerListEntries.removeFirst();
+        }
+    }
+
+    private void clearFakePlayerTracking() {
+        detectedFakePlayers.clear();
+        lastJoinedPlayerListEntries.clear();
+        suspectedFakePlayers.clear();
+    }
+
+    private boolean isDetectedFakePlayer(Entity entity) {
+        if (!fakePlayerDetect.get() || !(entity instanceof Player player)) return false;
+        UUID playerId = player.getUUID();
+        Integer detectedAtAge = detectedFakePlayers.get(playerId);
+        if (detectedAtAge == null) return false;
+        if (getLocalPlayerAge() - detectedAtAge > fakePlayerMaxLiveTicks.get()) {
+            detectedFakePlayers.remove(playerId);
+            return false;
+        }
+        return true;
+    }
+
+    private void updateRenderCollector() {
+        fakePlayerLineCollector.clear();
+        if (checkNull()) {
+            clearFakePlayerTracking();
+            return;
+        }
+        if (!fakePlayerDetect.get()) {
+            clearFakePlayerTracking();
+            return;
+        }
+
+        int currentAge = getLocalPlayerAge();
+        evictExpiredPlayerListJoins(currentAge);
+        detectedFakePlayers.entrySet().removeIf(entry -> currentAge - entry.getValue() > fakePlayerMaxLiveTicks.get());
+
+        for (Iterator<Map.Entry<UUID, SuspectedFakePlayer>> iterator =
+                        suspectedFakePlayers.entrySet().iterator();
+                iterator.hasNext(); ) {
+            Map.Entry<UUID, SuspectedFakePlayer> entry = iterator.next();
+            UUID playerId = entry.getKey();
+            SuspectedFakePlayer suspected = entry.getValue();
+            int age = currentAge - suspected.spawnedAtAge();
+            if (age > fakePlayerMaxLiveTicks.get()) {
+                iterator.remove();
+                continue;
+            }
+
+            Entity entity = mc.level.getEntity(playerId);
+            if (entity instanceof Player player
+                    && PositionPredict.INSTANCE
+                                    .getPredictor(player)
+                                    .getKnownDeltaMovement()
+                                    .lengthSqr()
+                            > 0.0D) {
+                markDetectedFakePlayer(playerId, suspected.spawnedAtAge());
+                iterator.remove();
+            } else if (age >= FAKE_PLAYER_MOVEMENT_CHECK_TICKS) {
+                iterator.remove();
+            }
+        }
+
+        if (checkNull()) return;
+
+        for (Player player : mc.level.players()) {
+            if (!detectedFakePlayers.containsKey(player.getUUID())) continue;
+            Vec3 head = player.position().add(0, player.getBbHeight(), 0);
+            fakePlayerLineCollector.submit(List.of(head, head.add(0, 1, 0)), Color.RED.getRGB());
+        }
+    }
+
+    private void onRenderFakePlayers(Event<Render3D> event) {
+        if (checkNull() || !fakePlayerDetect.get()) return;
+
+        RenderUtils.startDrawVirtual(event.context.stack());
+        try {
+            fakePlayerLineCollector.render3D(event.context.stack(), event.context.partialTicks());
+        } finally {
+            RenderUtils.stopDrawVirtual(event.context.stack());
+        }
     }
 
     public final FlagRef grimExpandEyeHeight =
@@ -95,6 +286,9 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
                     false, NBTTypes.STRING_TYPE, "/msg %s I have just added you to my friends list!"))
             .build();
 
+    public final FlagRef loadMeteorFriends =
+            flagBuilder(attack.add("load-meteor-client-friends")).build();
+
     public final FlagRef attackFriend =
             builder(attack.add("att-friend"), FlagRef.TYPE).defaultValue(true).build();
 
@@ -126,10 +320,28 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
     public final FlagRef fakePlayerDetect =
             flagBuilder(attack.add("fake-player-and-npc-detect")).build();
 
+    public final DoubleRef fakePlayerDetectDistance = doubleBuilder(attack.add("fake-player-detect-distance"))
+            .defaultValue(12.0D)
+            .validator(Configs.doubleRange(1.0D, 128.0D))
+            .build();
+
+    public final IntRef fakePlayerMaxLiveTicks = intBuilder(attack.add("fake-player-max-live-ticks"))
+            .defaultValue(100)
+            .validator(Configs.intRange(1, 1200))
+            .build();
+
     @Override
     public void registerAll() {
         super.registerAll();
         registerCommandBootstrap(this::onFriendCommandBootstrap);
+        registerListener(Listener.getGameJoinPoint(), this::onLocalPlayerSpawn);
+        registerListener(Listener.getPlayerRespawnPoint(), this::onLocalPlayerSpawn);
+        registerListener(Listener.getOtherPlayerJoinPoint(), this::onPlayerListJoin);
+        registerListener(Listener.getOtherPlayerExitPoint(), this::onPlayerListExit);
+        registerListener(
+                Listener.getPacketPostHandlePoint().getChannel(ClientboundAddEntityPacket.class), this::onPlayerSpawn);
+        registerListener(Listener.getPostTick(), this::updateRenderCollector);
+        registerListener(RenderListener.getRender3DEvent(), this::onRenderFakePlayers);
     }
 
     public final FileStorage fileStorage = FileManager.getInstance().getInternalStorage("friends.nbt");
@@ -250,6 +462,12 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
     }
 
     public boolean isWithinAttackRange(Vec3 pos, Entity entity, double range) {
+        if (pos.distanceToSqr(entity.position())
+                > MathUtils.s2(range
+                        + realMaxExtraDistance.get()
+                        + Math.max(entity.dimensions.height(), entity.dimensions.width()))) {
+            return false;
+        }
         if (!entity.trackingPosition().equals(Vec3.ZERO)) {
             Vec3 syncPos = PositionPredict.INSTANCE.getPredictor(entity).getCurrentSyncedPos();
             AABB syncBox = entity.dimensions.makeBoundingBox(syncPos);
@@ -402,6 +620,7 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
                 || (target instanceof AbstractClientPlayer && !(target instanceof RemotePlayer))) {
             return false;
         }
+        if (isDetectedFakePlayer(target)) return false;
         if (target instanceof LivingEntity lv && lv.getHealth() <= 0) {
             return false;
         }
@@ -412,7 +631,7 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
             // if it is not friendly to us, and attackHostile is enabled, then we can still attack them
         }
 
-        if (!isNotFriend(target)) {
+        if (!isNotFriendly(target)) {
             return false;
         }
 
@@ -434,14 +653,25 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
             return false;
         }
         FriendListStorage list = playerList;
-        return (list != null && list.contains(playerName));
+        if (list != null && list.contains(playerName)) {
+            return true;
+        }
+        if (loadMeteorFriends.get() && MeteorHooks.getInstance().isFriend(playerName)) {
+            return true;
+        }
+        return false;
     }
 
     public boolean isInFriendList(Player e) {
         return isFriend(e.getScoreboardName());
     }
 
+    @Deprecated
     public boolean isNotFriend(Entity e) {
+        return isNotFriendly(e);
+    }
+
+    public boolean isNotFriendly(Entity e) {
         if (e instanceof Player pl) {
             String name = pl.getScoreboardName();
             Regex regex = friendNameRegex.get();
@@ -533,6 +763,11 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
     private boolean passHostileCheck(Entity e) {
         if (hostile.get()) {
             if (e instanceof NeutralMob anger) {
+                if (e instanceof EnderMan enderman) return enderman.isCreepy();
+                if (e instanceof PolarBear bear) return bear.isStanding() || bear.isAggressive();
+                if (e instanceof IronGolem || e instanceof ZombifiedPiglin) {
+                    return ((Mob) e).isAggressive();
+                }
                 long time = anger.getPersistentAngerEndTime();
                 long currentTime = e.level().getGameTime();
                 return currentTime < time;
@@ -547,14 +782,19 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
         return getAttackableEntities(nearbyOverride, 0, this::canAttack);
     }
 
-    public List<Entity> getAttackableEntities(double nearbyOverride, int ticks, Predicate<Entity> predicate) {
-        if (mc.level == null) {
+    public List<Entity> getAttackableEntities(double nearbyOverride, int ticksLater, Predicate<Entity> predicate) {
+        if (mc.level == null || mc.player == null) {
             return List.of();
         }
-        return mc.level.getEntities(
-                (Entity) null,
-                mc.player.getBoundingBox().inflate(nearbyOverride + 6),
-                (en) -> predicate.test(en) && isTargetInRange(en, nearbyOverride, ticks));
+        List<Entity> entities = new ArrayList<>();
+        for (var re : mc.level.entitiesForRendering()) {
+            double range = Math.max(nearbyOverride, CombatExtra.INSTANCE.getAttackAtTargetRange(re));
+            if (isWithinAttackRange(mc.player.position(), getEffectiveBox(re, ticksLater), range)
+                    && predicate.test(re)) {
+                entities.add(re);
+            }
+        }
+        return entities;
     }
 
     public boolean checkWeapon(Entity e, boolean commonBow) {
@@ -577,12 +817,15 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
         return entities;
     }
 
+    @Deprecated
     public boolean isTargetInRange(Entity e, double nearby, int ticks) {
+        return isTargetInRange(e, nearby);
+    }
+
+    public boolean isTargetInRange(Entity e, double nearby) {
         if (mc.player == null) return false;
         nearby = Math.max(nearby, CombatExtra.INSTANCE.getAttackAtTargetRange(e));
-        Vec3 predictedPlayerPos =
-                mc.player.position().add(mc.player.getDeltaMovement().scale(mc.player.isFallFlying() ? ticks : 0));
-        return isWithinAttackRange(predictedPlayerPos, e, nearby);
+        return isWithinAttackRange(mc.player.position(), e, nearby);
     }
 
     public Entity searchAttackEntity(double nearby, boolean autoSelect) {
@@ -611,7 +854,7 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
         if (mc.hitResult != null && mc.hitResult.getType() == HitResult.Type.ENTITY) {
             Entity entityCheck = ((EntityHitResult) mc.hitResult).getEntity();
             // fix: check attackable when not auto
-            if (!autoSelect || combinedPredicate.test(entityCheck)) {
+            if (!isDetectedFakePlayer(entityCheck) && (!autoSelect || combinedPredicate.test(entityCheck))) {
                 return entityCheck;
             }
         }
@@ -712,6 +955,15 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
         }
     }
 
+    public boolean isInFront(Entity entity) {
+        Entity camera = mc.getCameraEntity();
+        if (camera == null) return false;
+        Vec3 cameraEyePos = camera.getEyePosition(1.0F);
+        Vec3 viewDirection = camera.getViewVector(1.0F);
+        Vec3 cameraToTarget = entity.getBoundingBox().getCenter().subtract(cameraEyePos);
+        return viewDirection.dot(cameraToTarget) >= 0.0D;
+    }
+
     //    private double withMultiply(Entity e, double v) {
     //        return Math.abs(v)
     //                - ((v < 0.0) ? multiplyBackward.get() : 0.0D)
@@ -733,7 +985,8 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
                             .name("list")
                             .helper("message.command.friends_command.friends.list.help")
                             .post(e -> e.executor(CommandContext.run(() -> {
-                                Debug.chat(Component.literal("== 当前好友列表 ==").withStyle(ChatFormatting.GREEN));
+                                Debug.chat(Component.translatable("message.command.friends_command.friends.list.title")
+                                        .withStyle(ChatFormatting.GREEN));
                                 for (var re : playerList.friends()) {
                                     Debug.chat(re);
                                 }

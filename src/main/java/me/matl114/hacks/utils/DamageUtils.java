@@ -191,9 +191,23 @@ public class DamageUtils {
     }
 
     public static boolean canDealCritical(LivingEntity attacker, double fallDistance) {
-        return fallDistance > 0.0
-                && !attacker.onGround()
-                && !attacker.onClimbable()
+        return canDealCriticalGround(attacker, fallDistance)
+                && canDealCriticalEnvironment(attacker)
+                && !attacker.isSprinting();
+    }
+
+    public static boolean canDealCriticalGround(LivingEntity attacker, double fallDistance) {
+        return fallDistance > 0.0 && !attacker.onGround();
+    }
+
+    public static boolean canDealCriticalEnvironmentSelf() {
+        return !PlayerStateManager.INSTANCE.lastInWeb
+                && !PlayerStateManager.INSTANCE.lastSlowByBlock
+                && canDealCriticalEnvironment(mc.player);
+    }
+
+    public static boolean canDealCriticalEnvironment(LivingEntity attacker) {
+        return !attacker.onClimbable()
                 && !attacker.isInWater()
                 && !attacker.hasEffect(MobEffects.BLINDNESS)
                 && !attacker.isPassenger();
