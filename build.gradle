@@ -93,6 +93,21 @@ tasks.register('build') {
 }
 
 def rootLibsDir = layout.buildDirectory.dir('libs').get().asFile
+def rootReleaseDir = layout.buildDirectory.dir('release').get().asFile
+
+tasks.register('syncRelease', Copy) {
+	mustRunAfter 'buildAndGather'
+	from rootLibsDir
+	include '*.jar'
+	into rootReleaseDir
+	duplicatesStrategy = DuplicatesStrategy.INCLUDE
+	outputs.upToDateWhen { false }
+	doFirst {
+		println 'Syncing build/release'
+		rootReleaseDir.mkdirs()
+		rootReleaseDir.listFiles()?.each { it.isDirectory() ? it.deleteDir() : it.delete() }
+	}
+}
 
 tasks.register('buildAndGather', Copy) {
 
@@ -105,6 +120,7 @@ tasks.register('buildAndGather', Copy) {
 	}
 	into rootLibsDir
 	duplicatesStrategy = DuplicatesStrategy.INCLUDE
+	finalizedBy 'syncRelease'
 	// 先清空根 build/libs，避免版本改名后残留旧包
 	outputs.upToDateWhen { false }
 	doFirst {
