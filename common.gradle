@@ -36,6 +36,9 @@ repositories {
 	maven {
 		url = "https://maven.meteordev.org/releases"
 	}
+	maven {
+		url = "https://maven.caffeinemc.net/releases"
+	}
 }
 
 loom {
@@ -115,6 +118,13 @@ dependencies {
 	localRuntime files(rootProject.file(project.baritone_jar))
 
 	compileOnly "meteordevelopment:meteor-client:${project.meteor_version}"
+
+	// Sodium is an optional dependency. The old src/stubs shims compiled but carried no signatures;
+	// the real jar from CaffeineMC maven lets hook @Mixin targets and @At descriptors be checked
+	// at compile time (the Xray sodium hooks rely on that).
+	// Per-MC version lives in versions/<mc>/gradle.properties as sodium_version.
+	compileOnly "net.caffeinemc:sodium-fabric:${project.sodium_version}"
+	localRuntime "net.caffeinemc:sodium-fabric:${project.sodium_version}"
 
 	// bridge：第三方 mod 的空桩（见上面 compileStubs 任务的说明）
 	compileOnly files(stubsClasses)

@@ -69,6 +69,18 @@ public class SurvivalTasks {
     @Getter
     public static XaeroMapScanner xaeroMapScanner;
 
+    @Getter
+    private static FeatureLabel featureLabel;
+
+    @Getter
+    private static PearlBot pearlBot;
+
+    @Getter
+    private static AutoTrade autoTrade;
+
+    @Getter
+    private static AutoFarm autoFarm;
+
     private static void initModules(ModuleManager m) {
         schedularSettings = new SchedularSettings().register(m);
         villagerEsp = new VillagerEsp().register(m);
@@ -89,6 +101,10 @@ public class SurvivalTasks {
         baritoneFix = new BaritoneFix().register(m);
         xaeroHelper = new XaeroHelper().register(m);
         xaeroMapScanner = new XaeroMapScanner().register(m);
+        featureLabel = new FeatureLabel().register(m);
+        pearlBot = new PearlBot().register(m);
+        autoTrade = new AutoTrade().register(m);
+        autoFarm = new AutoFarm().register(m);
     }
 
     static {
