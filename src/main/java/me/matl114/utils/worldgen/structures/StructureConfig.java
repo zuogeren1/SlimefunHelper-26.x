@@ -7,6 +7,11 @@ import java.util.OptionalInt;
 import java.util.Set;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadType;
+//#if MC >= 260300
+//$$ import net.minecraft.world.level.levelgen.structure.placement.AbstractSpreadingStructurePlacement.FrequencyReductionMethod;
+//#else
+import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement.FrequencyReductionMethod;
+//#endif
 
 public final class StructureConfig {
     private static final Map<Identifier, StructureConfig> VANILLA = createVanillaConfigs();
@@ -17,6 +22,8 @@ public final class StructureConfig {
     private final int spacing;
     private final int separation;
     private final RandomSpreadType spreadType;
+    private final float frequency;
+    private final FrequencyReductionMethod frequencyReductionMethod;
 
     private StructureConfig(
             Identifier structureSetId,
@@ -24,9 +31,14 @@ public final class StructureConfig {
             int salt,
             int spacing,
             int separation,
-            RandomSpreadType spreadType) {
+            RandomSpreadType spreadType,
+            float frequency,
+            FrequencyReductionMethod frequencyReductionMethod) {
         if (spacing <= separation || separation < 0) {
             throw new IllegalArgumentException("Structure spacing must be greater than separation");
+        }
+        if (frequency < 0.0F || frequency > 1.0F || Float.isNaN(frequency)) {
+            throw new IllegalArgumentException("Structure frequency must be between 0 and 1");
         }
         this.structureSetId = Objects.requireNonNull(structureSetId);
         this.structureIds = Set.copyOf(structureIds);
@@ -34,6 +46,8 @@ public final class StructureConfig {
         this.spacing = spacing;
         this.separation = separation;
         this.spreadType = Objects.requireNonNull(spreadType);
+        this.frequency = frequency;
+        this.frequencyReductionMethod = Objects.requireNonNull(frequencyReductionMethod);
     }
 
     public static StructureConfig of(
@@ -43,7 +57,35 @@ public final class StructureConfig {
             int spacing,
             int separation,
             RandomSpreadType spreadType) {
-        return new StructureConfig(structureSetId, structureIds, salt, spacing, separation, spreadType);
+        return of(
+                structureSetId,
+                structureIds,
+                salt,
+                spacing,
+                separation,
+                spreadType,
+                1.0F,
+                FrequencyReductionMethod.DEFAULT);
+    }
+
+    public static StructureConfig of(
+            Identifier structureSetId,
+            Set<Identifier> structureIds,
+            int salt,
+            int spacing,
+            int separation,
+            RandomSpreadType spreadType,
+            float frequency,
+            FrequencyReductionMethod frequencyReductionMethod) {
+        return new StructureConfig(
+                structureSetId,
+                structureIds,
+                salt,
+                spacing,
+                separation,
+                spreadType,
+                frequency,
+                frequencyReductionMethod);
     }
 
     public static Map<Identifier, StructureConfig> vanillaConfigs() {
@@ -104,6 +146,19 @@ public final class StructureConfig {
                         40,
                         15,
                         RandomSpreadType.LINEAR));
+        configs.put(
+                Identifier.withDefaultNamespace("mineshafts"),
+                of(
+                        Identifier.withDefaultNamespace("mineshafts"),
+                        Set.of(
+                                Identifier.withDefaultNamespace("mineshaft"),
+                                Identifier.withDefaultNamespace("mineshaft_mesa")),
+                        0,
+                        1,
+                        0,
+                        RandomSpreadType.LINEAR,
+                        0.004F,
+                        FrequencyReductionMethod.LEGACY_TYPE_3));
         return Map.copyOf(configs);
     }
 
@@ -129,6 +184,20 @@ public final class StructureConfig {
 
     public RandomSpreadType spreadType() {
         return spreadType;
+    }
+
+    public float frequency() {
+        return frequency;
+    }
+
+    public FrequencyReductionMethod frequencyReductionMethod() {
+        return frequencyReductionMethod;
+    }
+
+    public boolean passesFrequencyReduction(long worldSeed, long chunkX, long chunkZ) {
+        return frequency >= 1.0F
+                || frequencyReductionMethod.shouldGenerate(
+                        worldSeed, salt, Math.toIntExact(chunkX), Math.toIntExact(chunkZ), frequency);
     }
 
     public boolean containsStructure(Identifier structureId) {

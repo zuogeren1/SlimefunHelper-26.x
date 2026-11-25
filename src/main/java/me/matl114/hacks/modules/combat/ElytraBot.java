@@ -1748,6 +1748,17 @@ public class ElytraBot extends BaseModule {
                                                         .y()))) {
                     return ElytraExtra.INSTANCE.requestManualArmorSwapAndResetFallFlying(50);
                 }
+                Vec3 predictedPosition = PositionPredict.INSTANCE
+                        .attackPredictArgument
+                        .get()
+                        .predict0(base.target, base.maceSwapTargetPredictTicks.get());
+                double predictingRange = base.macePreSwapSpeed.get().data().x()
+                        + base.macePreSwapSpeed.get().data().y() * speed;
+                double range = attackRange + predictingRange;
+                if (TargetSelector.INSTANCE.isWithinAttackRange(
+                        mc.player.position(), base.target.dimensions.makeBoundingBox(predictedPosition), range)) {
+                    return ElytraExtra.INSTANCE.requestManualArmorSwapAndResetFallFlying(50);
+                }
             }
             return false;
         }

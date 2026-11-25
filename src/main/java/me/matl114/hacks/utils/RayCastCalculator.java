@@ -47,6 +47,16 @@ public interface RayCastCalculator<T> {
                         box.contains(eyePos) || RaycastRotationSolver.canRayCast(box, eyePos, range, pitch, yaw));
     }
 
+    /**
+     * 在 locked 已锁定部分角度时，搜索能命中目标的旋转。
+     *
+     * <p>按 {@link #getPotentialEyeHeights(Vec3)} 的优先级依次处理每个眼睛高度：眼睛位于碰撞箱内部时直接通过，
+     * 不修改角度（返回 locked 本身）；否则先检查当前角度是否命中，再基于已锁定的 pitch 或 yaw 与射线距离
+     * 直接求解另一个角度；未锁定任何角度时按 {@link #getRaycast(Vec3, Object)} 的方式求解。
+     * 前一个眼睛高度有解时不再考虑后续高度。pitch 与 yaw 都被锁定时无法搜索，直接返回 locked。
+     *
+     * @return 找到的旋转；无解时返回 null
+     */
     default @Nullable Rotation findRotation(Vec3 pos, T target, Rotation locked, float pitch, float yaw) {
         if (locked.hasPitch() && locked.hasYaw()) return locked;
         float lockedPitch = locked.getPitch(pitch);
@@ -56,6 +66,7 @@ public interface RayCastCalculator<T> {
         Iterator<Vec3> eyes = getPotentialEyeHeights(pos).iterator();
         while (eyes.hasNext()) {
             Vec3 eye = eyes.next();
+            // 眼睛位于碰撞箱内部：任意角度均视为命中，在进入求解器之前直接通过，不修改角度
             if (box.contains(eye)) return locked;
             if (!locked.hasRotate()) {
                 if (box.distanceToSqr(eye) > MathUtils.s2(range)) continue;
@@ -74,6 +85,7 @@ public interface RayCastCalculator<T> {
             }
         }
         if (!locked.hasRotate()) {
+            // 与 getRaycast 一致：所有眼睛高度均无法命中时退回当前眼睛高度的方向
             Vec3 fallbackEye = pos.add(0, this.client.player.dimensions.eyeHeight(), 0);
             return Rotation.from(raycastDirection(box, fallbackEye, range));
         }

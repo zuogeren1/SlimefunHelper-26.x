@@ -3,6 +3,7 @@ package me.matl114.hacks.modules.survival;
 import java.util.*;
 import java.util.function.Predicate;
 import me.matl114.accessors.access.ChunkAccess;
+import me.matl114.accessors.interfaces.MetadataHolder;
 import me.matl114.events.Event;
 import me.matl114.events.impl.BlockUpdate;
 import me.matl114.events.impl.Render2D;
@@ -14,7 +15,6 @@ import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.config.TracingOption;
 import me.matl114.hacks.utils.config.WrapColor;
-import me.matl114.hacks.utils.move.goal.GoalBlockPos;
 import me.matl114.hacks.utils.move.goal.GoalList;
 import me.matl114.hacks.utils.move.goal.GoalNearBlockPos;
 import me.matl114.hacks.utils.move.goal.IPathGoal;
@@ -41,6 +41,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
@@ -60,6 +61,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 public class TrialInfoESP extends BaseModule {
+    private static final String KEY_TRIAL_SPAWNER_POS = "trialSpawnerPos";
+
     public TrialInfoESP() {
         super("TrialESP");
         bindFlag(enable);
@@ -105,6 +108,8 @@ public class TrialInfoESP extends BaseModule {
 
     public final FlagRef renderKeys = flagBuilder(root.add("render-keys"), true).build();
 
+    public final FlagRef trackMobs = flagBuilder(root.add("track-mobs")).build();
+
     public final EnumRef<RenderMode> textMode = builder(root.add("text-mode"), RenderMode.class)
             .defaultValue(RenderMode.RENDER_2D)
             .build();
@@ -132,11 +137,12 @@ public class TrialInfoESP extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getPostGameTick(), this::onTick);
+        registerListener(Listener.getPostTick(), this::onTick);
         registerListener(RenderListener.getRender3DEvent(), this::onRender3D);
         registerListener(Listener.getWorldSwitchPoint(), this::onSwitchWorld);
         registerListener(
                 Listener.getBlockUpdateListener().getChannel(Blocks.TRIAL_SPAWNER), this::onTrialSpawnerActivated);
+        registerListener(Listener.getServerEntitySpawnListener(), this::onEntitySpawn);
         registerListener(RenderListener.getRender2DEvent(), this::onRender2D);
     }
 
@@ -144,8 +150,11 @@ public class TrialInfoESP extends BaseModule {
     public final RenderCollector<List<Vec3>> lineRenderCollector = RenderCollectors.createLinesCollector();
     public final RenderCollector<AABB> boxCollector = RenderCollectors.createBoxCollector(true, false, false);
     public final RenderCollector<AABB> boxCollector2 = RenderCollectors.createBoxCollector(false, true, false);
+    public final RenderCollector<Entity> entityBoxCollector =
+            RenderCollectors.createEntityBoxCollector(true, false, false);
     public final RenderCollector<Vec3> traceCollector = RenderCollectors.createTracerCollector();
     private Map<ChunkPos, Set<BlockPos>> cachedVaultsAndTrials = new HashMap<>();
+    private final Set<BlockPos> activeSpawners = new HashSet<>();
     private Vec3 enterTrialPosition;
     TimerExecutor cacheClearTimer = new TimerExecutor();
 
@@ -158,7 +167,7 @@ public class TrialInfoESP extends BaseModule {
                         == TrialSpawnerState.WAITING_FOR_PLAYERS);
         if (!found && enterTrialPosition != null) {
             BaritoneHooks.getInstance()
-                    .setBaritoneCurrentGoal(new GoalBlockPos(BlockPos.containing(enterTrialPosition)));
+                    .setBaritoneCurrentGoal(new GoalNearBlockPos(BlockPos.containing(enterTrialPosition)));
         }
     }
 
@@ -200,6 +209,7 @@ public class TrialInfoESP extends BaseModule {
     }
 
     public void onTick() {
+        activeSpawners.clear();
         if (cacheClearTimer.run(1000)) {
             cachedVaultsAndTrials = new HashMap<>();
         }
@@ -208,6 +218,7 @@ public class TrialInfoESP extends BaseModule {
         boxCollector.clear();
         boxCollector2.clear();
         traceCollector.clear();
+        entityBoxCollector.clear();
         TracingOption tracingOption = traceOption.get();
         int miscRgb = colorMisc.get().withAlpha(255);
         if (enterTrialPosition != null
@@ -247,6 +258,7 @@ public class TrialInfoESP extends BaseModule {
                             highlightTrialKey(bp, miscRgb, tracingOption);
                         }
                         if (state == TrialSpawnerState.ACTIVE) {
+                            activeSpawners.add(bp.immutable());
                             color = colorSpawner.get();
                         }
                         if (state == TrialSpawnerState.WAITING_FOR_PLAYERS) {
@@ -333,7 +345,60 @@ public class TrialInfoESP extends BaseModule {
                     }
                 }
             }
+            if (enable.get() && trackMobs.get()) {
+                submitTrackedMobLines();
+            }
         }
+    }
+
+    private void submitTrackedMobLines() {
+        int color = colorSpawner.get().withAlpha(255);
+        for (Entity entity : mc.level.entitiesForRendering()) {
+            if (!(entity instanceof MetadataHolder holder)) {
+                continue;
+            }
+            if (holder.isMetaEmpty()) continue;
+            BlockPos spawnerPos = holder.getMetadata().get(this, KEY_TRIAL_SPAWNER_POS);
+            if (spawnerPos != null) {
+                lineRenderCollector.submit(
+                        List.of(
+                                Vec3.atCenterOf(spawnerPos),
+                                entity.getBoundingBox().getCenter()),
+                        color);
+                entityBoxCollector.submit(entity, color);
+            }
+        }
+    }
+
+    private void onEntitySpawn(Event<Entity> event) {
+        if (!enable.get() || checkNull() || !(event.context() instanceof LivingEntity entity)) {
+            return;
+        }
+        BlockPos spawnerPos = findMatchingTrialSpawner(entity);
+        if (spawnerPos != null && entity instanceof MetadataHolder holder) {
+            holder.getMetadata().put(this, KEY_TRIAL_SPAWNER_POS, spawnerPos);
+        }
+    }
+
+    private BlockPos findMatchingTrialSpawner(LivingEntity entity) {
+        BlockPos nearestPos = null;
+        double nearestDistanceSquared = 25.0D;
+        for (BlockPos pos : activeSpawners) {
+            double distanceSquared = Vec3.atCenterOf(pos).distanceToSqr(entity.position());
+            if (distanceSquared >= nearestDistanceSquared
+                    || !(mc.level.getBlockEntity(pos) instanceof TrialSpawnerBlockEntity trialSpawner)) {
+                continue;
+            }
+            var displayEntity = trialSpawner
+                    .getTrialSpawner()
+                    .getStateData()
+                    .getOrCreateDisplayEntity(trialSpawner.getTrialSpawner(), mc.level, TrialSpawnerState.ACTIVE);
+            if (displayEntity != null && displayEntity.getType() == entity.getType()) {
+                nearestDistanceSquared = distanceSquared;
+                nearestPos = pos.immutable();
+            }
+        }
+        return nearestPos;
     }
 
     public void onRender3D(Event<Render3D> event) {
@@ -351,6 +416,7 @@ public class TrialInfoESP extends BaseModule {
             traceCollector.render3D(event.context().stack(), event.context().partialTicks());
             boxCollector.render3D(event.context().stack(), event.context().partialTicks());
             boxCollector2.render3D(event.context().stack(), event.context().partialTicks());
+            entityBoxCollector.render3D(event.context().stack(), event.context().partialTicks());
         } finally {
             RenderUtils.stopDrawVirtual(event.context().stack());
         }
@@ -384,7 +450,7 @@ public class TrialInfoESP extends BaseModule {
 
     private void submitHighlight(Entity entity, int color, TracingOption tracingOption) {
         if (enable.get() && renderKeys.get() && tracingOption.box()) {
-            boxCollector.submit(entity.getBoundingBox(), color);
+            entityBoxCollector.submit(entity, color);
         }
         if (enable.get() && renderKeys.get() && tracingOption.line()) {
             traceCollector.submit(entity.getBoundingBox().getCenter(), color);
@@ -407,5 +473,6 @@ public class TrialInfoESP extends BaseModule {
 
     private void onSwitchWorld() {
         cachedVaultsAndTrials.clear();
+        activeSpawners.clear();
     }
 }

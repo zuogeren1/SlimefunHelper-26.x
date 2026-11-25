@@ -1,7 +1,6 @@
 package me.matl114.hacks.modules.survival;
 
 import me.matl114.gui.interfaces.ElementFactory;
-import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.ClientUtils;
 
 import com.mojang.datafixers.util.Pair;
@@ -19,6 +18,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.combat.TargetSelector;
 import me.matl114.hacks.modules.interact.Interact;
+import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.utils.config.*;
 import me.matl114.hacks.utils.move.AdjustmentSchedular;
@@ -26,7 +26,6 @@ import me.matl114.hacks.utils.move.PathingSchedular;
 import me.matl114.hacks.utils.move.goal.*;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
-import me.matl114.managers.Tasks;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.NBTRef;
@@ -47,6 +46,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.tags.EnchantmentTags;
+import net.minecraft.network.protocol.game.ClientboundMerchantOffersPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
@@ -124,8 +124,10 @@ public class AutoLibrarian extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
-        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
+        registerListener(Listener.getPostTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
+        registerListener(
+                Listener.getPacketPostHandlePoint().getChannel(ClientboundMerchantOffersPacket.class), this::onMerchantUpdate);
     }
 
     final PathingSchedular pathingSchedular = new PathingSchedular();
@@ -273,6 +275,10 @@ public class AutoLibrarian extends BaseModule {
         return null;
     }
 
+    public BlockPos findWorkStation(Villager villager) {
+        return locateWorkStation(villager);
+    }
+
     public void refreshTarget() {
         if (targetVillager != null) {
             targetWorkStationBase = locateWorkStation(targetVillager);
@@ -303,6 +309,8 @@ public class AutoLibrarian extends BaseModule {
         }
     }
 
+    public void onMerchantUpdate() {}
+
     public void onRender(Event<Render3D> event) {
         if (enable.get() && render.get()) {
             if (targetVillager != null && targetWorkStationBase != null) {
@@ -323,7 +331,6 @@ public class AutoLibrarian extends BaseModule {
         }
     }
 
-    private int lastInteractTick = 0;
     private boolean noLecternNotify = false;
     private int lastMerchantScreenSyncId = -1;
     private boolean currentAccepted = false;
@@ -334,6 +341,8 @@ public class AutoLibrarian extends BaseModule {
             clearTarget();
             // end
             if (ClientUtils.getScreen(mc) instanceof MerchantScreen merchant) {
+                // remove map
+                onMerchantScreenUpdate(merchant);
                 merchant.onClose();
             }
             return;
@@ -353,11 +362,10 @@ public class AutoLibrarian extends BaseModule {
         if (currentState.isAir() || currentState.liquid() || currentState.canBeReplaced()) {
             hasOpened = false;
             if (Objects.equals(professionRegistryKey, VillagerProfession.NONE)) {
-                IndexEntry<ItemStack> findStack = InventoryUtils.findPlayerItem(s -> s.is(Items.LECTERN), true, false);
+                IndexEntry<ItemStack> findStack = InventoryUtils.findPlayerItem(s -> s.is(Items.LECTERN), false, false);
                 if (findStack != null) {
                     noLecternNotify = false;
-                    Runnable callback =
-                            InvExtra.INSTANCE.swapItemToHand(findStack.index(), false, GhostHandMode.INV_SWAP);
+                    Runnable callback = InvExtra.INSTANCE.swapItemToHand(findStack.index(), false);
                     if (callback != null) {
                         Direction direction = MathUtils.getHorizontalFacing(
                                 Vec3.atCenterOf(targetWorkspace).subtract(targetVillager.position()));
@@ -403,12 +411,17 @@ public class AutoLibrarian extends BaseModule {
                     ClientUtils.swing(mc.player, InteractionHand.MAIN_HAND);
                     access.sendBreakPacket(true);
                 } else if (!WorldManager.canVillagerResetTrade(merchantScreen.getMenu())) {
-                    WorldManager.INSTANCE.setVillagerTradeLock(targetVillager, true);
+                    if (targetVillager != null) {
+                        WorldManager.INSTANCE.setVillagerTradeLock(targetVillager, true);
+                    }
                 }
             } else if (ClientUtils.getScreen(mc) == null || ClientUtils.getScreen(mc) instanceof AbstractContainerScreen<?>) {
-                if (!hasOpened && lastInteractTick + 5 < Tasks.getTick()) {
+                if (!hasOpened
+                        && !SequencedActionManager.INSTANCE
+                                .getEntityInteractTracker()
+                                .isWaitingResponse(entity -> entity instanceof Villager)) {
                     Interact.INSTANCE.interactEntity(targetVillager);
-                    lastInteractTick = Tasks.getTick();
+                    SequencedActionManager.INSTANCE.getEntityInteractTracker().postInteract(targetVillager);
                 }
             }
         }
@@ -420,7 +433,7 @@ public class AutoLibrarian extends BaseModule {
                     new LinkedHashMap<>(enchantments.get().idMap());
             Integer val = map.remove(remove.unwrapKey().get().identifier());
             if (val != null && val >= price) {
-                if (!onlyMaxLeve.get() && level >= remove.value().getMaxLevel()) {
+                if (!onlyMaxLeve.get() || level >= remove.value().getMaxLevel()) {
                     map.remove(remove.unwrapKey().get().identifier());
                     if (log.get()) {
                         logI18N(
@@ -487,10 +500,10 @@ public class AutoLibrarian extends BaseModule {
             }
             currentAccepted = true;
             if (autoLockTrade.get()) {
-                if (InventoryUtils.findPlayerItem(s -> s.is(Items.BOOK), true, false) != null) {
+                if (InventoryUtils.computePlayerInventory(Items.BOOK) >= 1) {
                     if (InventoryUtils.computePlayerInventory(Items.EMERALD) >= price) {
                         var access = MerchantScreenAccess.of(screen);
-                        access.setSelectedIndex(access.getSelectedIndex());
+                        access.setSelectedIndex(findIndex.index());
                         mc.gameMode.handleContainerInput(handler.containerId, 2, 1, ContainerInput.PICKUP, mc.player);
                     } else {
                         if (log.get()) {
@@ -508,7 +521,9 @@ public class AutoLibrarian extends BaseModule {
                 }
             }
         } else {
-            WorldManager.INSTANCE.setVillagerTradeLock(targetVillager, true);
+            if (targetVillager != null) {
+                WorldManager.INSTANCE.setVillagerTradeLock(targetVillager, true);
+            }
             currentAccepted = true;
             IndexEntry<Pair<Integer, Holder<Enchantment>>> findIndex = checkTradingIndex(handler);
             if (findIndex != null) {
@@ -572,17 +587,20 @@ public class AutoLibrarian extends BaseModule {
                 return new GoalNearBlockPos(nearest.blockPosition());
             }
         } else {
+            if (MathUtils.isInBox(mc.player.position(), Vec3.atCenterOf(targetWorkStationBase), 1.5)) {
+                return null;
+            }
             Direction lastDirection = MathUtils.getHorizontalFacing(
                     Vec3.atCenterOf(targetWorkStationBase).subtract(targetVillager.position()));
-            Direction clockWise = lastDirection.getClockWise(Direction.Axis.Y);
-            BlockPos testPos = targetWorkStationBase.offset(0, 1, 0).relative(clockWise);
+            BlockPos testPos = targetWorkStationBase.offset(0, 1, 0).relative(lastDirection);
             BlockState testState = mc.level.getBlockState(testPos);
             if (!testState
                     .getCollisionShape(mc.level, testPos, CollisionContext.of(mc.player))
                     .isEmpty()) {
-                testPos = targetWorkStationBase.offset(0, 1, 0).relative(clockWise.getOpposite());
+                testPos = targetWorkStationBase.offset(0, 1, 0).relative(lastDirection.getOpposite());
             }
-            return new GoalBlockPos(testPos);
+
+            return new GoalNearBlockPos(testPos);
         }
     }
 
@@ -595,49 +613,64 @@ public class AutoLibrarian extends BaseModule {
     }
 
     {
-        adjustmentSchedular.adjustRange(1.5);
+        adjustmentSchedular.adjustRange(2.5);
         adjustmentSchedular.center(this::adjustmentGoal);
     }
 
     public Vec3 adjustmentGoal() {
         if (adjustmentControl.get() && targetVillager != null && targetWorkStationBase != null) {
             BlockPos targetWorkSpace = targetWorkStationBase.offset(0, 1, 0);
-            BlockPos playerPos = mc.player.blockPosition();
-            int manDistance = MathUtils.getManhattanDistance(targetWorkSpace, playerPos);
-            if (manDistance <= 1) {
-                Direction lastDirection = MathUtils.getHorizontalFacing(
-                        Vec3.atCenterOf(targetWorkStationBase).subtract(targetVillager.position()));
-                Direction leftPos = lastDirection.getClockWise();
-                Direction rightPos = lastDirection.getCounterClockWise();
-                BlockPos leftBp = targetWorkSpace.relative(leftPos);
-                BlockPos rightBp = targetWorkSpace.relative(rightPos);
-                if (Objects.equals(playerPos, leftBp)) {
-                    Vec3 corner = Vec3.atBottomCenterOf(playerPos)
-                            .relative(lastDirection.getOpposite(), 0.2)
-                            .relative(rightPos, 0.15);
-                    if (MathUtils.isInBox(corner, mc.player.position(), 0.05)) {
-                        return null;
-                    }
-                    return corner.relative(lastDirection.getOpposite(), 0.5);
+            Vec3 playerVec = mc.player.position();
 
-                } else if (Objects.equals(playerPos, rightBp)) {
-                    Vec3 corner = Vec3.atBottomCenterOf(playerPos)
-                            .relative(lastDirection.getOpposite(), 0.23)
-                            .relative(leftPos, 0.15);
-                    if (MathUtils.isInBox(corner, mc.player.position(), 0.05)) {
-                        return null;
-                    }
-                    return corner.relative(lastDirection.getOpposite(), 0.5);
-                } else if (Objects.equals(playerPos, targetWorkSpace)) {
-                    if (MathUtils.isInBox(Vec3.atCenterOf(leftBp), mc.player.position(), 1)) {
-                        return Vec3.atBottomCenterOf(leftBp);
-                    } else {
-                        return Vec3.atBottomCenterOf(rightBp);
-                    }
+            Direction lastDirection = MathUtils.getHorizontalFacing(
+                    Vec3.atCenterOf(targetWorkStationBase).subtract(targetVillager.position()));
+            Direction leftPos = lastDirection.getClockWise();
+            Direction rightPos = lastDirection.getCounterClockWise();
+
+            BlockPos leftBp = targetWorkSpace.relative(leftPos);
+            BlockPos rightBp = targetWorkSpace.relative(rightPos);
+            Vec3 leftCorner = Vec3.atBottomCenterOf(leftBp)
+                    .relative(lastDirection.getOpposite(), 0.2)
+                    .relative(rightPos, 0.15);
+            Vec3 rightCorner = Vec3.atBottomCenterOf(rightBp)
+                    .relative(lastDirection.getOpposite(), 0.23)
+                    .relative(leftPos, 0.15);
+            if (MathUtils.isInBox(Vec3.atCenterOf(leftBp), playerVec, 0.75)) {
+                if (MathUtils.isInBox(leftCorner, playerVec, 0.05)) {
+                    return null;
                 }
-            } else if (manDistance == 2) {
-                return targetVillager.position();
+                return leftCorner.relative(lastDirection.getOpposite(), 0.5);
+            } else if (MathUtils.isInBox(Vec3.atCenterOf(rightBp), playerVec, 0.75)) {
+                if (MathUtils.isInBox(rightCorner, playerVec, 0.05)) {
+                    return null;
+                }
+                return rightCorner.relative(lastDirection.getOpposite(), 0.5);
             }
+
+            Vec3 leftGoal = Vec3.atBottomCenterOf(leftBp).relative(lastDirection, 0.8);
+            Vec3 rightGoal = Vec3.atBottomCenterOf(rightBp).relative(lastDirection, 0.8);
+            if (MathUtils.isInBox(leftGoal, playerVec, 0.2)) {
+                return leftCorner;
+            } else if (MathUtils.isInBox(rightGoal, playerVec, 0.2)) {
+                return rightCorner;
+            }
+
+            double leftDistance = playerVec.distanceToSqr(leftGoal);
+            double rightDistance = playerVec.distanceToSqr(rightGoal);
+            double captureRangeSq = 1.5 * 1.5;
+
+            if (leftDistance > captureRangeSq && rightDistance > captureRangeSq) {
+                if (MathUtils.isInBox(Vec3.atCenterOf(targetWorkStationBase), playerVec, 2.5)) {
+                    return Vec3.atBottomCenterOf(targetWorkStationBase).add(0, 1, 0);
+                }
+                return null;
+            }
+
+            if (leftDistance <= captureRangeSq && (leftDistance <= rightDistance || rightDistance > captureRangeSq)) {
+                return leftGoal;
+            }
+
+            return rightGoal;
         }
         return null;
     }

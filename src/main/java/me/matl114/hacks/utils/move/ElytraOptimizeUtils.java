@@ -1132,7 +1132,7 @@ public class ElytraOptimizeUtils {
                 extraTargeting = targetTo;
             }
         } else {
-            if (pitch > -7) {
+            if (pitch > -7 || pitch < -89.9999) {
                 return applyAxisLimit2(currentMotion, pitch, yaw, apply);
             } else {
                 float extraYaw = getV5ExtraYaw(currentMotion, pitch, yaw, autoRescaleAmount);

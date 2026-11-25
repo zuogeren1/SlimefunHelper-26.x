@@ -165,17 +165,23 @@ public class NoInteract extends BaseModule {
                             return;
                         }
                         if (autoCorrect.get()) {
-                            BlockPos targetPos = InteractUtils.getCurrentPlacePos(mc.player, hitResult);
                             BlockState targetState = InteractUtils.getBlockPlacement(mc.player, hand, stack, hitResult);
                             if (targetState != null) {
                                 BlockHitResult hitResultOverride = handleMayAutoCorrect(hitResult);
                                 if (hitResultOverride != null) {
                                     if (correctState.get()) {
-
-                                        BlockRotate.INSTANCE.addTempStateSchematic(targetPos, targetState);
+                                        // 修正后的命中点与目标状态不一致时，需要旋转欺骗才能放出正确朝向
+                                        BlockRotate.INSTANCE.handleYawDeceivePlace(
+                                                correctMode.get(),
+                                                hitResultOverride,
+                                                hand,
+                                                targetState,
+                                                swingHand.get());
+                                    } else {
+                                        InteractionTasks.handlePlaceMode(
+                                                correctMode.get(), hitResultOverride, hand, swingHand.get());
                                     }
-                                    InteractionTasks.handlePlaceMode(
-                                            correctMode.get(), hitResultOverride, hand, swingHand.get());
+
                                     event.cancel();
                                     event.context.actionResult(InteractionResult.SUCCESS);
                                     return;

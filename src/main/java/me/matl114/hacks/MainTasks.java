@@ -109,12 +109,12 @@ public class MainTasks {
                 } else {
                     len = 250;
                 }
-                String generatedContent = "§b§k" + ("1a锕β".repeat(len));
+                String generatedContent = "2222" + ("锟斤拷".repeat(len));
                 mc.getConnection()
                         .send(new ServerboundEditBookPacket(
                                 InventoryUtils.getSelectedSlot(),
                                 Collections.nCopies(nCopies, generatedContent),
-                                args.length > 0 ? Optional.of(String.join("\n", args)) : Optional.empty()));
+                                Optional.empty()));
             } else {
                 Debug.chat("手持物品不是书");
             }

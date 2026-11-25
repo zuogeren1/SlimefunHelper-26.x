@@ -18,6 +18,7 @@ import me.matl114.hacks.modules.combat.TargetSelector;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.ElytraExtra;
 import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.utils.InteractUtils;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
@@ -28,7 +29,6 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.hacks.utils.InteractUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.versioned.api.VItem;
@@ -271,7 +271,7 @@ public class AutoEat extends BaseModule {
                 ? InventoryUtils.findBestPlayerItem(
                         stack -> scoreFood(stack, healthPriority),
                         ghostHand.get().getSearchSize(false),
-                        true,
+                        false,
                         false)
                 : findHandStack(healthPriority);
     }

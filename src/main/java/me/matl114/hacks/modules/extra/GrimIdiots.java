@@ -14,6 +14,7 @@ import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.interact.Interact;
+import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.PlayerInputManager;
 import me.matl114.hacks.modules.task.DisablerManager;
@@ -23,7 +24,6 @@ import me.matl114.hacks.utils.enums.LegalInteractMode;
 import me.matl114.hacks.utils.interact.InteractRequest;
 import me.matl114.hacks.utils.interact.InteractionQueue;
 import me.matl114.hacks.utils.interact.TaskAction;
-import me.matl114.hacks.utils.tasks.TimerExecutor;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
@@ -307,13 +307,19 @@ public class GrimIdiots extends BaseModule {
                 InteractionTasks.getPlaceSupportingResult(pos, queue.enableAirPlace(), queue.enablePositionPlace()));
     }
 
+    private boolean isAutoPlaceTimedOut(int[] startTick) {
+        int tick = Tasks.getTick();
+        if (startTick[0] < 0) startTick[0] = tick;
+        return tick >= startTick[0] + 10;
+    }
+
     private int findSlot(Predicate<ItemStack> predicate) {
-        var item = InventoryUtils.findPlayerItem(predicate, true, false);
+        var item = InventoryUtils.findPlayerItem(predicate, false, false);
         return item == null ? -1 : item.index();
     }
 
     private int findBestSlot() {
-        var item = InventoryUtils.findBestPlayerItem(this::scoreItem, true, false);
+        var item = InventoryUtils.findBestPlayerItem(this::scoreItem, false, false);
         return item == null ? -1 : item.index();
     }
 
@@ -368,13 +374,14 @@ public class GrimIdiots extends BaseModule {
         Function<ItemStack, Double> baseScore = stack -> score(tStruct, stack);
         Function<ItemStack, Double> aboveScore = stack -> score(aboveStruct, stack);
         int[] startTick = {0};
+        int[] autoPlaceStartTick = {-1};
         boolean[] bugPath = {false};
         boolean[] hasBugBlock = {false};
         placementQueue.enqueueAll(List.of(request(
                 stack -> 1.0,
                 (queue, matched) -> {
                     if (!hasTStructureItems(tStruct, aboveStruct)) return queue.abort();
-                    var bug = InventoryUtils.findPlayerItem(this::isBugBlock, true, false);
+                    var bug = InventoryUtils.findPlayerItem(this::isBugBlock, false, false);
                     hasBugBlock[0] = bug != null;
                     bugPath[0] = bug != null && bug.val().getCount() >= 2;
                     startTick[0] = Tasks.getTick();
@@ -402,6 +409,7 @@ public class GrimIdiots extends BaseModule {
                             BlockPos abovePos = pos.above().above();
                             if (!golem) abovePos = abovePos.relative(dir.getClockWise(Direction.Axis.Y));
                             if (canPlaceBlock(queue1, abovePos)) return queue1.success();
+                            if (isAutoPlaceTimedOut(autoPlaceStartTick)) return queue1.abort();
                             PlayerInputManager.INSTANCE.addJumpModifier(0, true, 0);
                             return queue1.pause();
                         });
@@ -486,33 +494,34 @@ public class GrimIdiots extends BaseModule {
     }
 
     private boolean hasTStructureItems(Predicate<ItemStack> base, Predicate<ItemStack> above) {
-        return InventoryUtils.findPlayerItem(base, true, false) != null
-                && InventoryUtils.findPlayerItem(above, true, false) != null
-                && InventoryUtils.findPlayerItem(ItemStack::isEmpty, true, true) != null;
+        return InventoryUtils.findPlayerItem(base, false, false) != null
+                && InventoryUtils.findPlayerItem(above, false, false) != null
+                && InventoryUtils.findPlayerItem(ItemStack::isEmpty, false, true) != null;
     }
-
-    TimerExecutor executor = new TimerExecutor();
 
     private void tickAutoNameWither() {
         if (autoName.get()) {
-            if (executor.canRun(2)) {
-                for (var re : mc.level.getEntitiesOfClass(
-                        WitherBoss.class,
-                        mc.player.getBoundingBox().inflate(8, 8, 8),
-                        entity -> !entity.hasCustomName())) {
-                    if (!re.hasCustomName()) {
-                        var entry = InventoryUtils.findPlayerItem(
-                                stack -> stack.is(Items.NAME_TAG) && stack.has(DataComponents.CUSTOM_NAME),
-                                true,
-                                false);
-                        if (entry != null) {
-                            var val = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, GhostHandMode.INV_SWAP);
-                            if (val != null) {
-                                Interact.INSTANCE.interactEntity(re);
-                                val.run();
-                                executor.mark();
-                                return;
-                            }
+            for (var re : mc.level.getEntitiesOfClass(
+                    WitherBoss.class,
+                    mc.player.getBoundingBox().inflate(8, 8, 8),
+                    entity -> !entity.hasCustomName())) {
+                if (SequencedActionManager.INSTANCE.getEntityInteractTracker().isWaitingResponse(re)) {
+                    continue;
+                }
+                if (!re.hasCustomName()) {
+                    var entry = InventoryUtils.findPlayerItem(
+                            stack -> stack.is(Items.NAME_TAG) && stack.has(DataComponents.CUSTOM_NAME),
+                            false,
+                            false);
+                    if (entry != null) {
+                        var val = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, GhostHandMode.INV_SWAP);
+                        if (val != null) {
+                            Interact.INSTANCE.interactEntity(re);
+                            SequencedActionManager.INSTANCE
+                                    .getEntityInteractTracker()
+                                    .postInteract(re);
+                            val.run();
+                            return;
                         }
                     }
                 }
@@ -530,6 +539,7 @@ public class GrimIdiots extends BaseModule {
                     directRequest(placeSequence.get(3), this::scoreItem)));
         } else if (mode == Mode.OVER_INTERACT) {
             int[] startTick = {0};
+            int[] autoPlaceStartTick = {-1};
             List<InteractRequest> steps = new ArrayList<>();
             steps.add(placeBlockRequest(placeSequence.get(0), this::scoreItem));
             for (int i = 0; i < 9; i++) {
@@ -547,6 +557,7 @@ public class GrimIdiots extends BaseModule {
                         if (!matched) return queue.abort();
                         BlockPos top = placeSequence.get(3);
                         if (!canPlaceBlock(queue, top)) {
+                            if (isAutoPlaceTimedOut(autoPlaceStartTick)) return queue.abort();
                             PlayerInputManager.INSTANCE.addJumpModifier(0, true, 0);
                             return queue.pause();
                         }
@@ -564,6 +575,7 @@ public class GrimIdiots extends BaseModule {
             placementQueue.enqueueAll(steps);
         } else if (mode == Mode.GHOST_HAND_AIR) {
             boolean[] high = {false};
+            int[] autoPlaceStartTick = {-1};
             List<InteractRequest> steps = new ArrayList<>();
             steps.add(placeBlockRequest(placeSequence.get(0), this::scoreItem));
             steps.add(placeBlockRequest(placeSequence.get(1), this::scoreItem));
@@ -576,7 +588,8 @@ public class GrimIdiots extends BaseModule {
                         high[0] = mc.player.getEyeY() > centerPos.getY() + 2;
                         if (!InteractUtils.canInteractAndPlace(mc.player, supporting)
                                 || (!high[0]
-                                        && InventoryUtils.findPlayerItem(this::isHalfBlock, true, false) == null)) {
+                                        && InventoryUtils.findPlayerItem(this::isHalfBlock, false, false) == null)) {
+                            if (isAutoPlaceTimedOut(autoPlaceStartTick)) return queue.abort();
                             PlayerInputManager.INSTANCE.addJumpModifier(0, true, 0);
                             return queue.pause();
                         }
@@ -589,6 +602,7 @@ public class GrimIdiots extends BaseModule {
     }
 
     private List<InteractRequest> ghostDickRequests(BlockPos centerPos, boolean[] high) {
+        int[] autoPlaceStartTick = {-1};
         Function<ItemStack, Double> empty = stack -> score(ItemStack::isEmpty, stack);
         List<InteractRequest> steps = new ArrayList<>();
         steps.add(request(
@@ -598,6 +612,7 @@ public class GrimIdiots extends BaseModule {
                     FlagEntry<BlockHitResult> supporting =
                             InteractionTasks.getPlaceSupportingResult(centerPos, false, false);
                     if (!InteractUtils.canInteractAndPlace(mc.player, supporting)) {
+                        if (isAutoPlaceTimedOut(autoPlaceStartTick)) return queue.abort();
                         PlayerInputManager.INSTANCE.addJumpModifier(0, true, 0);
                         return queue.pause();
                     }

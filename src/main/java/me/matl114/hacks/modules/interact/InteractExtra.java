@@ -122,9 +122,12 @@ public class InteractExtra extends BaseModule implements RayCastCalculator<Block
         registerListener(Listener.getUseItemCooldownReset(), this::onCooldown);
     }
 
+    public double getBlockReachAttribute() {
+        return mc.player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
+    }
+
     public double getBlockReachDistance() {
-        return mc.player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE)
-                + (mc.player.isPassenger() ? ridingReachDistance.get() : reachDistance.get());
+        return getBlockReachAttribute() + (mc.player.isPassenger() ? ridingReachDistance.get() : reachDistance.get());
     }
 
     @Override
@@ -160,10 +163,11 @@ public class InteractExtra extends BaseModule implements RayCastCalculator<Block
     }
 
     public boolean isWithinInteractRange(Vec3 pos, BlockPos bp) {
-        return isWithinInteractRange(pos, bp, getBlockReachDistance());
-    }
-
-    public boolean isWithinInteractRange(Vec3 pos, AABB bp) {
+        // 先用不带模块额外触达加成的属性值做一次廉价排除，命中不到才走完整判定
+        if (new AABB(bp).distanceToSqr(pos.add(0, mc.player.dimensions.eyeHeight(), 0))
+                > MathUtils.s2(1.0D + getBlockReachAttribute())) {
+            return false;
+        }
         return isWithinInteractRange(pos, bp, getBlockReachDistance());
     }
 
@@ -171,7 +175,7 @@ public class InteractExtra extends BaseModule implements RayCastCalculator<Block
         return isWithinInteractRange(pos, new AABB(bp), range);
     }
 
-    public boolean isWithinInteractRange(Vec3 pos, AABB box, double range) {
+    private boolean isWithinInteractRange(Vec3 pos, AABB box, double range) {
         if (box.distanceToSqr(pos) > MathUtils.s2(range + 2 + mc.player.dimensions.eyeHeight())) {
             // filter all outofrange
             // optimize calculation

@@ -122,6 +122,7 @@ public class Sprint extends BaseModule implements LegalMovementManager.MovementM
                 if (yaw != 0.0F) {
                     RotationManager.INSTANCE.push(
                             RotationManager.ofDirection(Optional.empty(), Optional.of(mc.player.getYRot() + yaw))
+                                    .applyMoveFix(true)
                                     .preTickTask(() -> {
                                         PlayerInputManager.INSTANCE.addSprintModifier(0, true, 0);
                                     })

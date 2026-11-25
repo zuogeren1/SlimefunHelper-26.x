@@ -20,6 +20,7 @@ import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.FloatingUtils;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.enums.GhostHandMode;
@@ -75,7 +76,7 @@ public class PacketMine extends BaseModule {
 
     public final DoubleRef mineThreshold = builder(packetMine.add("mine-threshold"), DoubleRef.TYPE)
             .defaultValue(0.7)
-            .validator(Configs.doubleRange(-0.0001F, 1.0001F))
+            .validator(Configs.doubleRange(0.0F, 1.0001F))
             .build();
 
     public final FlagRef autoTool = flagBuilder(packetMine.add("auto-pickaxe")).build();
@@ -168,6 +169,8 @@ public class PacketMine extends BaseModule {
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
         ModulePreset preset = event.context.getValue();
         if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
+        if (preset.isGhostHandPreset()) ghostHand.set(preset.getGhostHandMode(ghostHand.get()));
+        if (preset.isSwingMinePreset()) swingHand.set(preset.getSwingMine(swingHand.get()));
     }
 
     public boolean hasMiningTarget() {
@@ -197,11 +200,14 @@ public class PacketMine extends BaseModule {
     }
 
     public void onTick() {
+        if (!mc.options.keyAttack.isDown()) {
+            clearRequest();
+        }
         if (isActive()) {
             BlockPos request = getRequestedBlock();
             if (checkNull()) return;
             if (delayMine) {
-                if (MineExtra.INSTANCE.getMiningPacketCooldown(0) == 0) {
+                if (MineExtra.INSTANCE.getOptimMiningPacketCooldown(1) == 0) {
                     if (request != null) {
                         if (!MineExtra.INSTANCE.handleMineMode(request, legalMiningMode.get())) {
                             return;
@@ -239,7 +245,7 @@ public class PacketMine extends BaseModule {
                     IndexEntry<ItemStack> currentItemSlot = getCurrentUsableTool(blockState);
 
                     ItemStack currentTool = currentItemSlot.val();
-                    if (canMine(blockState, currentTool)) {
+                    if (tickMine(blockState, currentTool)) {
                         progress = PlayerInteractionAccess.of(mc.gameMode)
                                 .predictCurrentMiningProgressWithTool(currentTool);
                         Event<BlockBreak> eventPre = new Event<>(
@@ -277,6 +283,21 @@ public class PacketMine extends BaseModule {
                             }
                             currentTickCallback = callback;
                             postMineCallback = eventPre.context();
+                        }
+                    } else if (autoTool.get()
+                            && ServerFeature.INSTANCE.attributeSwap.get()
+                            && currentItemSlot.index() != InventoryUtils.getSelectedSlot()
+                            && isMineable(blockState)) {
+                        // swap ahead
+                        var access = PlayerInteractionAccess.of(mc.gameMode);
+                        float speed = access.predictCurrentMiningProgressWithTool(currentTool, 1, false);
+                        if (groundDeceive.get() && !mc.player.onGround()) {
+                            speed *= 5;
+                        }
+                        MineExtra.INSTANCE.submitProgress(speed);
+                        if (speed > Math.min(0.98, mineThreshold.get())) {
+                            currentTickCallback =
+                                    InvExtra.INSTANCE.swapItemToHand(currentItemSlot.index(), false, ghostHand.get());
                         }
                     }
                 }
@@ -349,6 +370,9 @@ public class PacketMine extends BaseModule {
             } else {
                 calS = currentState;
             }
+            if (calS.getBlock().defaultDestroyTime() <= 0) {
+                return InventoryUtils.getSelectedItem();
+            }
             var re = InventoryUtils.findBestPlayerItem(
                     item -> {
                         return (double)
@@ -356,7 +380,7 @@ public class PacketMine extends BaseModule {
                                         mc.player, calS, item, false);
                     },
                     ghostHand.get().getSearchSize(false),
-                    true,
+                    false,
                     true);
             if (re != null) {
                 return re;
@@ -372,20 +396,19 @@ public class PacketMine extends BaseModule {
                 && (!whiteList.get() || !whiteListRegex.get().test(state.getBlock()));
     }
 
-    public boolean canMine(BlockState state, ItemStack tool) {
+    private boolean tickMine(BlockState state, ItemStack tool) {
         // do not mine liquid, that's a disaster
         // do not mine air, shit
         if (isMineable(state)) {
-            if (mineThreshold.get() > 0) {
-                var access = PlayerInteractionAccess.of(mc.gameMode);
-                float speed = access.predictCurrentMiningProgressWithTool(tool);
-                if (groundDeceive.get() && !mc.player.onGround()) {
-                    speed *= 5;
-                }
-                return speed > Math.min(0.98, mineThreshold.get());
+            var access = PlayerInteractionAccess.of(mc.gameMode);
+            float speed = access.predictCurrentMiningProgressWithTool(tool);
+            if (groundDeceive.get() && !mc.player.onGround()) {
+                speed *= 5;
             }
-            return true;
+            MineExtra.INSTANCE.submitProgress(speed);
+            return speed > Math.min(0.98, mineThreshold.get());
         } else {
+            MineExtra.INSTANCE.submitProgress(0.0F);
             return false;
         }
     }

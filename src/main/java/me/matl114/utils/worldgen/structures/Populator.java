@@ -21,6 +21,7 @@ public final class Populator {
     private static final int ANCIENT_CITY_START_SEARCH_HALO_CHUNKS = 9;
     private static final int END_CITY_START_SEARCH_HALO_CHUNKS = 8;
     private static final Identifier END_CITY = Identifier.withDefaultNamespace("end_city");
+    private static final Identifier MINESHAFTS = Identifier.withDefaultNamespace("mineshafts");
     private static final Identifier END_CITY_LOOT = Identifier.withDefaultNamespace("chests/end_city_treasure");
     private static final Identifier DESERT_PYRAMID = Identifier.withDefaultNamespace("desert_pyramid");
     private static final Identifier DESERT_PYRAMID_LOOT = Identifier.withDefaultNamespace("chests/desert_pyramid");
@@ -58,7 +59,11 @@ public final class Populator {
             return Optional.empty();
         }
         return Optional.of(MinecraftWorldgenRandom.forDecorationChunk(
-                seed, Math.toIntExact(decorationChunkX), Math.toIntExact(decorationChunkZ), index));
+                seed,
+                Math.toIntExact(decorationChunkX),
+                Math.toIntExact(decorationChunkZ),
+                index.structureIndex(),
+                index.generationStep()));
     }
 
     public Optional<AncientCityVariant> generateAncientCity(StructurePosition structure) {
@@ -458,7 +463,8 @@ public final class Populator {
         for (long regionX = minRegionX; regionX <= maxRegionX; regionX++) {
             for (long regionZ = minRegionZ; regionZ <= maxRegionZ; regionZ++) {
                 StructureConfig.StructureChunk chunk = config.getStartChunk(seed, regionX, regionZ);
-                if (range.contains(chunk.chunkX(), chunk.chunkZ())) {
+                if (config.passesFrequencyReduction(seed, chunk.chunkX(), chunk.chunkZ())
+                        && range.contains(chunk.chunkX(), chunk.chunkZ())) {
                     positions.add(new StructurePosition(config, chunk.chunkX(), chunk.chunkZ()));
                 }
                 if (regionZ == maxRegionZ) {
@@ -470,6 +476,30 @@ public final class Populator {
             }
         }
         return List.copyOf(positions);
+    }
+
+    /**
+     * Finds mineshaft structure-set start candidates after applying its legacy_type_3 frequency.
+     * The mesa/normal variant and eventual pieces still require biome and generator checks.
+     */
+    public List<MineshaftCandidate> generateMineshaftCandidates(ChunkRange range) {
+        Objects.requireNonNull(range);
+        if (lootVersion == LootVersion.V26_1) {
+            throw new IllegalArgumentException("Mineshaft placement has only been checked through Minecraft 1.21.11");
+        }
+        StructureConfig config = StructureConfig.vanillaConfigs().get(MINESHAFTS);
+        if (config == null) {
+            return List.of();
+        }
+        return generate(config, range).stream()
+                .map(candidate -> new MineshaftCandidate(
+                        config.structureSetId(),
+                        config.structureIds(),
+                        candidate.chunkX(),
+                        candidate.chunkZ(),
+                        lootVersion,
+                        MineshaftCandidate.Confidence.FREQUENCY_FILTERED_START_CHUNK_ONLY))
+                .toList();
     }
 
     public List<StructurePosition> generate(Collection<StructureConfig> configs, ChunkRange range) {

@@ -2,6 +2,7 @@ package me.matl114.hacks.modules.interact;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -14,8 +15,12 @@ import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.PacketMine;
 import me.matl114.hacks.modules.move.PlayerInputManager;
+import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.move.RotationManager;
 import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.EntrySet;
+import me.matl114.hacks.utils.config.NBTTypes;
+import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
 import me.matl114.hacks.utils.tasks.StateExecutor;
@@ -30,6 +35,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -37,6 +43,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.InteractUtils;
 
 public class SelfTrap extends BaseModule {
@@ -73,9 +81,17 @@ public class SelfTrap extends BaseModule {
 
     public final FlagRef airplace = flagBuilder(selfTrap.add("air-place")).build();
 
-    public final FlagRef scaffold = flagBuilder(selfTrap.add("lower")).build();
+    public final FlagRef placeLower =
+            flagBuilder(selfTrap.add("place-lower"), true).build();
+
+    public final NBTRef<OptionalPrimitive<Integer>> scaffold = builder(
+                    selfTrap.add("lower"), OptionalPrimitive.INT_TYPE)
+            .defaultValue(new OptionalPrimitive<>(true, NBTTypes.INT_TYPE, 1))
+            .build();
 
     public final FlagRef onlyGround = flagBuilder(selfTrap.add("only-ground")).build();
+
+    public final FlagRef autoCenter = flagBuilder(selfTrap.add("auto-center")).build();
 
     public final FlagRef autoSneak = flagBuilder(selfTrap.add("auto-sneak")).build();
 
@@ -126,15 +142,21 @@ public class SelfTrap extends BaseModule {
         }
     }
 
+    BlockPos lastSurround;
+    BlockPos lastCenter;
+
     public void onInput() {
         if (checkNull() || !enable.get()) {
             return;
         }
-
+        boolean triggerCenterFix = lastCenter != null;
         boolean wasSneaking = mc.player.isShiftKeyDown();
         if (++delayTicks >= delay.get()) {
             if (!eatingAbort.get() || !mc.player.isUsingItem()) {
                 if (checkSelfTrap()) {
+                    if (autoCenter.get() && mc.player.getPose() != Pose.SWIMMING) {
+                        triggerCenterFix = true;
+                    }
                     delayTicks = 0;
                     needPlaceState.state(true);
                 } else {
@@ -160,6 +182,39 @@ public class SelfTrap extends BaseModule {
                 }
             }
         }
+        if (triggerCenterFix && mc.player.onGround() && !mc.player.isFallFlying()) {
+            if (lastCenter == null || !MathUtils.isInBox(Vec3.atCenterOf(lastCenter), mc.player.position(), 0.75)) {
+                lastCenter = lastSurround == null ? PlayerStateManager.INSTANCE.lastVelocityAffectingPos : lastSurround;
+            }
+            var blockPos = lastCenter;
+            boolean fixed = mc.player.getX() - blockPos.getX() - 0.5 <= 0.2
+                    && mc.player.getX() - blockPos.getX() - 0.5 >= -0.2
+                    && mc.player.getZ() - blockPos.getZ() - 0.5 <= 0.2
+                    && mc.player.getZ() - 0.5 - blockPos.getZ() >= -0.2;
+            if (!fixed) {
+                PlayerInputUtils.Input inputUtils = PlayerInputUtils.of(mc.options);
+                if (!inputUtils.hasMovement()) {
+                    Vec3 lookHorizontal = Vec3.atCenterOf(blockPos).subtract(mc.player.position());
+                    float yaw = EntityUtils.rotationToYaw(lookHorizontal);
+                    RotationManager.INSTANCE.push(RotationManager.ofDirection(Optional.empty(), Optional.of(yaw))
+                            .preTick((rotation, player, matchRaycast) -> {
+                                PlayerInputUtils.Input movement = PlayerInputUtils.tryCorrectMovementInput(
+                                        new PlayerInputUtils.Input(true, false, false, false), yaw, player.getYRot());
+                                PlayerInputManager.INSTANCE.addInputModifier(
+                                        PlayerInputManager.Modifier.empty(0)
+                                                .forward(movement.forward())
+                                                .backward(movement.backward())
+                                                .left(movement.left())
+                                                .right(movement.right()),
+                                        0);
+                            })
+                            .applyMoveFix(false)
+                            .priority(0));
+                }
+            } else {
+                lastCenter = null;
+            }
+        }
     }
 
     public Set<BlockPos> getTargetingPos() {
@@ -178,11 +233,7 @@ public class SelfTrap extends BaseModule {
         }
 
         Set<BlockPos> result = new LinkedHashSet<>();
-        if (!onlyGround.get()
-                || !CollisionUtil.isBoxCollided(
-                        mc.level,
-                        mc.player,
-                        playerBox.setMinY(playerBox.minY - 1.5).setMaxY(playerBox.minY))) {
+        if (placeLower.get()) {
             for (BlockPos occupied : occupiedFeet) {
                 result.add(occupied.below());
             }
@@ -193,12 +244,19 @@ public class SelfTrap extends BaseModule {
                 BlockPos candidate = occupied.relative(direction);
                 if (!occupiedFeet.contains(candidate)) {
                     result.add(candidate);
-                    if (scaffold.get()) {
+                    if (scaffold.get().isPresent()) {
                         BlockState state = mc.level.getBlockState(candidate);
                         if (state.isAir() || state.liquid()) {
-                            BlockPos candidateDown = candidate.below();
-                            if (!occupiedFeet.contains(candidateDown)) {
-                                scaffoldPoses.add(candidateDown);
+                            for (var i = 1; i <= scaffold.get().getValue(); ++i) {
+                                BlockPos candidateDown = candidate.below(i);
+                                BlockState currentState = mc.level.getBlockState(candidateDown);
+                                if (!occupiedFeet.contains(candidateDown)) {
+                                    if (currentState.isAir() || currentState.liquid()) {
+                                        scaffoldPoses.add(candidateDown);
+                                    } else {
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -213,6 +271,7 @@ public class SelfTrap extends BaseModule {
         if (onlyGround.get() && !mc.player.onGround() && !CollisionUtil.isEntitySupported(mc.player, 1.5D)) {
             return false;
         }
+        lastSurround = PlayerStateManager.INSTANCE.lastVelocityAffectingPos;
 
         boolean legal = mode.get().isLegal();
         int maxPlace =
@@ -297,7 +356,7 @@ public class SelfTrap extends BaseModule {
                             + (blockItem.getBlock() instanceof BaseEntityBlock ? -1E8 : 0);
                 },
                 ghostHand.get().getSearchSize(offhand.get()),
-                true,
+                false,
                 false);
     }
 

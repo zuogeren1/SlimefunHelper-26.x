@@ -28,7 +28,6 @@ import me.matl114.utils.commands.params.ArgumentInputStream;
 import me.matl114.utils.commands.params.SimpleCommandArgs;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.LongTag;
@@ -172,7 +171,10 @@ public class WorldTasks {
             Executors.newSingleThreadExecutor(ThreadUtils.daemonThreadFactory("sfh-world-task"));
     static int tickCounter = 0;
 
-    public static void onTick(Event<LocalPlayer> eventUpdate) {
+    public static void onTick(Event<Void> eventUpdate) {
+        if (mc.player == null || mc.level == null) {
+            return;
+        }
         if (++tickCounter > 5) {
             tickCounter = 0;
             Set<ChunkPos> chunkPoses = pendingUpdateTasks.keySet();
@@ -315,6 +317,6 @@ public class WorldTasks {
         registerListener(Listener.getChunkUpdateListener(), WorldTasks::onChunkUpdate);
         registerListener(Listener.getWorldSwitchPoint(), WorldTasks::onWorldChange);
         registerListener(Listener.getServerLeavePoint(), WorldTasks::onGameExit);
-        registerListener(Listener.getPostGameTick(), WorldTasks::onTick);
+        registerListener(Listener.getPostTick(), WorldTasks::onTick);
     }
 }

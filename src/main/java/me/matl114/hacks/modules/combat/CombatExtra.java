@@ -343,6 +343,11 @@ public class CombatExtra extends BaseModule {
             }
         }
 
+        // 交互盒与插值盒是同一份计算，保留两个名字以兼容既有调用点。
+        public AABB getNextInteractBox(Entity entity, int ticksLater, boolean maySkipTick) {
+            return getNextInterpolatedBox(entity, ticksLater, maySkipTick);
+        }
+
         public AABB getNextInterpolatedBox(Entity entity, int ticksLater, boolean maySkipTick) {
             if (ticksLater <= 0) return getInteractBox(entity);
             if (newPacketLocation == null) return entity.getBoundingBox();

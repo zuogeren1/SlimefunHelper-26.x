@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import lombok.Getter;
+import me.matl114.accessors.access.PendingUpdateManagerAccess;
 import me.matl114.accessors.access.PlayerInteractBlockC2SPacketAccess;
 import me.matl114.accessors.access.PlayerInteractItemC2SPacketAccess;
 import me.matl114.events.Event;
@@ -75,11 +76,6 @@ public class SequencedActionManager extends BaseModule {
     public static EventChannelDispatcher<IndexEntry<? extends SequencedAction>> sequencedActionResponse =
             new EventChannelDispatcher<>(entry -> entry.val().getClass());
 
-    // Mirrors the pre-break block states that vanilla keeps in the (private) BlockStatePredictionHandler map:
-    // upstream reads them back through its own PendingUpdateManagerAccess, which we do not have, and the access
-    // widener does not expose that map, so we record the states we predict ourselves.
-    private final Map<BlockPos, BlockState> beforeBreakPredictionStates = new HashMap<>();
-
     private void onPlayerRespawn() {
         maxSeq = 0;
         maxAckSeq = 0;
@@ -89,7 +85,6 @@ public class SequencedActionManager extends BaseModule {
         blockPlaceSequences.clear();
         itemUsageSequences.clear();
         blockBreakSequences.clear();
-        beforeBreakPredictionStates.clear();
         lastBlockPlace = null;
         lastItemUse = null;
     }
@@ -184,7 +179,7 @@ public class SequencedActionManager extends BaseModule {
         while ((val = ackList.peek()) != null && val.index() <= ack) {
             var pollOut = ackList.pollFirst();
             if (pollOut != null) {
-                onActionAcked(pollOut);
+                sequencedActionResponse.broadcast(pollOut);
             }
         }
         if (!ackList.isEmpty()) {
@@ -193,18 +188,10 @@ public class SequencedActionManager extends BaseModule {
                 var s = iter.next();
                 if (s.index() <= ack) {
                     iter.remove();
-                    onActionAcked(s);
+                    sequencedActionResponse.broadcast(s);
                 }
             }
         }
-    }
-
-    private void onActionAcked(IndexEntry<? extends SequencedAction> entry) {
-        // drop the mirrored pre-break state together with the action, like endPredictionsUpTo does for vanilla
-        if (entry.val() instanceof BlockBreak blockBreak) {
-            beforeBreakPredictionStates.remove(blockBreak.blockPos());
-        }
-        sequencedActionResponse.broadcast(entry);
     }
 
     public boolean isWaitingBlockResponse(BlockPos bp) {
@@ -298,18 +285,12 @@ public class SequencedActionManager extends BaseModule {
         var predictionHandler = mc.level.getBlockStatePredictionHandler();
         if (predictionHandler.isPredicting()) {
             // ClientLevel.setBlock already retains the known server state while predicting
-            BlockState oldState = mc.level.getBlockState(pos);
-            boolean success = mc.level.setBlock(pos, state, 11, 512);
-            if (success) {
-                beforeBreakPredictionStates.put(pos, oldState);
-            }
-            return success;
+            return mc.level.setBlock(pos, state, 11, 512);
         } else {
             BlockState oldState = mc.level.getBlockState(pos);
             boolean success = mc.level.setBlock(pos, state, 11, 512);
             if (success) {
                 predictionHandler.retainKnownServerState(pos, oldState, mc.player);
-                beforeBreakPredictionStates.put(pos, oldState);
             }
             return success;
         }
@@ -320,9 +301,11 @@ public class SequencedActionManager extends BaseModule {
                 .filter(s -> Objects.equals(s.val().blockPos(), pos))
                 .max(Comparator.comparingInt(IndexEntry::index))
                 .orElse(null);
-        if (latestAction == null) {
+        if (latestAction != null) {
+            return PendingUpdateManagerAccess.of(mc.level.getBlockStatePredictionHandler())
+                    .getPendingBlockState(latestAction.index(), pos);
+        } else {
             return Optional.empty();
         }
-        return Optional.ofNullable(beforeBreakPredictionStates.get(pos));
     }
 }

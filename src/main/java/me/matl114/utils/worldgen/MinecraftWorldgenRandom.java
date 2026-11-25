@@ -1,6 +1,6 @@
 package me.matl114.utils.worldgen;
 
-import me.matl114.utils.worldgen.structures.StructureDecorationIndex;
+import net.minecraft.world.level.levelgen.GenerationStep;
 
 /**
  * The Xoroshiro-backed {@code WorldgenRandom} stream used by 1.21.11 structure
@@ -21,11 +21,27 @@ public final class MinecraftWorldgenRandom {
     }
 
     public static MinecraftWorldgenRandom forDecorationChunk(
-            long worldSeed, int chunkX, int chunkZ, StructureDecorationIndex.Index index) {
+            long worldSeed, int chunkX, int chunkZ, int structureIndex, int generationStep) {
         MinecraftWorldgenRandom random = new MinecraftWorldgenRandom(worldSeed);
         long decorationSeed = random.setDecorationSeed(worldSeed, chunkX * 16, chunkZ * 16);
-        random.setFeatureSeed(decorationSeed, index.structureIndex(), index.generationStep());
+        random.setFeatureSeed(decorationSeed, structureIndex, generationStep);
         return random;
+    }
+
+    public static MinecraftWorldgenRandom forPlacedFeature(
+            long worldSeed, int chunkX, int chunkZ, int featureIndex, GenerationStep.Decoration generationStep) {
+        MinecraftWorldgenRandom random = new MinecraftWorldgenRandom(worldSeed);
+        long populationSeed = random.setPopulationSeed(worldSeed, chunkX * 16, chunkZ * 16);
+        random.setFeatureSeed(populationSeed, featureIndex, generationStep.ordinal());
+        return random;
+    }
+
+    /** Returns an independent stream at the same state, for trying a generator branch. */
+    public MinecraftWorldgenRandom copy() {
+        MinecraftWorldgenRandom copy = new MinecraftWorldgenRandom(0L);
+        copy.seedLo = seedLo;
+        copy.seedHi = seedHi;
+        return copy;
     }
 
     public void setSeed(long seed) {
@@ -46,6 +62,15 @@ public final class MinecraftWorldgenRandom {
         long decorationSeed = ((long) blockX * xMultiplier + (long) blockZ * zMultiplier) ^ worldSeed;
         setSeed(decorationSeed);
         return decorationSeed;
+    }
+
+    public long setPopulationSeed(long worldSeed, int blockX, int blockZ) {
+        setSeed(worldSeed);
+        long xMultiplier = nextLong() | 1L;
+        long zMultiplier = nextLong() | 1L;
+        long populationSeed = ((long) blockX * xMultiplier + (long) blockZ * zMultiplier) ^ worldSeed;
+        setSeed(populationSeed);
+        return populationSeed;
     }
 
     public void setFeatureSeed(long decorationSeed, int structureIndex, int generationStep) {

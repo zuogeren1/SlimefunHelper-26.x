@@ -5,6 +5,8 @@ import com.google.common.util.concurrent.Runnables;
 //#if MC >= 260300
 //$$ import com.mojang.blaze3d.Blaze3D;
 //#endif
+import io.netty.handler.timeout.TimeoutException;
+import java.net.SocketException;
 import java.util.Comparator;
 import java.util.List;
 import me.matl114.accessors.gui.ScreenAccess;
@@ -321,7 +323,11 @@ public class ClientExtra extends BaseModule {
                 }
                 Debug.info("Exception StackTrace:");
                 Debug.info(exception);
-                event.cancel();
+                if (!(exception instanceof SocketException
+                        || exception instanceof TimeoutException
+                        || !playListener.isAcceptingMessages())) {
+                    event.cancel();
+                }
             }
         }
     }

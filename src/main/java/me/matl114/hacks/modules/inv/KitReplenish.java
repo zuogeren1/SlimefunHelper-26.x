@@ -448,7 +448,7 @@ public class KitReplenish extends BaseModule {
                         Interact.INSTANCE.interactBlock(InteractionTasks.createHitResult(pos, mc.player.position()));
                 } else {
                     IndexEntry<ItemStack> stackEnderChest =
-                            InventoryUtils.findPlayerItem(s -> s.is(Items.ENDER_CHEST), true, false);
+                            InventoryUtils.findPlayerItem(s -> s.is(Items.ENDER_CHEST), false, false);
                     if (stackEnderChest != null) {
                         var re = searchAvailableChestLikePosition(true)
                                 .findFirst()
@@ -1426,7 +1426,11 @@ public class KitReplenish extends BaseModule {
             for (var i = from; i < rule.to(); ++i) {
                 int idx = i - from;
                 if (idx >= shulkerInventory.getContainerSize()) break;
-                shulkerInventory.setItem(idx, inventory.getItem(i));
+                if (idx >= inventory.getContainerSize()) {
+                    shulkerInventory.setItem(idx, ItemStack.EMPTY);
+                } else {
+                    shulkerInventory.setItem(idx, inventory.getItem(i));
+                }
             }
             ItemContainerContents shulkerComponent = ItemContainerContents.fromItems(stacks);
             ItemStack newShulker = new ItemStack(Items.SHULKER_BOX);
@@ -1822,7 +1826,7 @@ public class KitReplenish extends BaseModule {
             MutableRecord record,
             ElementFactory factory) {
         SubScreenWidget widget = new SubScreenWidget(0, 0, 250, 45);
-        widget.addDrawableChild(createToggleButton(
+        widget.addDrawableChild(factory.createToggleButton(
                 Component::empty,
                 List::of,
                 ValueAccessor.of(() -> indexOf.getValue() == record, (bl) -> {
@@ -1857,7 +1861,7 @@ public class KitReplenish extends BaseModule {
 
         widget.addDrawableChild(maxSize.generateKeyValueInput(factory, 120, 1, 30, 0, 20, 20));
         String ruleKey = Kit.KEYS.get(3);
-        widget.addDrawableChild(createLabel(
+        widget.addDrawableChild(factory.createLabel(
                 () -> {
                     Rule rule = record.getOrPut(ruleKey, Rule.DEFAULT);
                     return Component.translatable(
@@ -1874,7 +1878,7 @@ public class KitReplenish extends BaseModule {
                 23,
                 150,
                 20));
-        widget.addDrawableChild(createExecuteButton(
+        widget.addDrawableChild(factory.createExecuteButton(
                 "widget.kit-manager.open-kit-list.rule.edit",
                 ButtonAction.run(() -> {
                     Rule rule = record.getOrPut(ruleKey, Rule.DEFAULT);
@@ -1930,7 +1934,7 @@ public class KitReplenish extends BaseModule {
             screen.access().openFromCurrent();
         };
         if (mc.getConnection() != null) {
-            widget.addDrawableChild(createExecuteButton(
+            widget.addDrawableChild(factory.createExecuteButton(
                     "widget.kit-manager.open-kit-list.items",
                     ButtonAction.run(() -> {
                         Kit temporaryKit = record.toRecord(Kit.class);
@@ -1940,7 +1944,7 @@ public class KitReplenish extends BaseModule {
                     1,
                     40,
                     20));
-            widget.addDrawableChild(createExecuteButton(
+            widget.addDrawableChild(factory.createExecuteButton(
                     "widget.kit-manager.open-kit-list.items.import",
                     ButtonAction.run(() -> {
                         if (mc.player != null) {
@@ -1957,7 +1961,8 @@ public class KitReplenish extends BaseModule {
                     40,
                     20));
         } else {
-            widget.addDrawableChild(createLabel("widget.kit-manager.open-kit-list.items.error", 180, 1, 70, 20));
+            widget.addDrawableChild(
+                    factory.createLabel("widget.kit-manager.open-kit-list.items.error", 180, 1, 70, 20));
         }
         return widget;
     }

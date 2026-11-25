@@ -12,7 +12,6 @@ import me.matl114.managers.config.IntRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.InventoryUtils;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
 import net.minecraft.world.entity.Entity;
@@ -77,15 +76,16 @@ public class AutoLogout extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getPostGameTick(), this::onTick);
+        registerListener(Listener.getPostTick(), this::onTick);
         registerListener(Listener.getPacketPoint().getChannel(ClientboundEntityEventPacket.class), this::onPacketTotem);
         registerListener(
                 Listener.getPacketPostHandlePoint().getChannel(ClientboundAddEntityPacket.class), this::onPlayerSpawn);
     }
 
-    public void onTick(Event<LocalPlayer> event) {
+    public void onTick() {
+        if (checkNull()) return;
         if (enable.get()) {
-            LocalPlayer player = event.context;
+            var player = mc.player;
             if (healthEnable.get() && player.getHealth() <= healthThreshold.get()) {
                 MainTasks.scheduleDisconnect();
                 return;
@@ -133,7 +133,7 @@ public class AutoLogout extends BaseModule {
             ClientboundAddEntityPacket spawn = event.context();
             if (spawn.getType() == EntityTypes.PLAYER && spawn.getId() != mc.player.getId()) {
                 Entity entity = mc.level.getEntity(spawn.getId());
-                if (entity != null && CombatTasks.getTargetSelector().isNotFriend(entity)) {
+                if (entity != null && CombatTasks.getTargetSelector().isNotFriendly(entity)) {
                     MainTasks.scheduleDisconnect();
                     strangerPlayerEnable.set(false);
                 }

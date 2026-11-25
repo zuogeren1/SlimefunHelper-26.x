@@ -11,6 +11,7 @@ import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
+import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.KeyCode;
@@ -48,12 +49,32 @@ public class GuiMove extends BaseModule {
             .defaultValue(true)
             .build();
 
+    public final ModulePath moveRot = path.add("key-move-rot");
+
+    public final FlagRef keyMoveRot = flagBuilder(moveRot.addEnable()).build();
+
+    public final KeyBindRef movePitchUp =
+            hotkey(moveRot.add("pitch-up"), new MultiKeyBind()).build();
+
+    public final KeyBindRef movePitchDown =
+            hotkey(moveRot.add("pitch-down"), new MultiKeyBind()).build();
+
+    public final KeyBindRef moveYawUp =
+            hotkey(moveRot.add("yaw-up"), new MultiKeyBind()).build();
+
+    public final KeyBindRef moveYawDown =
+            hotkey(moveRot.add("yaw-down"), new MultiKeyBind()).build();
+
+    public final DoubleRef speed =
+            doubleBuilder(moveRot.add("speed")).defaultValue(1.0D).build();
+
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getKeyboardInput(), this::onKeyInput);
         registerListener(Listener.getPostSetScreen(), this::onPostSetScreen);
         registerListener(Listener.getPlayerKeyboardInputTick(), this::onInputTick);
+        registerListener(Listener.getPostTick(), this::onMoveRotWithKeys);
     }
 
     /**
@@ -160,5 +181,23 @@ public class GuiMove extends BaseModule {
     public boolean checkCustomWidget(DrawableWidget drawableWidget) {
         DrawableWidget drawable = WidgetUtils.getFocusedWidget(drawableWidget);
         return drawable != null && WidgetUtils.isInputWidget(drawable);
+    }
+
+    public void onMoveRotWithKeys() {
+        if (checkNull()) return;
+        if (enable.get() && keyMoveRot.get()) {
+            if (skip()) return;
+            mc.player.setXRot(Math.clamp(
+                    mc.player.getXRot()
+                            + ((movePitchUp.get().isAllPressed() ? -1.0F : 0F)
+                                            + (movePitchDown.get().isAllPressed() ? 1.0F : 0.0F))
+                                    * (float) speed.get(),
+                    -90.0F,
+                    90.0F));
+            mc.player.setYRot(mc.player.getYRot()
+                    + ((moveYawUp.get().isAllPressed() ? 1.0F : 0.0F)
+                                    + (moveYawDown.get().isAllPressed() ? -1.0F : 0.0F))
+                            * (float) speed.get());
+        }
     }
 }

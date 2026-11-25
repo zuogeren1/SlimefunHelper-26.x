@@ -2,6 +2,7 @@ package me.matl114.mixins.events;
 
 import me.matl114.hacks.utils.ClientUtils;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -298,6 +299,9 @@ public abstract class MinecraftClientEvents {
             method = "tick",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;handleKeybinds()V"))
     private void onInputEvent(Minecraft instance, Operation<Void> original) {
+        if (captureAttackReset > 0) {
+            captureAttackReset = 0;
+        }
         Event<Void> re = new Event<>(null, true, false);
         Listener.getPreHandleInputEvents().handleValue(re);
         if (!re.isCancelled()) {
@@ -342,16 +346,82 @@ public abstract class MinecraftClientEvents {
                 re.cancel();
                 Listener.getPreHandleInputEvents().handleValue(re);
                 if (!re.isCancelled()) {
-                    handleKeybinds();
+                    try {
+                        duringOpenScreenInputEvent = true;
+                        handleKeybinds();
+                    } finally {
+                        duringOpenScreenInputEvent = false;
+                    }
                 } else {
+                    if (captureAttackReset > 0) {
+                        this.missTime = captureAttackReset;
+                    }
                     this.continueAttack(false);
                     if (this.missTime > 0) {
                         --this.missTime;
                     }
                 }
+                if (captureAttackReset > 0) {
+                    captureAttackReset = 0;
+                }
                 Listener.getPostHandleInputEvents().handleValue(new Event<>(null, false, false));
             }
         }
+    }
+
+    /** tick 里原版准备写入的攻击冷却值；界面打开时的事件分支要靠它还原冷却。 */
+    int captureAttackReset = 0;
+
+    boolean duringOpenScreenInputEvent = false;
+
+    // 界面打开期间自行驱动 handleKeybinds，这里让原版误认为没有界面，
+    // 否则原版会在界面打开时吞掉交互键。
+    //#if MC >= 26.2
+    @ModifyExpressionValue(
+            method = "handleKeybinds",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lnet/minecraft/client/gui/Gui;screen()Lnet/minecraft/client/gui/screens/Screen;"))
+    //#else
+    //$$ @ModifyExpressionValue(
+    //$$         method = "handleKeybinds",
+    //$$         at =
+    //$$                 @At(
+    //$$                         value = "FIELD",
+    //$$                         target =
+    //$$                                 "Lnet/minecraft/client/Minecraft;screen:Lnet/minecraft/client/gui/screens/Screen;"))
+    //#endif
+    private Screen onOverrideScreenValue(Screen original) {
+        if (duringOpenScreenInputEvent) {
+            return null;
+        }
+        return original;
+    }
+
+    // 同理：界面打开期间把光标当成已锁定，否则原版会抢鼠标导致输入被吞。
+    @ModifyExpressionValue(
+            method = "handleKeybinds",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/client/MouseHandler;isMouseGrabbed()Z"))
+    private boolean onOverrideMouseCursorLocked(boolean original) {
+        if (duringOpenScreenInputEvent) {
+            return true;
+        }
+        if (ClientUtils.getScreen() == null) {
+            return true;
+        }
+        return original;
+    }
+
+    // 记下原版要写入的冷却值后立刻还原，界面打开时的输入事件分支再决定用哪个。
+    @WrapOperation(
+            method = "tick",
+            at = @At(value = "FIELD", target = "Lnet/minecraft/client/Minecraft;missTime:I", ordinal = 0))
+    private void onSetAttackCooldown(Minecraft instance, int value, Operation<Void> original) {
+        int currentCooldown = this.missTime;
+        captureAttackReset = value;
+        original.call(instance, value);
+        this.missTime = currentCooldown;
     }
 
     @Inject(
@@ -406,7 +476,8 @@ public abstract class MinecraftClientEvents {
                     @At(
                             value = "INVOKE",
                             target =
-                                    "Lnet/minecraft/world/phys/HitResult;getType()Lnet/minecraft/world/phys/HitResult$Type;",
+                                    "Lnet/minecraft/world/item/ItemStack;get(Lnet/minecraft/core/component/DataComponentType;)Ljava/lang/Object;",
+                            ordinal = 0,
                             shift = At.Shift.BEFORE),
             locals = LocalCapture.CAPTURE_FAILHARD,
             cancellable = true)

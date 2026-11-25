@@ -34,8 +34,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 public class ElytraJump extends BaseModule implements LegalMovementManager.MovementModifier {
-    static LegalMovementManager.DelegateMovementModifier instance;
-
     public ElytraJump() {
         super("ElytraJump");
         MovementManager.registerMovementPipeline(this);
@@ -279,13 +277,29 @@ public class ElytraJump extends BaseModule implements LegalMovementManager.Movem
                 return;
             }
             float routeYaw = EntityUtils.rotationToYaw(route.direction());
-            boolean forwardBlocked = hasForwardObstacle();
-            int routeGroundY = BlockPos.containing(route.origin()).getY() - 1;
-            int currentPlaneY = currentLandingBlock != null ? currentLandingBlock.getY() : routeGroundY;
-            boolean blockedStep = forwardBlocked && !canStepForward(currentPlaneY);
-            climbingStep = workThisTick && forwardBlocked && canStepForward(currentPlaneY);
+            if (!baritonePathing) mc.player.setYRot(routeYaw);
 
-            if (workThisTick) {
+            if (climbingStep && mc.player.getY() > route.origin().y) {
+                climbingStep = false;
+            }
+            boolean forwardBlocked = enable.get() && mc.player.onGround() && hasForwardObstacle();
+            boolean blockedStep = false;
+            if (!climbingStep && forwardBlocked && currentLandingBlock != null) {
+                int currentPlaneY = currentLandingBlock.getY() + 1;
+                if (currentPlaneY == route.origin().y || currentPlaneY == route.origin().y - 1.0D) {
+                    climbingStep = canStepForward(currentPlaneY);
+                    blockedStep = !climbingStep;
+                }
+            }
+            if (climbingStep) {
+                workThisTick = false;
+                routeSafeTarget = null;
+                clearRoadPath();
+                if (!baritonePathing) movementManagerEvent.context.markForResetRot();
+                return;
+            }
+
+            if (!blockedStep && currentLandingBlock != null) {
                 int groundY = currentLandingBlock.getY();
                 float maxYaw = routeYaw;
                 int maxLen = 0;

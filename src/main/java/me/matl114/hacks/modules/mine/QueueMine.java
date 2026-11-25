@@ -9,8 +9,10 @@ import me.matl114.events.Event;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
+import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.utils.config.WrapColor;
 import me.matl114.hacks.utils.enums.LegalMiningMode;
@@ -81,10 +83,11 @@ public class QueueMine extends BaseModule {
         registerListener(Listener.getPostHandleInputEvents(), this::onPostInputEvent);
         registerListener(Listener.getMineBlockAction(), this::handleQueueSumbit);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
+        registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
     }
 
     int lastSumitTick = 0;
-    RenderCollector<AABB> outline = RenderCollectors.createBoxCollector(true, false, false);
+    final RenderCollector<AABB> outline = RenderCollectors.createBoxCollector(true, false, false);
     boolean lastRequestContainsDoubleBreak = false;
 
     public void onPostInputEvent() {
@@ -103,24 +106,41 @@ public class QueueMine extends BaseModule {
                 lastRequestContainsDoubleBreak = false;
             }
         }
-
+        outline.clear();
         for (var re : breakRequest) {
             outline.submit(new AABB(re).inflate(-0.2), color.get().withAlpha(255));
         }
     }
 
     public void tickQueue() {
-        boolean shouldTryStartBreak = true;
-        if (!ignoreCooldown.get() && MineExtra.INSTANCE.getMiningPacketCooldown(1) > 0) {
-            shouldTryStartBreak = false;
-        }
+
         var access = PlayerInteractionAccess.of(mc.gameMode);
         if (access == null) return;
+        // do not try mine which is far away from us, it may stuck here
+        while (!breakRequest.isEmpty()
+                && !InteractExtra.INSTANCE.isWithinInteractRange(mc.player.position(), breakRequest.peek())) {
+            breakRequest.poll();
+        }
 
-        if (shouldTryStartBreak) {
-            boolean currentCanDoubleBreak = access.getCurrentFailBreakPos() == null && useDoubleBreak.get();
-            while (!breakRequest.isEmpty()) {
-                BlockPos posLatest = breakRequest.peek();
+        while (!breakRequest.isEmpty()) {
+            BlockPos posLatest = breakRequest.peek();
+            BlockPos currentMiningPos = access.getCurrentMiningPos();
+            boolean currentCanDoubleBreak = useDoubleBreak.get() && access.getCurrentFailBreakPos() == null;
+
+            if (Objects.equals(currentMiningPos, posLatest)) {
+                if (currentCanDoubleBreak && access.sendFailBreakCurrentPos(null)) {
+                    lastRequestContainsDoubleBreak = true;
+                    breakRequest.poll();
+                } else {
+                    break;
+                }
+            } else {
+                boolean shouldTryStartBreak =
+                        ignoreCooldown.get() || MineExtra.INSTANCE.getOptimMiningPacketCooldown(1) <= 0;
+                if (!shouldTryStartBreak) {
+                    break;
+                }
+
                 if (!InteractExtra.INSTANCE.isWithinInteractRange(mc.player.position(), posLatest)) {
                     breakRequest.poll();
                     continue;
@@ -133,34 +153,18 @@ public class QueueMine extends BaseModule {
                 if (!MineExtra.INSTANCE.handleMineMode(posLatest, legalMiningMode.get())) {
                     break;
                 }
-                BlockPos currentMiningPos = access.getCurrentMiningPos();
-                if (!Objects.equals(currentMiningPos, posLatest)) {
-                    // change
-                    //                if(rotate.get()){
-                    //
-                    //                }
-                    access.sendStartBreakPacket(posLatest);
-                    if (currentCanDoubleBreak) {
-                        access.sendFailBreakCurrentPos(null);
-                        currentCanDoubleBreak = false;
-                        lastRequestContainsDoubleBreak = true;
-                        breakRequest.poll();
-                    } else {
-                        if (Objects.equals(access.getCurrentMiningPos(), posLatest)) {
-                            access.sendAbortBreakPacket();
-                            break;
-                        } else {
-                            // instant break, next block
-                            breakRequest.poll();
-                        }
-                    }
-                } else if (currentCanDoubleBreak) {
-                    access.sendFailBreakCurrentPos(null);
-                    currentCanDoubleBreak = false;
+                access.sendStartBreakPacket(posLatest);
+                if (currentCanDoubleBreak && access.sendFailBreakCurrentPos(null)) {
                     lastRequestContainsDoubleBreak = true;
                     breakRequest.poll();
                 } else {
-                    break;
+                    if (Objects.equals(access.getCurrentMiningPos(), posLatest)) {
+                        access.sendAbortBreakPacket();
+                        break;
+                    } else {
+                        // instant break, next block
+                        breakRequest.poll();
+                    }
                 }
             }
         }
@@ -216,5 +220,10 @@ public class QueueMine extends BaseModule {
                 RenderUtils.stopDrawVirtual(eventRender.context.stack());
             }
         }
+    }
+
+    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        ModulePreset preset = event.context.getValue();
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
     }
 }

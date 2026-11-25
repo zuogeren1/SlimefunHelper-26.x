@@ -14,6 +14,7 @@ import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
 import me.matl114.events.model.GuiModel;
+import me.matl114.gui.presets.single.RegistryDisplays;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.models.NewStyleModel;
@@ -34,6 +35,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.*;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.item.BowItem;
@@ -42,6 +44,9 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.MaceItem;
+import net.minecraft.world.item.alchemy.PotionContents;
+import net.minecraft.world.item.component.ChargedProjectiles;
+import net.minecraft.world.item.component.SuspiciousStewEffects;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
@@ -53,6 +58,8 @@ public class ItemDisplay extends BaseModule {
             makePath(Configs.RENDER_CONFIG, "itemstack-display.item-display.storage-display");
     public final ModulePath enchantmentConfig =
             makePath(Configs.RENDER_CONFIG, "itemstack-display.item-display.enchantment-display");
+    public final ModulePath potionEffectConfig =
+            makePath(Configs.RENDER_CONFIG, "itemstack-display.item-display.potion-effect-display");
 
     public static final String NAMESPACE = "slimefunhelper";
     public static final String MODEL_PATH = "enchantment_icon/";
@@ -88,6 +95,17 @@ public class ItemDisplay extends BaseModule {
             .defaultValue(false)
             .build();
 
+    public final FlagRef enablePotionEffectDisplay = builder(potionEffectConfig.addEnable(), Boolean.class)
+            .defaultValue(false)
+            .build();
+    public final FlagRef showPotionComponent =
+            flagBuilder(potionEffectConfig.add("potion-component"), true).build();
+    public final FlagRef showStewComponent =
+            flagBuilder(potionEffectConfig.add("stew-component"), true).build();
+    public final FlagRef showCrossbowPotionArrowComponent = flagBuilder(
+                    potionEffectConfig.add("crossbow-potion-arrow-component"), true)
+            .build();
+
     public final Map<Item, List<ResourceKey<Enchantment>>> checkList = new HashMap<>();
     public final Map<Item, FlagRef> checkFlags = new HashMap<>();
 
@@ -95,6 +113,7 @@ public class ItemDisplay extends BaseModule {
         super("ItemDisplay");
         portConfigs(makePath(Configs.RENDER_CONFIG, "itemstack-display.storage-display"), modelConfig);
         portConfigs(makePath(Configs.RENDER_CONFIG, "itemstack-display.enchantment-display"), enchantmentConfig);
+        portConfigs(makePath(Configs.RENDER_CONFIG, "itemstack-display.potion-effect-display"), potionEffectConfig);
     }
 
     /**
@@ -143,6 +162,8 @@ public class ItemDisplay extends BaseModule {
 
     public final FlagRef shulkerDisplay =
             flagBuilder(modelConfig.add("enable-shulker-display")).build();
+
+    public final FlagRef bundleDisplay = flagBuilder(modelConfig.add("bundle-display")).build();
 
     public final EnumRef<Mode> mode = builder(modelConfig.add("display-mode"), Mode.class)
             .defaultValue(Mode.ALL)
@@ -199,10 +220,13 @@ public class ItemDisplay extends BaseModule {
     }
 
     private void onInfoAttached(Event<List<GuiModel>> event) {
-        if (!enable.get()) return;
         ItemStack stack = event.getArgs(0);
+        if (stack.isEmpty()) return;
+        // 药水效果图标与附魔图标各有独立开关，先处理效果图标，不受附魔总开关影响
+        onPotionEffectInfoAttached(event, stack);
+        if (!enable.get()) return;
         ensureCheckTables();
-        if (stack.isEmpty() || !checkList.containsKey(stack.getItem())) return;
+        if (!checkList.containsKey(stack.getItem())) return;
         FlagRef checkFlag = checkFlags.get(stack.getItem());
         if (checkFlag == null || !checkFlag.get()) return;
         ItemEnchantments enchantments = stack.get(DataComponents.ENCHANTMENTS);
@@ -214,6 +238,54 @@ public class ItemDisplay extends BaseModule {
                 }
             }
         }
+    }
+
+    private void onPotionEffectInfoAttached(Event<List<GuiModel>> event, ItemStack stack) {
+        if (!enablePotionEffectDisplay.get()) return;
+
+        if (showPotionComponent.get()) {
+            PotionContents potionContents = stack.get(DataComponents.POTION_CONTENTS);
+            if (potionContents != null) {
+                addPotionContentsDisplay(event.context(), potionContents);
+            }
+        }
+
+        if (showStewComponent.get()) {
+            SuspiciousStewEffects stewEffects = stack.get(DataComponents.SUSPICIOUS_STEW_EFFECTS);
+            if (stewEffects != null && !stewEffects.effects().isEmpty()) {
+                for (var effect : stewEffects.effects()) {
+                    addStatusEffectDisplay(event.context(), effect.createEffectInstance());
+                }
+            }
+        }
+
+        if (showCrossbowPotionArrowComponent.get()) {
+            ChargedProjectiles projectiles = stack.get(DataComponents.CHARGED_PROJECTILES);
+            if (projectiles != null) {
+                // 只认 items() 里的模板：itemCopies() 在 26.3 换成 Stream，用模板 create() 才三版本通用
+                for (var projectileTemplate : projectiles.items()) {
+                    ItemStack projectile = projectileTemplate.create();
+                    if (projectile.is(Items.TIPPED_ARROW)) {
+                        PotionContents contents = projectile.get(DataComponents.POTION_CONTENTS);
+                        if (contents != null && contents.hasEffects()) {
+                            addPotionContentsDisplay(event.context(), contents);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static void addPotionContentsDisplay(List<GuiModel> models, PotionContents contents) {
+        if (contents.hasEffects()) {
+            for (MobEffectInstance effect : contents.getAllEffects()) {
+                addStatusEffectDisplay(models, effect);
+            }
+        }
+    }
+
+    private static void addStatusEffectDisplay(List<GuiModel> models, MobEffectInstance effect) {
+        models.add(GuiModel.ofSprite(RegistryDisplays.getEffectTexture(effect.getEffect())));
     }
 
     public void onContainerSpawner(Event<List<GuiModel>> event) {
@@ -265,6 +337,44 @@ public class ItemDisplay extends BaseModule {
                 // all the same, render
                 List<ItemStack> result = timeStamp.itemStack;
                 appendContainerInfos(event.context, result);
+            }
+        }
+        if (bundleDisplay.get()) {
+            ItemStack stack = event.getArgs(0);
+            var container = stack.get(DataComponents.BUNDLE_CONTENTS);
+            if (container != null) {
+                ItemStackWithTimeStamp timeStamp = asyncUpdateItemInfo(stack, ((st0) -> {
+                    ItemStack st = (ItemStack) st0;
+                    var con = st.get(DataComponents.BUNDLE_CONTENTS);
+                    if (con != null) {
+                        Map<ItemStackSample, Integer> map = new LinkedHashMap<>();
+                        loop_items:
+                        // 收纳袋在 26.3 才并入 ContainerComponent，items() 是三个版本都有的一份模板表
+                        for (var item : con.items()) {
+                            ItemStack templateStack = item.create();
+                            if (templateStack.isEmpty()) {
+                                continue loop_items;
+                            }
+                            for (var re : map.entrySet()) {
+                                if (ItemStackUtils.matchItemWithout(
+                                        templateStack, re.getKey().sample(), false, false, false)) {
+                                    re.setValue(re.getValue() + templateStack.getCount());
+                                    continue loop_items;
+                                }
+                            }
+                            map.put(ItemStackSample.of(templateStack), templateStack.getCount());
+                        }
+                        return map.entrySet().stream()
+                                .sorted(Comparator.comparingInt(v -> -v.getValue()))
+                                .map(Map.Entry::getKey)
+                                .map(ItemStackSample::sample)
+                                .toList();
+                    }
+                    return null;
+                }));
+                // all the same, render
+                List<ItemStack> result = timeStamp.itemStack;
+                appendContainerInfos(event.context(), result);
             }
         }
     }

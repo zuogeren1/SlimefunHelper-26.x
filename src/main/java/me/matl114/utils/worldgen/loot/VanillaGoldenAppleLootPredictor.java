@@ -34,6 +34,14 @@ public final class VanillaGoldenAppleLootPredictor {
     private static final Identifier RUINED_PORTAL = Identifier.withDefaultNamespace("chests/ruined_portal");
     private static final Identifier BOOK_ID = Identifier.withDefaultNamespace("book");
     private static final Identifier SUSPICIOUS_STEW_ID = Identifier.withDefaultNamespace("suspicious_stew");
+    private static final Identifier SIMPLE_DUNGEON = Identifier.withDefaultNamespace("chests/simple_dungeon");
+    private static final Identifier ABANDONED_MINESHAFT = Identifier.withDefaultNamespace("chests/abandoned_mineshaft");
+    private static final ResourceKey<Enchantment> LUNGE =
+            ResourceKey.create(Registries.ENCHANTMENT, Identifier.withDefaultNamespace("lunge"));
+
+    private static final List<Pool> LEGACY_SIMPLE_DUNGEON_POOLS = simpleDungeonPools(false);
+    private static final List<Pool> V1_21_11_SIMPLE_DUNGEON_POOLS = simpleDungeonPools(true);
+    private static final List<Pool> ABANDONED_MINESHAFT_POOLS = abandonedMineshaftPools();
 
     private static final List<Pool> DESERT_PYRAMID_POOLS = List.of(
             new Pool(
@@ -127,6 +135,90 @@ public final class VanillaGoldenAppleLootPredictor {
         entries.set(7, Entry.item(20, Identifier.withDefaultNamespace("saddle")));
         entries.remove(8);
         return List.of(new Pool(2, 4, entries), DESERT_PYRAMID_POOLS.get(1), DESERT_PYRAMID_POOLS.get(2));
+    }
+
+    private static List<Pool> simpleDungeonPools(boolean modern) {
+        List<Entry> treasureEntries = new ArrayList<>();
+        treasureEntries.add(
+                modern
+                        ? Entry.uniform(20, Identifier.withDefaultNamespace("leather"), 1, 5)
+                        : Entry.item(20, Identifier.withDefaultNamespace("saddle")));
+        treasureEntries.add(Entry.item(15, Identifier.withDefaultNamespace("golden_apple")));
+        treasureEntries.add(Entry.item(2, Identifier.withDefaultNamespace("enchanted_golden_apple")));
+        treasureEntries.add(Entry.item(2, Identifier.withDefaultNamespace("music_disc_otherside")));
+        treasureEntries.add(Entry.item(15, Identifier.withDefaultNamespace("music_disc_13")));
+        treasureEntries.add(Entry.item(15, Identifier.withDefaultNamespace("music_disc_cat")));
+        treasureEntries.add(Entry.item(20, Identifier.withDefaultNamespace("name_tag")));
+        treasureEntries.add(Entry.item(10, Identifier.withDefaultNamespace("golden_horse_armor")));
+        if (modern) {
+            treasureEntries.add(Entry.item(15, Identifier.withDefaultNamespace("copper_horse_armor")));
+        }
+        treasureEntries.add(Entry.item(15, Identifier.withDefaultNamespace("iron_horse_armor")));
+        treasureEntries.add(Entry.item(5, Identifier.withDefaultNamespace("diamond_horse_armor")));
+        treasureEntries.add(Entry.randomlyEnchanted(10, Identifier.withDefaultNamespace("book")));
+
+        return List.of(
+                new Pool(1, 3, treasureEntries),
+                new Pool(
+                        1,
+                        4,
+                        List.of(
+                                Entry.uniform(10, Identifier.withDefaultNamespace("iron_ingot"), 1, 4),
+                                Entry.uniform(5, Identifier.withDefaultNamespace("gold_ingot"), 1, 4),
+                                Entry.item(20, Identifier.withDefaultNamespace("bread")),
+                                Entry.uniform(20, Identifier.withDefaultNamespace("wheat"), 1, 4),
+                                Entry.item(10, Identifier.withDefaultNamespace("bucket")),
+                                Entry.uniform(15, Identifier.withDefaultNamespace("redstone"), 1, 4),
+                                Entry.uniform(15, Identifier.withDefaultNamespace("coal"), 1, 4),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("melon_seeds"), 2, 4),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("pumpkin_seeds"), 2, 4),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("beetroot_seeds"), 2, 4))),
+                new Pool(
+                        3,
+                        3,
+                        List.of(
+                                Entry.uniform(10, Identifier.withDefaultNamespace("bone"), 1, 8),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("gunpowder"), 1, 8),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("rotten_flesh"), 1, 8),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("string"), 1, 8))));
+    }
+
+    private static List<Pool> abandonedMineshaftPools() {
+        return List.of(
+                new Pool(
+                        1,
+                        1,
+                        List.of(
+                                Entry.item(20, Identifier.withDefaultNamespace("golden_apple")),
+                                Entry.item(1, Identifier.withDefaultNamespace("enchanted_golden_apple")),
+                                Entry.item(30, Identifier.withDefaultNamespace("name_tag")),
+                                Entry.randomlyEnchanted(10, Identifier.withDefaultNamespace("book")),
+                                Entry.item(5, Identifier.withDefaultNamespace("iron_pickaxe")),
+                                Entry.empty(5))),
+                new Pool(
+                        2,
+                        4,
+                        List.of(
+                                Entry.uniform(10, Identifier.withDefaultNamespace("iron_ingot"), 1, 5),
+                                Entry.uniform(5, Identifier.withDefaultNamespace("gold_ingot"), 1, 3),
+                                Entry.uniform(5, Identifier.withDefaultNamespace("redstone"), 4, 9),
+                                Entry.uniform(5, Identifier.withDefaultNamespace("lapis_lazuli"), 4, 9),
+                                Entry.uniform(3, Identifier.withDefaultNamespace("diamond"), 1, 2),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("coal"), 3, 8),
+                                Entry.uniform(15, Identifier.withDefaultNamespace("bread"), 1, 3),
+                                Entry.uniform(15, Identifier.withDefaultNamespace("glow_berries"), 3, 6),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("melon_seeds"), 2, 4),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("pumpkin_seeds"), 2, 4),
+                                Entry.uniform(10, Identifier.withDefaultNamespace("beetroot_seeds"), 2, 4))),
+                new Pool(
+                        3,
+                        3,
+                        List.of(
+                                Entry.uniform(20, Identifier.withDefaultNamespace("rail"), 4, 8),
+                                Entry.uniform(5, Identifier.withDefaultNamespace("powered_rail"), 1, 4),
+                                Entry.uniform(5, Identifier.withDefaultNamespace("detector_rail"), 1, 4),
+                                Entry.uniform(5, Identifier.withDefaultNamespace("activator_rail"), 1, 4),
+                                Entry.uniform(15, Identifier.withDefaultNamespace("torch"), 1, 16))));
     }
 
     private static List<Pool> ancientCityPools(LootVersion version) {
@@ -243,7 +335,7 @@ public final class VanillaGoldenAppleLootPredictor {
                 if (entry.empty()) {
                     continue;
                 }
-                Optional<ItemStack> stack = generateEntry(entry, random, enchantments, randomLootSet);
+                Optional<ItemStack> stack = generateEntry(entry, random, enchantments, randomLootSet, lootVersion);
                 if (stack.isEmpty()) {
                     return Optional.empty();
                 }
@@ -321,17 +413,56 @@ public final class VanillaGoldenAppleLootPredictor {
 
     private record GeneratedLoot(List<ItemStack> stacks, RandomSource random) {}
 
+    /**
+     * Whether the seeded loot contains an enchanted golden apple. Draws exactly like
+     * {@link #generateContents} but stops at the first apple, or as soon as no remaining pool can
+     * hold one (for {@code simple_dungeon}, after the first pool), skipping later pools and stacks.
+     */
     public static Optional<Boolean> containsEnchantedGoldenApple(
             Identifier lootTable, long lootSeed, LootVersion lootVersion) {
-        Optional<List<ItemStack>> contents = generateContents(lootTable, lootSeed, lootVersion);
-        return contents.map(stacks -> stacks.stream().anyMatch(stack -> stack.is(Items.ENCHANTED_GOLDEN_APPLE)));
+        if (lootSeed == 0L) {
+            return Optional.empty();
+        }
+        List<Pool> pools = poolsFor(lootTable, lootVersion);
+        if (pools == null) {
+            return Optional.empty();
+        }
+        RandomSource random = RandomSource.create(lootSeed);
+        HolderLookup.RegistryLookup<Enchantment> enchantments =
+                DefaultWorldgenRegistryManager.registry().lookupOrThrow(Registries.ENCHANTMENT);
+        Optional<HolderSet.Named<Enchantment>> randomLootSet = enchantments.get(EnchantmentTags.ON_RANDOM_LOOT);
+        for (int index = 0; index < pools.size(); index++) {
+            if (pools.subList(index, pools.size()).stream().noneMatch(Pool::canHoldApple)) {
+                return Optional.of(false);
+            }
+            Pool pool = pools.get(index);
+            int rolls = pool.rolls(random);
+            for (int roll = 0; roll < rolls; roll++) {
+                Entry entry = pool.select(random);
+                if (entry.empty()) {
+                    continue;
+                }
+                if (ENCHANTED_GOLDEN_APPLE_ID.equals(entry.itemId())) {
+                    return Optional.of(true);
+                }
+                if (generateEntry(entry, random, enchantments, randomLootSet, lootVersion)
+                        .isEmpty()) {
+                    return Optional.empty();
+                }
+            }
+        }
+        return Optional.of(false);
     }
+
+    private static final Identifier ENCHANTED_GOLDEN_APPLE_ID =
+            Identifier.withDefaultNamespace("enchanted_golden_apple");
 
     private static Optional<ItemStack> generateEntry(
             Entry entry,
             RandomSource random,
             HolderLookup.RegistryLookup<Enchantment> enchantments,
-            Optional<HolderSet.Named<Enchantment>> randomLootSet) {
+            Optional<HolderSet.Named<Enchantment>> randomLootSet,
+            LootVersion lootVersion) {
         int count = entry.minCount();
         ItemStack stack;
         Item item = entry.item();
@@ -389,6 +520,8 @@ public final class VanillaGoldenAppleLootPredictor {
                 }
                 ItemStack candidateStack = stack;
                 List<Holder<Enchantment>> choices = randomLootSet.get().stream()
+                        // The runtime registry is 1.21.11; drop entries the selected version did not have.
+                        .filter(enchantment -> lootVersion.hasLungeEnchantment() || !enchantment.is(LUNGE))
                         .filter(enchantment -> BOOK_ID.equals(entry.itemId())
                                 || enchantment.value().isSupportedItem(candidateStack))
                         .toList();
@@ -425,6 +558,17 @@ public final class VanillaGoldenAppleLootPredictor {
         if (DESERT_PYRAMID.equals(lootTable)) {
             return lootVersion.hasCopperHorseArmor() ? DESERT_PYRAMID_POOLS : LEGACY_DESERT_PYRAMID_POOLS;
         }
+        if (SIMPLE_DUNGEON.equals(lootTable)) {
+            return switch (lootVersion) {
+                case V1_21_1, V1_21_4 -> LEGACY_SIMPLE_DUNGEON_POOLS;
+                    // 26.1's chests/simple_dungeon.json is byte-identical to 1.21.11's.
+                case V1_21_11, V26_1, V26_2, V26_3 -> V1_21_11_SIMPLE_DUNGEON_POOLS;
+            };
+        }
+        if (ABANDONED_MINESHAFT.equals(lootTable)) {
+            // chests/abandoned_mineshaft.json is byte-identical in 1.21.1, 1.21.4, 1.21.11 and 26.1.
+            return ABANDONED_MINESHAFT_POOLS;
+        }
         if (ANCIENT_CITY.equals(lootTable)) {
             return switch (lootVersion) {
                 case V1_21_1, V1_21_4 -> LEGACY_ANCIENT_CITY_POOLS;
@@ -451,6 +595,10 @@ public final class VanillaGoldenAppleLootPredictor {
     }
 
     private record Pool(int minRolls, int maxRolls, List<Entry> entries) {
+        private boolean canHoldApple() {
+            return entries.stream().anyMatch(entry -> ENCHANTED_GOLDEN_APPLE_ID.equals(entry.itemId()));
+        }
+
         private int rolls(RandomSource random) {
             return minRolls + (minRolls == maxRolls ? 0 : random.nextInt(maxRolls - minRolls + 1));
         }

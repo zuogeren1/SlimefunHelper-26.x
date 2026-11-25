@@ -42,7 +42,6 @@ import org.jetbrains.annotations.MustBeInvokedByOverriders;
 import org.jetbrains.annotations.Nullable;
 import me.matl114.gui.elements.BoxElement;
 import me.matl114.gui.elements.ColorBoxElement;
-import me.matl114.utils.config.ValueAccessor;
 
 public abstract class BaseModule implements ModuleListProvider {
     protected static final Minecraft mc = Minecraft.getInstance();
@@ -509,87 +508,9 @@ public abstract class BaseModule implements ModuleListProvider {
     protected static ElementFactory ELEMENT_FACTORY = new CustomElementFactory(() -> CustomGuiConfig.DEFAULT);
     protected static ElementFactory CONFIG_FACTORY = new CustomElementFactory(() -> CustomGuiConfig.DEFAULT);
 
-    public static SubScreenWidget createSubWidget(int x, int y, int dx, int dy) {
-        return new SubScreenWidget(x, y, dx, dy);
-    }
-
-    public static DrawableWidget createLabel(String translationKey, int x, int y, int dx, int dy) {
-        return ELEMENT_FACTORY.createLabel(translationKey, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createLabel(
-            Supplier<Component> text, Supplier<List<Component>> tooltips, int x, int y, int dx, int dy) {
-        return ELEMENT_FACTORY.createLabel(text, tooltips, x, y, dx, dy);
-    }
-
+    // 宿主插件/模块仍以继承方式直接调用 createTitle / createElement，故保留这两个工厂。
     public static DrawableWidget createTitle(String translationKey, int x, int y, int dx, int dy) {
         return ELEMENT_FACTORY.createTitle(translationKey, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createExecuteButton(
-            String translationKey, ButtonAction action, int x, int y, int dx, int dy) {
-        return ELEMENT_FACTORY.createExecuteButton(translationKey, action, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createExecuteButton(
-            String translationKey, ButtonAction action, BooleanSupplier active, int x, int y, int dx, int dy) {
-        return ELEMENT_FACTORY.createExecuteButton(translationKey, action, active, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createExecuteButton(
-            Supplier<Component> text,
-            Supplier<List<Component>> tooltips,
-            ButtonAction action,
-            BooleanSupplier condition,
-            int x,
-            int y,
-            int dx,
-            int dy) {
-        return ELEMENT_FACTORY.createExecuteButton(text, tooltips, action, condition, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createExecuteButton(
-            Supplier<Component> text,
-            Supplier<List<Component>> tooltips,
-            ButtonAction action,
-            int x,
-            int y,
-            int dx,
-            int dy) {
-        return ELEMENT_FACTORY.createExecuteButton(text, tooltips, action, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createToggleButton(
-            String translationKey, ValueAccessor<Boolean> value, int x, int y, int dx, int dy) {
-        return ELEMENT_FACTORY.createToggleButton(translationKey, value, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createToggleButton(
-            String translationKey, ValueAccessor<Boolean> value, int x, int y, int dx, int dy, boolean frame) {
-        return ELEMENT_FACTORY.createToggleButton(translationKey, value, frame, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createToggleButton(
-            Supplier<Component> text,
-            Supplier<List<Component>> tooltips,
-            ValueAccessor<Boolean> value,
-            int x,
-            int y,
-            int dx,
-            int dy) {
-        return ELEMENT_FACTORY.createToggleButton(text, tooltips, value, true, x, y, dx, dy);
-    }
-
-    public static DrawableWidget createToggleButton(
-            Supplier<Component> text,
-            Supplier<List<Component>> tooltips,
-            ValueAccessor<Boolean> value,
-            int x,
-            int y,
-            int dx,
-            int dy,
-            boolean frame) {
-        return ELEMENT_FACTORY.createToggleButton(text, tooltips, value, frame, x, y, dx, dy);
     }
 
     public static DrawableWidget createElement(
@@ -605,7 +526,7 @@ public abstract class BaseModule implements ModuleListProvider {
     }
 
     public static DrawableWidget createElement(
-            RenderHandler elementHandler,
+            RenderHandler renderHandler,
             @Nullable Supplier<List<Component>> tooltips,
             @Nullable ButtonAction action,
             int x,
@@ -613,13 +534,11 @@ public abstract class BaseModule implements ModuleListProvider {
             int dx,
             int dy) {
         return ELEMENT_FACTORY.createElement(
-                elementHandler, tooltips == null ? null : TooltipHandler.of(tooltips), action, x, y, dx, dy);
+                renderHandler, tooltips == null ? null : TooltipHandler.of(tooltips), action, x, y, dx, dy);
     }
 
-    public static DrawableWidget createRefEditor(String path, Ref<?> ref, int x, int y, int dx, int dy) {
-        return createRefEditor(path, ref, x, y, dx, dy, ELEMENT_FACTORY);
-    }
-
+    // SlotElement.withRenderCondition 返回的是 RenderHandler，需要单独的 RenderHandler 重载，
+    // 否则链式调用后无法再匹配 ElementHandler 版本。
     public static DrawableWidget createRefEditor(
             String path, Ref<?> ref, int x, int y, int dx, int dy, ElementFactory factory) {
         return new DefaultedKeyValueInputWidget(

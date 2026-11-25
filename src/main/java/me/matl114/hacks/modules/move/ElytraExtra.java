@@ -880,7 +880,13 @@ public class ElytraExtra extends BaseModule implements LegalMovementManager.Move
                                     AttributeUtils.getAttributeWith(mc.player, Map.of(EquipmentSlot.CHEST, item));
 
                             return container.getValue(Attributes.ARMOR)
-                                    * container.getValue(Attributes.ARMOR_TOUGHNESS);
+                                            * container.getValue(Attributes.ARMOR_TOUGHNESS)
+                                    + 16
+                                            * (ItemStackUtils.getEnchantmentLevel(
+                                                            ItemStackUtils.getItemEnchant(item), Enchantments.PROTECTION)
+                                                    + ItemStackUtils.getEnchantmentLevel(
+                                                            ItemStackUtils.getItemEnchant(item),
+                                                            Enchantments.BLAST_PROTECTION));
                         }
                         return null;
                     },

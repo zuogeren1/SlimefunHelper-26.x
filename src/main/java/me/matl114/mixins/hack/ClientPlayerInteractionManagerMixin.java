@@ -10,10 +10,12 @@ import javax.annotation.Nullable;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.hacks.CombatTasks;
 import me.matl114.hacks.modules.task.DisablerManager;
+import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.inv.InventoryManager;
 import me.matl114.hacks.modules.mine.MineExtra;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
+import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.managers.Tasks;
 import me.matl114.hacks.utils.AttributeUtils;
@@ -337,7 +339,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
             return false;
         }
         LocalPlayer playerEntity = this.minecraft.player;
-        if (!playerEntity.isWithinBlockInteractionRange(this.destroyBlockPos, 1.0D)) {
+        if (!InteractExtra.INSTANCE.isWithinInteractRange(playerEntity.position(), this.destroyBlockPos)) {
             return false;
         }
         BlockState state = this.minecraft.level.getBlockState(this.destroyBlockPos);
@@ -401,7 +403,8 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
     @Unique
     public boolean calculateInstantBlockBreakingDeltaWithGhostHand(BlockState instance, BlockPos pos) {
         if (MineExtra.INSTANCE.ghostHandMine.get()) {
-            var bestTool = MineExtra.INSTANCE.getGhostHandMiningTool(instance);
+            var bestTool = MineExtra.INSTANCE.getGhostHandMiningTool(
+                    instance, ServerFeature.INSTANCE.attributeSwap.get());
             if (MineExtra.INSTANCE.ghostHandSwapWhenStart.get()
                     || WorldUtils.calcBlockBreakingDelta(
                                     instance,
@@ -435,7 +438,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
             if (this.minecraft.player.getAbilities().instabuild
                     || (!state.isAir()
                             && (calculateInstantBlockBreakingDeltaWithGhostHand(state, pos)
-                                    || state.getDestroyProgress(minecraft.player, minecraft.level, pos) > 1.0))) {
+                                    || WorldUtils.calcBlockBreakingDelta(state, minecraft.level, pos) > 1.0))) {
                 this.destroyBlock(pos);
                 // insta break do not change current breaking pos
             } else {
@@ -481,10 +484,14 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
         if (blockState.isAir() || blockState.liquid()) {
             return true;
         }
+        if (blockState.getDestroySpeed(this.minecraft.level, pos) < 0) {
+            return false;
+        }
         MineExtra mineExtra = MineExtra.INSTANCE;
-        IndexEntry<ItemStack> tool = MineExtra.INSTANCE.getGhostHandMiningTool(blockState);
-        float progress =
-                predictCurrentMiningProgressWithTool(tool.val(), MineExtra.INSTANCE.breakSpeedExtraTicks.get());
+        IndexEntry<ItemStack> tool = MineExtra.INSTANCE.getGhostHandMiningTool(
+                blockState, ServerFeature.INSTANCE.attributeSwap.get());
+        int extraTicks = MineExtra.INSTANCE.quickMine.get() ? MineExtra.INSTANCE.breakSpeedExtraTicks.get() : 0;
+        float progress = predictCurrentMiningProgressWithTool(tool.val(), extraTicks);
         if (mineExtra.shouldExecuteFastBreak(progress)) {
             this.destroyProgress = progress;
             DisablerManager.INSTANCE.flushACPlaceBreakQueue();
@@ -543,6 +550,7 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
         boolean attackStarted = original.call(instance, pos, direction);
         if (attackStarted
                 && sameDestroyTarget(pos)
+                && MineExtra.INSTANCE.quickMine.get()
                 && breakIfComplete(pos, this.minecraft.level.getBlockState(pos), direction)) {
             return true;
         }
@@ -686,7 +694,10 @@ public abstract class ClientPlayerInteractionManagerMixin implements PlayerInter
     public float fastBreakGhostHand(
             BlockState instance, Player player, BlockGetter blockView, BlockPos blockPos, Operation<Float> original) {
         if (calculateInstantBlockBreakingDeltaWithGhostHand(instance, blockPos)) {
-            AttributeUtils.updateAttribute(player);
+            if (!ServerFeature.INSTANCE.attributeSwap.get()) {
+                AttributeUtils.updateAttribute(player);
+            }
+            return WorldUtils.calcBlockBreakingDelta(instance, blockView, blockPos, player, player.getMainHandItem());
         }
         return original.call(instance, player, blockView, blockPos);
     }

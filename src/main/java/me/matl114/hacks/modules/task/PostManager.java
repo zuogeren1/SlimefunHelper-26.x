@@ -33,7 +33,6 @@ public class PostManager extends BaseModule {
         registerListener(
                 Listener.getPacketPostHandlePoint().getChannel(ClientboundPingPacket.class), this::postPongPacketOut);
         registerListener(Listener.getServerLeavePoint(), this::onDisconnectReset);
-        registerListener(Listener.getPostGameTick(), this::onWatchPingLongTimeNoSent);
         registerListener(Listener.getPreTick(), this::onPreTick);
     }
 
@@ -98,12 +97,14 @@ public class PostManager extends BaseModule {
 
     private void runQueue(ClientPacketListener handler, Deque<Consumer<ClientPacketListener>> postTickHandlers) {
         if (!postTickHandlers.isEmpty()) {
-
             if (handler != null) {
                 var iter = postTickHandlers.iterator();
                 while (iter.hasNext()) {
-                    iter.next().accept(handler);
-                    iter.remove();
+                    try {
+                        iter.next().accept(handler);
+                    } finally {
+                        iter.remove();
+                    }
                 }
             } else {
                 postTickHandlers.clear();
@@ -118,14 +119,6 @@ public class PostManager extends BaseModule {
     private void onDisconnectReset(Event<Void> v) {
         peekPingRequest = 0;
         //        hasHandledPongPacket = false;
-    }
-
-    private void onWatchPingLongTimeNoSent() {
-        if (peekPingRequest > 0 && lastPingTick + 20 < Tasks.getTick()) {
-            peekPingRequest = 0;
-            lastPingTick = Tasks.getTick();
-            runAllQueuePackets(mc.getConnection());
-        }
     }
 
     public void onDisconnect(Event<Void> v) {}

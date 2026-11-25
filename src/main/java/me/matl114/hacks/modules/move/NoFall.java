@@ -384,11 +384,6 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
         public void applyBeforeMovementPacketModify(Event<LegalMovementManager> movementManagerEvent) {
             // do nothing
         }
-
-        @Override
-        public void postModify(Event<LegalMovementManager> movementManagerEvent) {
-            // do nothing
-        }
     }
 
     public static final double DELTA_Y = 9E-8;
@@ -1530,10 +1525,6 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                 }
             }
         }
-
-        @Override
-        public void postModify(Event<LegalMovementManager> movementManagerEvent) {
-        }
     }
 
     public static class NoFallFuckGrimTest extends NoFallDelegate {
@@ -1937,11 +1928,6 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
             } else {
                 testFlag1 = false;
             }
-        }
-
-        @Override
-        public void postModify(Event<LegalMovementManager> movementManagerEvent) {
-
         }
     }
 

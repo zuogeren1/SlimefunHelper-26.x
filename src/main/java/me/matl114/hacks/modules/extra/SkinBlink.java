@@ -1,7 +1,6 @@
 package me.matl114.hacks.modules.extra;
 
 import java.util.*;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -9,7 +8,6 @@ import me.matl114.hacks.utils.config.BoundedPrimitiveFlagMap;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.player.PlayerModelPart;
 
@@ -44,7 +42,7 @@ public class SkinBlink extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getPostGameTick(), this::onTick);
+        registerListener(Listener.getPostTick(), this::onTick);
     }
 
     @Override
@@ -61,7 +59,8 @@ public class SkinBlink extends BaseModule {
     HumanoidArm currentArm = null;
     int lastDelay = 0;
 
-    public void onTick(Event<LocalPlayer> eventTick) {
+    public void onTick() {
+        if (checkNull()) return;
         if (enable.get()) {
             if (++lastDelay >= delay.get()) {
                 lastDelay = 0;

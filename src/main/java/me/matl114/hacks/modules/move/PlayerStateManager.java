@@ -262,11 +262,14 @@ public class PlayerStateManager extends BaseModule {
                 this::onPlayerEnterVisualRange);
         registerListener(Listener.getOtherPlayerExitPoint(), this::onPlayerLeave);
         //#if MC >= 260300
-        //$$ registerListener(Listener.getPacketPoint().getChannel(ServerboundPunchPacket.class), this::onSwingHand);
+        //$$ registerListener(Listener.getPacketPoint().getChannel(ServerboundPunchPacket.class), this::onSwingHand, Integer.MAX_VALUE);
         //#else
-        registerListener(Listener.getPacketPoint().getChannel(ServerboundSwingPacket.class), this::onSwingHand);
+        registerListener(Listener.getPacketPoint().getChannel(ServerboundSwingPacket.class), this::onSwingHand, Integer.MAX_VALUE);
         //#endif
-        registerListener(Listener.getPacketPoint().getChannel(ServerboundAttackPacket.class), this::onAttack);
+        registerListener(
+                Listener.getPacketPoint().getChannel(ServerboundAttackPacket.class),
+                this::onAttack,
+                Integer.MAX_VALUE);
         registerListener(Listener.getPacketPoint().getChannel(ClientboundDamageEventPacket.class), this::onPlayerDamage);
         registerListener(
                 Listener.getPacketPoint().getChannel(ServerboundSetCarriedItemPacket.class),
@@ -320,6 +323,8 @@ public class PlayerStateManager extends BaseModule {
             if (packet.hasRotation()) {
                 lastPitch = packet.getXRot(lastPitch);
                 lastYaw = packet.getYRot(lastYaw);
+                lastServerSidePitch = lastPitch;
+                lastServerSideYaw = lastYaw;
                 updateAFK();
             }
             lastKnownMovementSpeed = new Vec3(lastX - oldMove.x, lastY - oldMove.y, lastZ - oldMove.z);
@@ -344,6 +349,8 @@ public class PlayerStateManager extends BaseModule {
             if (packet.hasRotation()) {
                 lastPitch = packet.getXRot(lastPitch);
                 lastYaw = packet.getYRot(lastYaw);
+                lastServerSidePitch = lastPitch;
+                lastServerSideYaw = lastYaw;
                 updateAFK();
             }
         }
@@ -986,6 +993,7 @@ public class PlayerStateManager extends BaseModule {
     }
 
     public void updateOtherPlayers() {
+        if (checkNull()) return;
         for (var player : mc.level.players()) {
             if (player instanceof MetadataHolder metadataHolder) {
                 PlayerStatus status = getOrCreateStatus(player);

@@ -3,6 +3,7 @@ package me.matl114.hacks.modules.extra;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.access.LivingEntityAccess;
@@ -31,7 +32,10 @@ import me.matl114.hacks.utils.RaycastUtils;
 import me.matl114.utils.render.RenderCollector;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.GamePacketTypes;
+import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundClientCommandPacket;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.level.block.LadderBlock;
@@ -90,6 +94,23 @@ public class Misc extends BaseModule {
     public final FlagRef parkourUsePacketQueue =
             flagBuilder(autoParkour.add("use-packet-queue")).defaultValue(false).build();
 
+    public final ModulePath godMode = root.add("god-mode");
+
+    public final FlagRef godEnable = flagBuilder(godMode.addEnable())
+            .updateListener(s -> {
+                if (!s) {
+                    onGodModeRelease();
+                }
+            })
+            .build();
+
+    public final KeyBindRef godKey = toggleHotkey(godMode.addHotkey(), new MultiKeyBind(), godMode.addEnable())
+            .build();
+
+    public final KeyBindRef godRelease = hotkey(godMode.add("release"), new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.wrapAsHandler(this::onGodModeRelease))
+            .build();
+
     public final ModulePath tests = root.add("tests");
     public final KeyBindRef test1 = hotkey(tests.add("test-1"), new MultiKeyBind())
             .registerHotkey(HotKeyUtils.wrapAsHandler(this::runTest1))
@@ -123,10 +144,16 @@ public class Misc extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreGameTick(), this::onPreGameTick);
-        registerListener(Listener.getPostGameTick(), this::updateParkour);
+        registerListener(Listener.getPostTick(), this::updateParkour);
         registerListener(PacketManager.getPacketQueueOutEvent(), this::onParkourPacketQueue);
         registerListener(PacketManager.getQueueShutdownEvent(), this::onParkourQueueShutdown);
         registerListener(RenderListener.getRender3DEvent(), this::renderParkour);
+
+        registerListener(
+                Listener.getPacketPreHandlePoint().getChannel(ClientboundRespawnPacket.class), this::onCatchGodMode);
+        registerListener(
+                Listener.getPacketPreHandlePoint().getChannel(ClientboundPlayerPositionPacket.class), this::onTeleportPos);
+        registerListener(Listener.getPacketPoint().getChannel(ServerboundAcceptTeleportationPacket.class), this::onTeleportConfirm);
     }
 
     public void onPostTick(Event<LocalPlayer> event) {
@@ -137,16 +164,19 @@ public class Misc extends BaseModule {
         if (checkNull()) return;
         int tick = Tasks.getTick() % 10;
         if (friendsWineEnable.get() && !mc.player.isFallFlying()) {
-            if (sneak.get()) {
-                PlayerInputManager.INSTANCE.addSneakModifier(0, tick <= 4, 1);
-            }
-            RotationManager.INSTANCE.request(
+            RotationManager.INSTANCE.push(
                     RotationManager.ofDirection(Optional.empty(), Optional.of(mc.player.getYRot() + 36 * tick))
+                            .applyMoveFix(true)
+                            .preTick((rotation, player, matchRaycast) -> {
+                                if (matchRaycast && sneak.get()) {
+                                    PlayerInputManager.INSTANCE.addSneakModifier(0, tick <= 4, 1);
+                                }
+                            })
                             .priority(-114514));
         }
     }
 
-    private void updateParkour(Event<LocalPlayer> event) {
+    private void updateParkour() {
         parkourTarget.clear();
         parkourTrajectory.clear();
         if (checkNull()) {
@@ -1150,6 +1180,53 @@ public class Misc extends BaseModule {
         if (!autoParkourEnable.get()) return;
         parkourTarget.render3D(event.context.stack(), event.context.partialTicks());
         parkourTrajectory.render3D(event.context.stack(), event.context.partialTicks());
+    }
+
+    Integer cachedGodTp = null;
+    boolean pendingCache;
+
+    public void onGodModeRelease() {
+        if (!checkNull() && cachedGodTp != null) {
+            //#if MC >= 260300
+            //$$ // 26.3 的确认包改成回传确认后的位置与朝向，这里按玩家当前状态回填
+            //$$ mc.getConnection()
+            //$$         .send(new ServerboundAcceptTeleportationPacket(
+            //$$                 cachedGodTp,
+            //$$                 mc.player.getX(),
+            //$$                 mc.player.getY(),
+            //$$                 mc.player.getZ(),
+            //$$                 mc.player.getYRot(),
+            //$$                 mc.player.getXRot()));
+            //#else
+            mc.getConnection().send(new ServerboundAcceptTeleportationPacket(cachedGodTp));
+            //#endif
+        }
+        cachedGodTp = null;
+        pendingCache = false;
+    }
+
+    public void onCatchGodMode(Event<ClientboundRespawnPacket> respawn) {
+        if (godEnable.get()
+                && mc.level != null
+                && !Objects.equals(
+                        mc.level.dimension(),
+                        respawn.context.commonPlayerSpawnInfo().dimension())) {
+            pendingCache = true;
+        }
+    }
+
+    public void onTeleportPos(Event<ClientboundPlayerPositionPacket> event) {
+        if (pendingCache || cachedGodTp != null) {
+            if (event.context.id() >= 0) {
+                cachedGodTp = event.context.id();
+            }
+        }
+    }
+
+    public void onTeleportConfirm(Event<ServerboundAcceptTeleportationPacket> event) {
+        if (cachedGodTp != null) {
+            event.cancel();
+        }
     }
 
     public void runTest1() {

@@ -20,6 +20,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.util.CommonColors;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
@@ -107,20 +108,21 @@ public class InventoryViewScreen extends GenericBackGroundScreen {
                 .addTo(this);
         ElementHandler labelElement;
         if (blockPos != null) {
-            labelElement = LabelElement.instance(Component.literal("%s [%d, %d, %d] "
-                                    .formatted(
-                                            this.blockDimension != null
-                                                    ? this.blockDimension
-                                                            .identifier()
-                                                            .toString()
-                                                    : this.blockWorld
-                                                            .dimension()
-                                                            .identifier()
-                                                            .toString(),
-                                            blockPos.getX(),
-                                            blockPos.getY(),
-                                            blockPos.getZ()))
-                            .append(Component.translatable("widget.gui.inventory-view-screen.click-slot")))
+            String dimensionName = this.blockDimension != null
+                    ? this.blockDimension.identifier().toString()
+                    : this.blockWorld.dimension().identifier().toString();
+            labelElement = new LabelElement(
+                            element -> Component.literal("%s ".formatted(dimensionName))
+                                    .append(
+                                            ScreenUtils.hasCtrlDown()
+                                                    ? Component.literal("[%d, %d, %d]"
+                                                            .formatted(
+                                                                    blockPos.getX(), blockPos.getY(), blockPos.getZ()))
+                                                    : Component.translatable(
+                                                            "widget.gui.inventory-view-screen.press-ctrl-to-show"))
+                                    .append(Component.literal(" "))
+                                    .append(Component.translatable("widget.gui.inventory-view-screen.click-slot")),
+                            CommonColors.WHITE)
                     .withInputHandler(InputHandler.run(() -> {
                         Minecraft.getInstance()
                                 .keyboardHandler

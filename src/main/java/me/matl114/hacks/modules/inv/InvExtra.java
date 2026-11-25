@@ -6,15 +6,18 @@ import com.google.common.util.concurrent.Runnables;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.OptionalInt;
 import me.matl114.accessors.access.HandledScreenAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.events.PacketManager;
 import me.matl114.events.impl.SlotClickAction;
+import me.matl114.events.impl.UseItem;
+import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -41,19 +44,25 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
 import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 public class InvExtra extends BaseModule {
+    private static final int HOTBAR_ITEM_USAGE_WINDOW_SIZE = 27;
     public static InvExtra INSTANCE;
     private final Deque<Runnable> postTickGhostHandCallbacks = new ArrayDeque<>();
     private final Deque<Runnable> nextTickGhostHandCallbacks = new ArrayDeque<>();
+    private final Deque<Item> hotbarItemUsageWindow = new ArrayDeque<>(HOTBAR_ITEM_USAGE_WINDOW_SIZE);
+    private final Map<Item, Integer> hotbarItemUsageCounts = new HashMap<>();
     public final ModulePath inventory = makePath(Configs.INV_CONFIG, "inventory");
 
     public InvExtra() {
@@ -90,13 +99,15 @@ public class InvExtra extends BaseModule {
         super.registerAll();
         registerListener(Listener.getPreClickSlot(), this::onClickSlot);
         registerListener(Listener.getPacketPoint().getChannel(ServerboundContainerClosePacket.class), this::onCloseScreen);
-        registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundClientTickEndPacket.class),
-                this::onClientTickEnd,
-                Integer.MAX_VALUE);
-        registerListener(Listener.getPreTick(), this::onNewTick);
+        registerListener(Listener.getPostGameTick(), this::onClientTickEnd, Integer.MAX_VALUE);
+        registerListener(Listener.getPostTick(), this::onClientPostTickEnd, Integer.MIN_VALUE);
+        registerListener(Listener.getPreTick(), this::onNewTick, Integer.MIN_VALUE + 11);
+        registerListener(Listener.getPostPlayerUseItem(), this::onPostUseItem);
+        registerListener(Listener.getPostPlayerUseItemOnBlock(), this::onPostUseItemOnBlock);
         registerListener(Listener.getServerLeavePoint(), event -> {
             postTickGhostHandCallbacks.clear();
+            nextTickGhostHandCallbacks.clear();
+            resetHotbarItemUsageWindow();
         });
         TaskManagers.getToggleManager().register(TaskManagers.PREFIX_BUTTON_TOGGLE + "." + "keep-inv", enableKeepInv);
         TaskManagers.getTaskManager().register(TaskManagers.PREFIX_BUTTON_TASKS + "." + CLEAR_KEEP, this::clearKeep);
@@ -135,27 +146,19 @@ public class InvExtra extends BaseModule {
         if (player == null) {
             return;
         }
-        InventoryManager manager = InvTasks.getInventoryManager();
-        try {
-            int syncId = manager != null && manager.currentOpenScreenHandler != null
-                    ? manager.currentOpenScreenHandler.containerId
-                    : player.containerMenu.containerId;
-            if (mc.getConnection() != null) {
-                mc.getConnection().send(new ServerboundContainerClosePacket(syncId));
-            }
-        } catch (Throwable e) {
-            e.printStackTrace();
-        } finally {
-            player.clientSideCloseContainer();
+        // the retained server handler is the one the server still has open, so close that id first
+        AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(player);
+        if (handler != null && mc.getConnection() != null) {
+            mc.getConnection().send(new ServerboundContainerClosePacket(handler.containerId));
         }
+        player.closeContainer();
     }
 
     List<Runnable> inventoryCallbacks = new ArrayList<>();
     List<Integer> hotBarCallbacks = new ArrayList<>();
+    List<Runnable> invPostTickCallbacks = List.of();
 
-    private void onClientTickEnd(Event<ServerboundClientTickEndPacket> event) {
-        if (event.isCancelled()) return;
-        // Movement-post actions may add inventory callbacks during this packet's post-schedule phase.
+    private void onClientTickEnd() {
         duringCallback = true;
         try {
             drainGhostHandCallbacks();
@@ -165,13 +168,7 @@ public class InvExtra extends BaseModule {
         if (!inventoryCallbacks.isEmpty()) {
             try {
                 MovTasks.getMovExtra().sendSprintPacketsForInventoryAction();
-                List<Runnable> inventoryTasks = new ArrayList<>(inventoryCallbacks);
-                PacketManager.schedulePostScheduleCallback(event.context, () -> {
-                    for (Runnable r : inventoryTasks) {
-                        r.run();
-                    }
-                });
-
+                invPostTickCallbacks = new ArrayList<>(inventoryCallbacks);
             } finally {
                 inventoryCallbacks.clear();
             }
@@ -179,7 +176,7 @@ public class InvExtra extends BaseModule {
         if (!hotBarCallbacks.isEmpty()) {
             try {
                 int lastSelected = hotBarCallbacks.getLast();
-                mc.player.getInventory().setSelectedSlot(lastSelected);
+                InventoryUtils.setSelectedSlot(lastSelected);
                 PostManager.INSTANCE.addNextTransactionAction((ch2) -> {
                     PlayerInteractionAccess.of(mc.gameMode).syncSelectedHotbar(lastSelected);
                 });
@@ -189,7 +186,17 @@ public class InvExtra extends BaseModule {
         }
     }
 
-    private void onNewTick(Event<Void> event) {
+    private void onClientPostTickEnd() {
+        try {
+            for (var runnable : invPostTickCallbacks) {
+                runnable.run();
+            }
+        } finally {
+            invPostTickCallbacks = List.of();
+        }
+    }
+
+    private void onNewTick() {
         if (checkNull()) return;
         tickNextTickCallbacks();
     }
@@ -214,6 +221,15 @@ public class InvExtra extends BaseModule {
         return false;
     }
 
+    public void pushHotbarRestoreAfterTick(int hotbarSlot) {
+        if (hotbarSlot < 0 || hotbarSlot >= 9) return;
+        pushPostTickGhostHandCallback(() -> {
+            if (mc.player != null) {
+                PlayerInteractionAccess.of(mc.gameMode).syncSelectedHotbar(hotbarSlot);
+            }
+        });
+    }
+
     public boolean pushNextTickGhostHandCallback(Runnable runnable) {
         // must ensure that this tick 's nextTick Task already processed
         tickNextTickCallbacks();
@@ -222,6 +238,13 @@ public class InvExtra extends BaseModule {
             return true;
         }
         return false;
+    }
+
+    public boolean pushNextTickPostTickGhostHandCallback(Runnable callback) {
+        if (callback == null || callback == Runnables.doNothing()) {
+            return false;
+        }
+        return pushNextTickGhostHandCallback(() -> postTickGhostHandCallbacks.addLast(callback));
     }
 
     public boolean hasPostTickGhostHandCallback() {
@@ -245,24 +268,22 @@ public class InvExtra extends BaseModule {
                 PlayerInteractionAccess.of(mc.gameMode).syncSelectedHotbar(hand);
                 return wrapHotbarTask(selected);
             } else {
-                OptionalInt slotIndex = mc.player.containerMenu.findSlot(mc.player.getInventory(), hand);
+                AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+                OptionalInt slotIndex = handler.findSlot(mc.player.getInventory(), hand);
                 if (slotIndex.isPresent()) {
                     int swapped = slotIndex.getAsInt();
                     if (swapped >= 0) {
                         MovExtra.INSTANCE.sendPacketsForInventoryAction();
                         mc.gameMode.handleContainerInput(
-                                mc.player.containerMenu.containerId,
-                                swapped,
-                                selected,
-                                ContainerInput.SWAP,
-                                mc.player);
+                                handler.containerId, swapped, selected, ContainerInput.SWAP, mc.player);
                         return wrapInvTask(() -> {
-                            mc.gameMode.handleContainerInput(
-                                    mc.player.containerMenu.containerId,
-                                    swapped,
-                                    selected,
-                                    ContainerInput.SWAP,
-                                    mc.player);
+                            AbstractContainerMenu handler2 = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+                            OptionalInt slotIndex2 = handler2.findSlot(mc.player.getInventory(), hand);
+                            if (slotIndex2.isPresent()) {
+                                int swapped2 = slotIndex2.getAsInt();
+                                mc.gameMode.handleContainerInput(
+                                        handler2.containerId, swapped2, selected, ContainerInput.SWAP, mc.player);
+                            }
                         });
                     } else {
                         return null;
@@ -278,10 +299,21 @@ public class InvExtra extends BaseModule {
     public boolean canSwapItemToHand(int hand, boolean offhand, GhostHandMode mode) {
         if (mc.player == null || hand < 0 || hand >= InventoryUtils.getPlayerInvSize()) return false;
         if (mode == GhostHandMode.HOT_BAR_ONLY && !offhand && hand != 40) return hand < 9;
-        return mc.player
-                .containerMenu
-                .findSlot(mc.player.getInventory(), hand)
-                .isPresent();
+        AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+        return handler != null && handler.findSlot(mc.player.getInventory(), hand).isPresent();
+    }
+
+    public Runnable swapItemToHand(int hand, boolean offhand) {
+        if (offhand) {
+            return swapInventoryIndexToOffhand(hand);
+        }
+        if (hand == 40) {
+            return swapInventoryIndexToHand(40);
+        }
+        if (hand >= 0 && hand < 9) {
+            return swapInventoryHotBar(hand);
+        }
+        return swapInventoryIndexToHand(hand);
     }
 
     public Runnable swapItemToHand(int hand, boolean offhand, GhostHandMode mode) {
@@ -297,6 +329,84 @@ public class InvExtra extends BaseModule {
         };
     }
 
+    /**
+     * 把背包里的物品借道空/少用的快捷栏槽位换到手上，返回调用后要恢复的手上槽位。
+     *
+     * <p>比起直接 {@link #swapItemToHand(int, boolean, GhostHandMode)}，这样不会把玩家当前手上的东西
+     * 挤到背包深处，只会在快捷栏内部换来换去，事后由调用方用 {@link #pushHotbarRestoreAfterTick(int)} 复原。
+     */
+    public Runnable swapItemToHotbarCache(int inventoryIndex) {
+        if (mc.player == null || inventoryIndex < 0 || inventoryIndex >= 36) return null;
+
+        if (inventoryIndex < 9) {
+            return swapInventoryHotBar(inventoryIndex);
+        }
+
+        int hotbarSlot = findHotbarCacheSlot();
+        if (hotbarSlot < 0 || hotbarSlot >= 9) {
+            return null;
+        }
+        int current = InventoryUtils.getSelectedSlot();
+        try {
+            InventoryUtils.setSelectedSlot(hotbarSlot);
+            if (swapItemToHand(inventoryIndex, false) == null) {
+                return null;
+            }
+        } finally {
+            InventoryUtils.setSelectedSlot(current);
+        }
+
+        return swapInventoryHotBar(hotbarSlot);
+    }
+
+    private int findHotbarCacheSlot() {
+        Inventory playerInventory = mc.player.getInventory();
+        for (int slot = 0; slot < 9; slot++) {
+            if (playerInventory.getItem(slot).isEmpty()) {
+                return slot;
+            }
+        }
+        int leastUsedSlot = -1;
+        int leastUsage = Integer.MAX_VALUE;
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = playerInventory.getItem(slot);
+            // 有耐久或不死图腾的槽位被换走代价太大，不参与挑选
+            if (stack.get(DataComponents.MAX_DAMAGE) != null || stack.is(Items.TOTEM_OF_UNDYING)) {
+                continue;
+            }
+            int usage = hotbarItemUsageCounts.getOrDefault(stack.getItem(), 0);
+            if (usage < leastUsage) {
+                leastUsedSlot = slot;
+                leastUsage = usage;
+            }
+        }
+        return leastUsedSlot >= 0 ? leastUsedSlot : InventoryUtils.getSelectedSlot();
+    }
+
+    private void onPostUseItemOnBlock(Event<UseItemOnBlock> event) {
+        recordMainHandUse(event.context.hand(), event.context.handItem());
+    }
+
+    private void onPostUseItem(Event<UseItem> event) {
+        recordMainHandUse(event.context.hand(), event.context.handItem());
+    }
+
+    private void recordMainHandUse(InteractionHand hand, ItemStack stack) {
+        if (mc.player == null || hand != InteractionHand.MAIN_HAND || stack.isEmpty()) return;
+        Item item = stack.getItem();
+        if (hotbarItemUsageWindow.size() == HOTBAR_ITEM_USAGE_WINDOW_SIZE) {
+            Item evicted = hotbarItemUsageWindow.removeFirst();
+            hotbarItemUsageCounts.computeIfPresent(evicted, (ignored, count) -> count == 1 ? null : count - 1);
+        }
+        hotbarItemUsageWindow.addLast(item);
+        hotbarItemUsageCounts.merge(item, 1, Integer::sum);
+    }
+
+    private void resetHotbarItemUsageWindow() {
+        hotbarItemUsageWindow.clear();
+        hotbarItemUsageCounts.clear();
+    }
+
     private Runnable swapInventoryIndexToHand(int hand) {
         int selected = InventoryUtils.getSelectedSlot();
         if (selected != hand) {
@@ -306,26 +416,53 @@ public class InvExtra extends BaseModule {
             //                    PlayerInteractionAccess.of(mc.gameMode).syncSelectedHotbar(selected);
             //                };
             //            } else {
-            OptionalInt slotIndex = mc.player.containerMenu.findSlot(mc.player.getInventory(), hand);
-            if (slotIndex.isPresent()) {
-                int swapped = slotIndex.getAsInt();
-                if (swapped >= 0) {
-                    MovTasks.getMovExtra().sendPacketsForInventoryAction();
-                    mc.gameMode.handleContainerInput(
-                            mc.player.containerMenu.containerId, swapped, selected, ContainerInput.SWAP, mc.player);
-                    return wrapInvTask(() -> {
-                        mc.gameMode.handleContainerInput(
-                                mc.player.containerMenu.containerId,
-                                swapped,
-                                selected,
-                                ContainerInput.SWAP,
-                                mc.player);
-                    });
+            AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+            // 界面上没有副手/背包槽时也能借 40 号交换：用当前选中槽位替它做占位
+            if (hand == 40) {
+                OptionalInt slotIndex = handler.findSlot(mc.player.getInventory(), selected);
+                if (slotIndex.isPresent()) {
+                    int swapped = slotIndex.getAsInt();
+                    if (swapped >= 0) {
+                        MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                        mc.gameMode.handleContainerInput(handler.containerId, swapped, hand, ContainerInput.SWAP, mc.player);
+                        return wrapInvTask(() -> {
+                            AbstractContainerMenu handler2 = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+                            OptionalInt slotIndex2 = handler2.findSlot(mc.player.getInventory(), selected);
+                            if (slotIndex2.isPresent()) {
+                                int swapped2 = slotIndex2.getAsInt();
+                                mc.gameMode.handleContainerInput(
+                                        handler2.containerId, swapped2, hand, ContainerInput.SWAP, mc.player);
+                            }
+                        });
+                    } else {
+                        return null;
+                    }
                 } else {
                     return null;
                 }
             } else {
-                return null;
+                OptionalInt slotIndex = handler.findSlot(mc.player.getInventory(), hand);
+                if (slotIndex.isPresent()) {
+                    int swapped = slotIndex.getAsInt();
+                    if (swapped >= 0) {
+                        MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                        mc.gameMode.handleContainerInput(
+                                handler.containerId, swapped, selected, ContainerInput.SWAP, mc.player);
+                        return wrapInvTask(() -> {
+                            AbstractContainerMenu handler2 = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+                            OptionalInt slotIndex2 = handler2.findSlot(mc.player.getInventory(), hand);
+                            if (slotIndex2.isPresent()) {
+                                int swapped2 = slotIndex2.getAsInt();
+                                mc.gameMode.handleContainerInput(
+                                        handler2.containerId, swapped2, selected, ContainerInput.SWAP, mc.player);
+                            }
+                        });
+                    } else {
+                        return null;
+                    }
+                } else {
+                    return null;
+                }
             }
             // }
         }
@@ -334,17 +471,21 @@ public class InvExtra extends BaseModule {
 
     private Runnable swapInventoryIndexToOffhand(int hand) {
         if (hand == 40) return Runnables.doNothing();
-        OptionalInt slotIndex = mc.player.containerMenu.findSlot(mc.player.getInventory(), hand);
+        AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+        OptionalInt slotIndex = handler.findSlot(mc.player.getInventory(), hand);
         if (slotIndex.isPresent()) {
             int swapped = slotIndex.getAsInt();
             if (swapped >= 0) {
                 MovTasks.getMovExtra().sendPacketsForInventoryAction();
 
-                mc.gameMode.handleContainerInput(
-                        mc.player.containerMenu.containerId, swapped, 40, ContainerInput.SWAP, mc.player);
+                mc.gameMode.handleContainerInput(handler.containerId, swapped, 40, ContainerInput.SWAP, mc.player);
                 return wrapInvTask(() -> {
-                    mc.gameMode.handleContainerInput(
-                            mc.player.containerMenu.containerId, swapped, 40, ContainerInput.SWAP, mc.player);
+                    AbstractContainerMenu handler2 = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+                    OptionalInt slotIndex2 = handler2.findSlot(mc.player.getInventory(), hand);
+                    if (slotIndex2.isPresent()) {
+                        int swapped2 = slotIndex2.getAsInt();
+                        mc.gameMode.handleContainerInput(handler2.containerId, swapped2, 40, ContainerInput.SWAP, mc.player);
+                    }
                 });
             } else {
                 return null;
@@ -370,7 +511,8 @@ public class InvExtra extends BaseModule {
 
     public Runnable swapInventorySlotToHand(int slot) {
         int selected = InventoryUtils.getSelectedSlot();
-        OptionalInt slotIndex = mc.player.containerMenu.findSlot(mc.player.getInventory(), selected);
+        AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+        OptionalInt slotIndex = handler.findSlot(mc.player.getInventory(), selected);
         if (slotIndex.isPresent()) {
             return swapScreenSlots(slot, slotIndex.getAsInt());
         } else {
@@ -380,7 +522,8 @@ public class InvExtra extends BaseModule {
 
     public Runnable swapInventorySlotToOffhand(int slot) {
         int selected = 40;
-        OptionalInt slotIndex = mc.player.containerMenu.findSlot(mc.player.getInventory(), selected);
+        AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+        OptionalInt slotIndex = handler.findSlot(mc.player.getInventory(), selected);
         if (slotIndex.isPresent()) {
             return swapScreenSlots(slot, slotIndex.getAsInt());
         } else {
@@ -390,8 +533,9 @@ public class InvExtra extends BaseModule {
 
     public Runnable swapInventoryIndexes(int slot1, int slot2) {
         ;
-        OptionalInt slotIndex = mc.player.containerMenu.findSlot(mc.player.getInventory(), slot1);
-        OptionalInt slotIndex2 = mc.player.containerMenu.findSlot(mc.player.getInventory(), slot2);
+        AbstractContainerMenu handler = InventoryManager.INSTANCE.getCurrentServerScreenHandler(mc.player);
+        OptionalInt slotIndex = handler.findSlot(mc.player.getInventory(), slot1);
+        OptionalInt slotIndex2 = handler.findSlot(mc.player.getInventory(), slot2);
         if (slotIndex.isPresent() && slotIndex2.isPresent()) {
             return swapScreenSlots(slotIndex.getAsInt(), slotIndex2.getAsInt());
         } else {

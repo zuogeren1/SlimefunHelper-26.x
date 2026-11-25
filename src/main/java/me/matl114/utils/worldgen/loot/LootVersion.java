@@ -47,6 +47,15 @@ public enum LootVersion implements ConfigEnum {
         return this == V1_21_11 || this == V26_1 || this == V26_2 || this == V26_3;
     }
 
+    /**
+     * {@code minecraft:lunge} joined {@code #minecraft:non_treasure} (and therefore
+     * {@code #minecraft:on_random_loot}) in 1.21.11. Older tables pick random book enchantments from
+     * one fewer option, which changes the enchantment draw and every later loot draw.
+     */
+    public boolean hasLungeEnchantment() {
+        return this == V1_21_11 || this == V26_1 || this == V26_2 || this == V26_3;
+    }
+
     @Override
     public String getConfigEnumType() {
         return "loot_version";

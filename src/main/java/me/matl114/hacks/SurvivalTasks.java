@@ -19,6 +19,9 @@ public class SurvivalTasks {
     private static VillagerEsp villagerEsp;
 
     @Getter
+    public static PearlESP pearlESP;
+
+    @Getter
     private static TrialInfoESP trialInfoESP;
 
     @Getter
@@ -66,12 +69,10 @@ public class SurvivalTasks {
     @Getter
     public static XaeroMapScanner xaeroMapScanner;
 
-    @Getter
-    public static PearlESP pearlESP;
-
     private static void initModules(ModuleManager m) {
         schedularSettings = new SchedularSettings().register(m);
         villagerEsp = new VillagerEsp().register(m);
+        pearlESP = new PearlESP().register(m);
         trialInfoESP = new TrialInfoESP().register(m);
         worldManager = new WorldManager().register(m);
         blockFarm = new BlockFarm().register(m);
@@ -88,7 +89,6 @@ public class SurvivalTasks {
         baritoneFix = new BaritoneFix().register(m);
         xaeroHelper = new XaeroHelper().register(m);
         xaeroMapScanner = new XaeroMapScanner().register(m);
-        pearlESP = new PearlESP().register(m);
     }
 
     static {

@@ -18,6 +18,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.protocol.game.*;
 import net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheRadiusPacket;
@@ -26,12 +27,60 @@ import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.EnchantmentTags;
 import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 
 public class BadPacketsFix extends BaseModule {
+    private static final List<ResourceKey<Enchantment>> VANILLA_ENCHANTMENT_ORDER = List.of(
+            Enchantments.BINDING_CURSE,
+            Enchantments.VANISHING_CURSE,
+            Enchantments.RIPTIDE,
+            Enchantments.CHANNELING,
+            Enchantments.WIND_BURST,
+            Enchantments.FROST_WALKER,
+            Enchantments.SHARPNESS,
+            Enchantments.SMITE,
+            Enchantments.BANE_OF_ARTHROPODS,
+            Enchantments.IMPALING,
+            Enchantments.POWER,
+            Enchantments.DENSITY,
+            Enchantments.BREACH,
+            Enchantments.PIERCING,
+            Enchantments.SWEEPING_EDGE,
+            Enchantments.MULTISHOT,
+            Enchantments.FIRE_ASPECT,
+            Enchantments.FLAME,
+            Enchantments.KNOCKBACK,
+            Enchantments.PUNCH,
+            Enchantments.PROTECTION,
+            Enchantments.BLAST_PROTECTION,
+            Enchantments.FIRE_PROTECTION,
+            Enchantments.PROJECTILE_PROTECTION,
+            Enchantments.FEATHER_FALLING,
+            Enchantments.FORTUNE,
+            Enchantments.LOOTING,
+            Enchantments.SILK_TOUCH,
+            Enchantments.LUCK_OF_THE_SEA,
+            Enchantments.EFFICIENCY,
+            Enchantments.QUICK_CHARGE,
+            Enchantments.LURE,
+            Enchantments.RESPIRATION,
+            Enchantments.AQUA_AFFINITY,
+            Enchantments.SOUL_SPEED,
+            Enchantments.SWIFT_SNEAK,
+            Enchantments.DEPTH_STRIDER,
+            Enchantments.THORNS,
+            Enchantments.LOYALTY,
+            Enchantments.UNBREAKING,
+            Enchantments.INFINITY,
+            Enchantments.MENDING);
+
     public static BadPacketsFix INSTANCE;
     public final ModulePath badPackets = makePath(Configs.EXTRA_CONFIG, "bad-packets");
 
@@ -79,7 +128,7 @@ public class BadPacketsFix extends BaseModule {
             .defaultValue(true)
             .build();
 
-    public final FlagRef cancelLitematicaTransmit = builder(badPackets.add("fix-litematica-transmit"), Boolean.class)
+    public final FlagRef fixIncorrectEnchantments = builder(badPackets.add("fix-incorrect-enchantments"), Boolean.class)
             .defaultValue(true)
             .build();
 
@@ -117,7 +166,10 @@ public class BadPacketsFix extends BaseModule {
                 this::onRepackViewDistance,
                 Integer.MIN_VALUE);
         registerListener(
-                Listener.getRegistryTagKeyReload().getChannel(BuiltInRegistries.BLOCK.key()), this::fixTagsBadPackets);
+                Listener.getRegistryTagKeyReload().getChannel(BuiltInRegistries.BLOCK.key()), this::fixBlockTagsBadPackets);
+        registerListener(
+                Listener.getRegistryTagKeyReload().getChannel(Registries.ENCHANTMENT),
+                this::fixEnchantmentTagBadPackets);
     }
 
     boolean serverSprint = false;
@@ -283,7 +335,7 @@ public class BadPacketsFix extends BaseModule {
         }
     }
 
-    public void fixTagsBadPackets(Event<Map<TagKey<?>, List<Holder<?>>>> event) {
+    public void fixBlockTagsBadPackets(Event<Map<TagKey<?>, List<Holder<?>>>> event) {
         var registryKey = event.getArgs(0);
         if (fixIncorrectTools.get() && Objects.equals(registryKey, BuiltInRegistries.BLOCK.key())) {
             var original = event.context;
@@ -304,6 +356,62 @@ public class BadPacketsFix extends BaseModule {
             if (recreateMap != null) {
                 event.context(recreateMap);
             }
+        }
+    }
+
+    public void fixEnchantmentTagBadPackets(Event<Map<TagKey<?>, List<Holder<?>>>> event) {
+        var registryKey = event.getArgs(0);
+        if (fixIncorrectEnchantments.get() && Objects.equals(registryKey, Registries.ENCHANTMENT)) {
+            var original = event.context;
+            List<Holder<Enchantment>> tooltipOrder = (List) original.get(EnchantmentTags.TOOLTIP_ORDER);
+            if (tooltipOrder == null || tooltipOrder.isEmpty()) {
+                return;
+            }
+
+            Map<ResourceKey<Enchantment>, Holder<Enchantment>> entriesByKey = new LinkedHashMap<>();
+            for (Holder<Enchantment> entry : tooltipOrder) {
+                ResourceKey<Enchantment> key = entry.unwrapKey().orElse(null);
+                if (key == null || entriesByKey.putIfAbsent(key, entry) != null) {
+                    return;
+                }
+            }
+            // get the intersection
+            List<ResourceKey<Enchantment>> vanillaOrder = VANILLA_ENCHANTMENT_ORDER.stream()
+                    .filter(entriesByKey::containsKey)
+                    .toList();
+            entriesByKey.keySet().removeIf(s -> !vanillaOrder.contains(s));
+            List<ResourceKey<Enchantment>> tooltipsOrderList =
+                    entriesByKey.keySet().stream().toList();
+            if (vanillaOrder.size() != tooltipsOrderList.size()) {
+                return;
+            }
+            // map server side wrong key to real entry
+            Map<ResourceKey<Enchantment>, Holder<Enchantment>> enchantmentMap = new HashMap<>();
+            for (int i = 0; i < vanillaOrder.size(); i++) {
+                ResourceKey<Enchantment> receivedKey = tooltipsOrderList.get(i);
+                enchantmentMap.put(receivedKey, entriesByKey.get(vanillaOrder.get(i)));
+            }
+
+            Map<TagKey<?>, List<Holder<?>>> recreateMap = new HashMap<>(original);
+            for (TagKey<Enchantment> tag : List.of(
+                    EnchantmentTags.TOOLTIP_ORDER,
+                    EnchantmentTags.CURSE,
+                    EnchantmentTags.DOUBLE_TRADE_PRICE,
+                    EnchantmentTags.TRADEABLE,
+                    EnchantmentTags.TREASURE,
+                    EnchantmentTags.NON_TREASURE)) {
+                List<Holder<Enchantment>> entries = (List) original.get(tag);
+                if (entries == null) {
+                    continue;
+                }
+                List<Holder<Enchantment>> remapped = new ArrayList<>(entries.size());
+                for (Holder<Enchantment> entry : entries) {
+                    ResourceKey<Enchantment> key = entry.unwrapKey().orElse(null);
+                    remapped.add(key == null ? entry : enchantmentMap.getOrDefault(key, entry));
+                }
+                recreateMap.put(tag, (List) remapped);
+            }
+            event.context(recreateMap);
         }
     }
 }

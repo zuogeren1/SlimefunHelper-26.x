@@ -79,7 +79,7 @@ public class MultiBlockHelper extends BaseModule {
 
     public final EnumRef<LegalInteractMode> legalMode = builder(
                     multiblock.add("bypass-targeting-mode"), LegalInteractMode.class)
-            .defaultValue(LegalInteractMode.USEITEM_PACKET)
+            .defaultValue(LegalInteractMode.LEGACY_SLIENT_ROT)
             .build();
 
     @Override
@@ -220,7 +220,6 @@ public class MultiBlockHelper extends BaseModule {
                         interactLook.subtract(mc.player.getEyePosition()).normalize();
                 Vec2 pitchYaw = EntityUtils.rotationToPitchYaw(cacheDirection);
                 switch (legalMode.get()) {
-                    case USEITEM_PACKET -> clickUsePacket(result, pitchYaw, rateLimit);
                     case LEGACY_SLIENT_ROT -> clickSnap(result, pitchYaw, rateLimit);
                     case DELAY_MOVEMENT, MOVEMENT_POST -> clickDelayMovement(result, pitchYaw, rateLimit);
                 }

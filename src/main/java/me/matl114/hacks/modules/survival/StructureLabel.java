@@ -68,9 +68,9 @@ public class StructureLabel extends BaseModule {
             Math.max(1, Runtime.getRuntime().availableProcessors() / 4);
     private static final int LOOT_EXECUTOR_THREAD_COUNT =
             Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
-    private static final ExecutorService structureExecutor =
+    static final ExecutorService structureExecutor =
             Executors.newFixedThreadPool(STRUCTURE_EXECUTOR_THREAD_COUNT, StructureLabel::daemonThread);
-    private static final ThreadPoolExecutor lootExecutor = new ThreadPoolExecutor(
+    static final ThreadPoolExecutor lootExecutor = new ThreadPoolExecutor(
             LOOT_EXECUTOR_THREAD_COUNT,
             LOOT_EXECUTOR_THREAD_COUNT,
             0L,
@@ -260,7 +260,7 @@ public class StructureLabel extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getPostGameTick(), this::onTick);
+        registerListener(Listener.getPostTick(), this::onTick);
         registerListener(RenderListener.getRender3DEvent(), this::onRender3D);
         registerListener(XaeroHelper.getWorldSwitchPoint(), this::onLeave);
         registerListener(Listener.getServerLeavePoint(), this::onLeave);

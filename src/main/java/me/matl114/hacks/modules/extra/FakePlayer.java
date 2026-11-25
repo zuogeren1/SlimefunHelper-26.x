@@ -19,6 +19,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.modules.combat.SpearEnhance;
 import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.hacks.utils.config.EntryPrimitiveMap;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.StringFormat;
@@ -173,7 +174,7 @@ public class FakePlayer extends BaseModule {
         DynamicListWidget list = new DynamicListWidget(0, dblank, dx);
         for (var re : mc.level.entitiesForRendering()) {
             if (re instanceof FakePlayerEntity fakePlayer) {
-                createWidgetForFakePlayer(fakePlayer, list, dx, dy, dblank);
+                createWidgetForFakePlayer(fakePlayer, list, dx, dy, dblank, factory);
             }
         }
         int dxx = (dx - dy) / 2;
@@ -181,17 +182,22 @@ public class FakePlayer extends BaseModule {
         acceptor.accept(ExecutableWidget.instance(dxx, dblank, dy, dy)
                 .setElementHandler(IconElement.fixedGui(Constants.ADD_SPRITE, ButtonAction.run(() -> {
                             FakePlayerEntity fakePlayer = createNewFakePlayer();
-                            createWidgetForFakePlayer(fakePlayer, list, dx, dy, dblank);
+                            createWidgetForFakePlayer(fakePlayer, list, dx, dy, dblank, factory);
                         }))
                         .withTooltips(TooltipHandler.of(ChatUtils.parseTooltipsTranslation(
                                 "widget.fake-player.fake-player-list.add.tooltips", "")))));
     }
 
     private DrawableWidget createWidgetForFakePlayer(
-            FakePlayerEntity fakePlayer, @Nullable DynamicListWidget list, int dx, int dy, int dblank) {
+            FakePlayerEntity fakePlayer,
+            @Nullable DynamicListWidget list,
+            int dx,
+            int dy,
+            int dblank,
+            ElementFactory factory) {
         DynamicContentWidget<DrawableWidget> widget = new DynamicContentWidget<>(() -> null, 0, 0);
         SubScreenWidget subScreenWidget = new SubScreenWidget(0, 0, dx, dy + dblank);
-        subScreenWidget.addDrawableChild(createExecuteButton(
+        subScreenWidget.addDrawableChild(factory.createExecuteButton(
                 () -> Component.translatable(
                         "widget.fake-player.fake-player-list.info",
                         fakePlayer.getDisplayName(),
@@ -325,7 +331,7 @@ public class FakePlayer extends BaseModule {
                 weapon,
                 PlayerStateManager.INSTANCE.fallDistance,
                 PlayerStateManager.INSTANCE.getTicksSinceLastAttack(),
-                false);
+                ServerFeature.INSTANCE.attributeSwap.get());
         onDamage(fake, DamageUtils.createDirectDamageSource(DamageTypes.PLAYER_ATTACK, mc.player), damage);
     }
 

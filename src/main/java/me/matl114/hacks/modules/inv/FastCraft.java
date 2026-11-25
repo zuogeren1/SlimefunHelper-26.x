@@ -1,7 +1,9 @@
 package me.matl114.hacks.modules.inv;
 
+import java.util.Set;
 import lombok.Getter;
 import me.matl114.accessors.access.HandledScreenAccess;
+import me.matl114.accessors.access.MerchantScreenAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.gui.basic.*;
@@ -11,10 +13,15 @@ import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.RecipeTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.utils.ClientUtils;
 import me.matl114.hacks.utils.HotKeyUtils;
+import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.managers.Configs;
 import me.matl114.managers.TaskManagers;
 import me.matl114.managers.config.FlagRef;
+import me.matl114.managers.config.KeyBindRef;
+import me.matl114.managers.config.NBTRef;
+import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.Debug;
 import me.matl114.utils.ScreenUtils;
 import me.matl114.utils.config.ValueAccessor;
@@ -23,20 +30,26 @@ import net.minecraft.client.gui.screens.inventory.CraftingScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.protocol.game.ClientboundMerchantOffersPacket;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.display.RecipeDisplayId;
+import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.inventory.AbstractCraftingMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import org.spongepowered.asm.mixin.Unique;
 
 public class FastCraft extends BaseModule {
     public final ModulePath fastCraft = makePath(Configs.INV_CONFIG, "fast-craft");
+    public static FastCraft INSTANCE;
 
     public FastCraft() {
         super("FastCraft");
         bindFlag(enable);
+        INSTANCE = this;
     }
 
     public final FlagRef enable =
@@ -44,12 +57,30 @@ public class FastCraft extends BaseModule {
 
     public final FlagRef dropCraft = flagBuilder(fastCraft.add("drop-craft")).build();
 
+    public final KeyBindRef craftHotkey = hotkey(fastCraft.add("craft-hotkey"), new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.asNonInputHandler(this::craftCurrentScreen))
+            .build();
+
+    public final KeyBindRef tradeHotkey = hotkey(fastCraft.add("trade-hotkey"), new MultiKeyBind())
+            .registerHotkey(HotKeyUtils.asNonInputHandler(this::tradeCurrentScreen))
+            .build();
+
+    public final FlagRef autoSelect = flagBuilder(fastCraft.add("auto-select")).build();
+
+    public final NBTRef<EntrySet<Item>> autoSelectTrades = builder(
+                    fastCraft.add("auto-select-trades"), EntrySet.<Item>parameter())
+            .defaultValue(new EntrySet<>(BuiltInRegistries.ITEM, Set.of()))
+            .build();
+
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(
                 Listener.getPostInitializeScreen().getChannel(AbstractContainerScreen.class), this::onCraftScreenInitialize);
         registerListener(Listener.getClickCraftingRecipe(), this::onRecipeClicked);
+        registerListener(
+                Listener.getPacketPostHandlePoint().getChannel(ClientboundMerchantOffersPacket.class),
+                this::onTradeOffersUpdated);
         TaskManagers.getToggleManager().register(TaskManagers.PREFIX_BUTTON_TOGGLE + "." + "drop-craft", dropCraft);
     }
 
@@ -76,6 +107,71 @@ public class FastCraft extends BaseModule {
 
     @Getter
     private RecipeDisplayId lastCrafted;
+
+    private boolean craftCurrentScreen() {
+        if (checkNull() || !enable.get()) return false;
+
+        if (ClientUtils.getScreen(mc) instanceof CraftingScreen craftingScreen) {
+            placeLastCraftingRecipe(craftingScreen, true);
+            return true;
+        }
+        if (ClientUtils.getScreen(mc) instanceof InventoryScreen inventoryScreen
+                && !mc.gameMode.getPlayerMode().isCreative()) {
+            placeLastCraftingRecipe(inventoryScreen, true);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean tradeCurrentScreen() {
+        if (checkNull() || !enable.get()) return false;
+
+        if (ClientUtils.getScreen(mc) instanceof MerchantScreen merchantScreen) {
+            craftSelectedTrade(merchantScreen);
+            return true;
+        }
+        return false;
+    }
+
+    public void craftSelectedTrade(MerchantScreen screen) {
+        if (checkNull()) return;
+        var access = MerchantScreenAccess.of(screen);
+        int index = access.getSelectedIndex();
+        var offers = screen.getMenu().getOffers();
+        if (index < 0 || index >= offers.size()) return;
+        access.setSelectedIndex(index);
+        MerchantOffer offer = offers.get(index);
+        ItemStack output = offer.getResult();
+        if (!output.isEmpty()) {
+            int maxCraft = (int) Math.ceil((float) output.getMaxStackSize() / (float) output.getCount());
+            maxCraft = Math.min(maxCraft, offer.getMaxUses() - offer.getUses());
+            craftAtSlotIndex(screen, output, maxCraft, 2);
+        }
+    }
+
+    private void onTradeOffersUpdated(Event<ClientboundMerchantOffersPacket> event) {
+        if (checkNull()
+                || !(ClientUtils.getScreen(mc) instanceof MerchantScreen screen)
+                || screen.getMenu().containerId != event.context.getContainerId()) return;
+        if (autoSelect.get()) {
+            selectMatchingTrade(screen);
+        }
+    }
+
+    private void selectMatchingTrade(MerchantScreen screen) {
+        var items = autoSelectTrades.get();
+        if (items.set().isEmpty()) return;
+        var offers = screen.getMenu().getOffers();
+        for (int index = 0; index < offers.size(); index++) {
+            MerchantOffer offer = offers.get(index);
+            if (items.test(offer.getCostA().getItem())
+                    || items.test(offer.getCostB().getItem())
+                    || items.test(offer.getResult().getItem())) {
+                MerchantScreenAccess.of(screen).selectIndexLocally(index);
+                return;
+            }
+        }
+    }
 
     public void placeLastCraftingRecipe(
             AbstractContainerScreen<? extends AbstractCraftingMenu> craftingScreen, boolean doCraft) {
@@ -150,7 +246,8 @@ public class FastCraft extends BaseModule {
         DynamicSubScreenWidget recipeSubScreen =
                 new DynamicSubScreenWidget(ValueAccessor.ofIgnore(access::getScreenX), ValueAccessor.ofIgnore(0));
 
-        createExecuteButton(
+        ELEMENT_FACTORY
+                .createExecuteButton(
                         "widget.fast-craft.craft",
                         ButtonAction.run(() -> placeLastCraftingRecipe(screen, ScreenUtils.hasShiftDown())),
                         120,
@@ -159,7 +256,8 @@ public class FastCraft extends BaseModule {
                         12)
                 .addToSub(recipeSubScreen);
 
-        createToggleButton(
+        ELEMENT_FACTORY
+                .createToggleButton(
                         "widget.fast-craft.lock",
                         ValueAccessor.of(() -> lock, (bl) -> lock = (boolean) bl),
                         95,
@@ -168,7 +266,8 @@ public class FastCraft extends BaseModule {
                         12)
                 .addToSub(recipeSubScreen);
         Runnable toggle = HotKeyUtils.wrapFlagAsToggle("fast-craft.drop-craft", dropCraft);
-        createToggleButton(
+        ELEMENT_FACTORY
+                .createToggleButton(
                         "widget.fast-craft.toggle-drop",
                         ValueAccessor.of(dropCraft::get, (bl) -> {
                             if (bl != dropCraft.get()) {
@@ -217,7 +316,8 @@ public class FastCraft extends BaseModule {
         DynamicSubScreenWidget recipeSubScreen =
                 new DynamicSubScreenWidget(ValueAccessor.ofIgnore(access::getScreenX), ValueAccessor.ofIgnore(0));
 
-        createExecuteButton(
+        ELEMENT_FACTORY
+                .createExecuteButton(
                         "widget.fast-craft.craft",
                         ButtonAction.run(() -> placeLastCraftingRecipe(screen, ScreenUtils.hasShiftDown())),
                         150,
@@ -226,7 +326,8 @@ public class FastCraft extends BaseModule {
                         12)
                 .addToSub(recipeSubScreen);
 
-        createToggleButton(
+        ELEMENT_FACTORY
+                .createToggleButton(
                         "widget.fast-craft.lock",
                         ValueAccessor.of(() -> lock, (bl) -> lock = (boolean) bl),
                         150,
@@ -235,7 +336,8 @@ public class FastCraft extends BaseModule {
                         12)
                 .addToSub(recipeSubScreen);
         Runnable toggle = HotKeyUtils.wrapFlagAsToggle("fast-craft.drop-craft", dropCraft);
-        createToggleButton(
+        ELEMENT_FACTORY
+                .createToggleButton(
                         "widget.fast-craft.toggle-drop",
                         ValueAccessor.of(dropCraft::get, (bl) -> {
                             if (bl != dropCraft.get()) {

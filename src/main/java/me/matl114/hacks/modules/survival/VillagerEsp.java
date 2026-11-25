@@ -65,7 +65,7 @@ public class VillagerEsp extends BaseModule {
     @Override
     public void registerAll() {
         super.registerAll();
-        registerListener(Listener.getPostGameTick(), this::onTick);
+        registerListener(Listener.getPostTick(), this::onTick);
         registerListener(RenderListener.getRender3DEvent(), this::onRender3D);
     }
 
@@ -149,11 +149,13 @@ public class VillagerEsp extends BaseModule {
         Holder<Enchantment> enchantment = firstEnchantment.getKey();
         int level = firstEnchantment.getIntValue();
         int price = Math.max(trade.buy1().getCount(), trade.buy2().getCount());
-        return enchantment
+        MutableComponent display = enchantment
                 .value()
                 .description()
                 .copy()
                 .append(Component.literal(String.valueOf(level)))
                 .append(Component.literal(" " + price));
+        trade.realPrice().ifPresent(price2 -> display.append(Component.literal(" (" + price2 + ")")));
+        return display;
     }
 }

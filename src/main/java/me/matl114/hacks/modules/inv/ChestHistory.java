@@ -10,12 +10,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import lombok.Getter;
-import me.matl114.accessors.access.PlayerInteractBlockC2SPacketAccess;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.accessors.interfaces.MetadataHolder;
 import me.matl114.accessors.interfaces.TileInventory;
 import me.matl114.events.Event;
 import me.matl114.events.impl.Render3D;
+import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
 import me.matl114.hacks.InvTasks;
@@ -55,7 +55,6 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
-import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
@@ -113,13 +112,10 @@ public class ChestHistory extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPostOpenHandledScreen(), this::onOpenHandledScreen);
-        registerListener(
-                Listener.getPacketPoint().getChannel(ServerboundUseItemOnPacket.class), this::onPlaceShulkerBox);
+        registerListener(Listener.getPostPlayerUseItemOnBlock(), this::onPlaceShulkerBox);
         registerListener(Listener.getGameJoinPoint(), this::onServerJoin);
-        registerListener(Listener.getPostGameTick(), this::onTick);
-        registerListener(Listener.getPostGameTick(), (ev) -> {
-            updateTitleCollector();
-        });
+        registerListener(Listener.getPostTick(), this::onTick);
+        registerListener(Listener.getPostTick(), this::updateTitleCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(ServerStorage.getServerStorageLoad(), this::onLoad);
         registerListener(ServerStorage.getServerStorageSave(), this::onSave);
@@ -168,16 +164,14 @@ public class ChestHistory extends BaseModule {
     private static final String KEY_SHULKER_BOX_PLACED_BY_PLAYER =
             "slimefunhelper:chest_history/tracked_self_place_shulker";
 
-    public void onPlaceShulkerBox(Event<ServerboundUseItemOnPacket> eventInteract) {
-        PlayerInteractBlockC2SPacketAccess access = PlayerInteractBlockC2SPacketAccess.of(eventInteract.context);
-        PlayerInteractBlockC2SPacketAccess.UseContext useContext = access.getUseContext();
-        if (useContext != null
-                && useContext.isAccepted()
-                && useContext.blockPlace()
-                && useContext.stack().getItem() instanceof BlockItem bi
+    public void onPlaceShulkerBox(Event<UseItemOnBlock> eventInteract) {
+        UseItemOnBlock use = eventInteract.context();
+        if (use.actionResult().consumesAction()
+                && use.blockPlace()
+                && use.handItem().getItem() instanceof BlockItem bi
                 && bi.getBlock() instanceof ShulkerBoxBlock) {
             //
-            BlockPos placePos = useContext.placePos().orElseThrow();
+            BlockPos placePos = use.placingBlockPos().orElseThrow();
             // if it is a real place
             BlockState state = mc.level.getBlockState(placePos);
             if (state.getBlock() == bi.getBlock()
@@ -185,7 +179,7 @@ public class ChestHistory extends BaseModule {
                 if (shulkerBoxBlock instanceof MetadataHolder holder) {
                     holder.getMetadata().put(this, KEY_SHULKER_BOX_PLACED_BY_PLAYER, true);
                 }
-                //                ItemStack stack = useContext.stack();
+                //                ItemStack stack = use.handItem();
                 //                var container = stack.get(DataComponentTypes.CONTAINER);
                 //                if(container != null){
                 //                    ContainerPosition position = ContainerPosition.ofSingle(mc.level, placePos);
@@ -310,7 +304,8 @@ public class ChestHistory extends BaseModule {
     private int interval = 0;
     private static final int REFRESH_RATE = 40;
 
-    public void onTick(Event<LocalPlayer> event) {
+    public void onTick() {
+        if (checkNull()) return;
         if (++interval < REFRESH_RATE) {
             return;
         }
@@ -324,7 +319,7 @@ public class ChestHistory extends BaseModule {
             }
         }
         interval = 0;
-        BlockLocation location = BlockLocation.of(event.context());
+        BlockLocation location = BlockLocation.of(mc.player);
         var iterator = screens.entrySet().iterator();
         while (iterator.hasNext()) {
             var entry = iterator.next();
@@ -387,7 +382,7 @@ public class ChestHistory extends BaseModule {
 
     private void updateTitleCollector() {
         titleCollector.clear();
-        if (!enableTitle.get() || mc.player == null || mc.level == null) return;
+        if (!enableTitle.get() || checkNull()) return;
         BlockLocation location = BlockLocation.of(mc.player);
         Set<Vec3> renderedPositions = new HashSet<>();
         for (var entry : screens.entrySet()) {

@@ -25,8 +25,6 @@ import me.matl114.hacks.modules.move.PlayerInputManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.WrapColor;
-import me.matl114.hacks.utils.enums.BypassMode;
-import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hacks.utils.enums.LegalInteractMode;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.hooks.LitematicaHooks;
@@ -45,6 +43,7 @@ import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.util.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -116,11 +115,6 @@ public class PrinterRewrite extends BaseModule {
 
     public final FlagRef returnBlock =
             flagBuilder(litematicaPrinterRewrite.add("ghost-hand-swap-back")).build();
-
-    public final EnumRef<GhostHandMode> preferredGhostHand = builder(
-                    litematicaPrinterRewrite.add("preferred-ghost-hand-mode"), GhostHandMode.class)
-            .defaultValue(GhostHandMode.INV_SWAP)
-            .build();
 
     public final FlagRef autoSneak = builder(litematicaPrinterRewrite.add("auto-sneak"), Boolean.class)
             .defaultValue(true)
@@ -214,11 +208,7 @@ public class PrinterRewrite extends BaseModule {
         var blockIter = desyncWaitBlocks.iterator();
         while (blockIter.hasNext()) {
             BlockPos pos = blockIter.next();
-            if (!actionManager.isWaitingBlockUseOnResponse(
-                            (useItemOn) -> useItemOn.placingBlockPos().isPresent()
-                                    && Objects.equals(
-                                            useItemOn.placingBlockPos().get(), pos))
-                    && !actionManager.isWaitingBlockResponse(pos)) {
+            if (!actionManager.isWaitingBlockPlaceResponse(pos) && !actionManager.isWaitingBlockResponse(pos)) {
                 blockIter.remove();
             }
         }
@@ -237,6 +227,7 @@ public class PrinterRewrite extends BaseModule {
         } else {
             return;
         }
+        int initialHotbarSlot = InventoryUtils.getSelectedSlot();
         tickDesyncWaitBlocks();
         drawOutlines.clear();
         if (enable.get() && LitematicaHooks.getInstance().isEnabled()) {
@@ -320,19 +311,22 @@ public class PrinterRewrite extends BaseModule {
         if (drainWater) {
             tickTryDrainWater();
         }
+        if (returnBlock.get() && InventoryUtils.getSelectedSlot() != initialHotbarSlot) {
+            InvExtra.INSTANCE.pushHotbarRestoreAfterTick(initialHotbarSlot);
+        }
     }
 
     public int supplyBlocks(Block needBlock) {
         Item needItem = needBlock.asItem();
         if (needItem == Items.AIR) return -1;
-        var entry = InventoryUtils.findPlayerItem((item) -> item.getItem() == needItem, true, false);
+        var entry = InventoryUtils.findPlayerItem((item) -> item.getItem() == needItem, false, false);
         return entry == null ? -1 : entry.index();
     }
 
     public int supplyLiquid(Fluid fluid) {
         Item item = fluid == Fluids.WATER ? Items.WATER_BUCKET : (fluid == Fluids.LAVA ? Items.LAVA_BUCKET : null);
         if (item == null) return -1;
-        var entry = InventoryUtils.findPlayerItem((itemStack) -> itemStack.getItem() == item, true, false);
+        var entry = InventoryUtils.findPlayerItem((itemStack) -> itemStack.getItem() == item, false, false);
         return entry == null ? -1 : entry.index();
     }
 
@@ -363,8 +357,15 @@ public class PrinterRewrite extends BaseModule {
         // add placement collision check
         if (result != null
                 && InteractExtra.INSTANCE.isWithinInteractRange(
-                        mc.player.position(), result.val().getBlockPos(), interactRangeOverride.get())
+                        mc.player.position(), result.val().getBlockPos())
                 && InteractUtils.getBlockPlacement(needBlock, mc.player, mc.level, result.val()) != null) {
+            // 上一次放置仍在等服务器回应时，重复点同一个位置只会白丢一次放置
+            BlockPos placementPos = needBlock.asItem() instanceof BlockItem blockItem
+                    ? InteractUtils.getCurrentPlacePos(blockItem, mc.player, result.val())
+                    : null;
+            if (placementPos != null && desyncWaitBlocks.contains(placementPos)) {
+                return false;
+            }
             if (result.flag()) {
                 needSneak = true;
 
@@ -373,51 +374,21 @@ public class PrinterRewrite extends BaseModule {
                     return false;
                 }
             }
-            FlagRef enableRotateFix = InteractionTasks.getBlockRotate().enable2;
-            FlagRef enableLegalLook = InteractionTasks.getBlockRotate().legal;
-            EnumRef<BypassMode> enableRot = InteractionTasks.getBlockRotate().bypassMode2;
-            boolean state = enableRotateFix.get();
-            boolean state2 = enableLegalLook.get();
-            BypassMode bypassMode = enableRot.get();
-            if (!state) {
-                enableRotateFix.set(true);
+            if (!InteractionTasks.canHandleInteract(mode.get(), result.val())) {
+                putCanNotPlace(pos);
+                return false;
             }
-            if (!state2) {
-                // cancel legal look fix because we here handle the look, do not duplicate
-                enableLegalLook.set(true);
+            if (InvExtra.INSTANCE.swapItemToHotbarCache(idx) == null) {
+                putCanNotPlace(pos);
+                return false;
             }
-            enableRot.set(BypassMode.NO_BYPASS);
-            try {
-                if (!InteractionTasks.canHandleInteract(mode.get(), result.val())) {
-                    putCanNotPlace(pos);
-                    return false;
-                }
-                Runnable callback = InvExtra.INSTANCE.swapItemToHand(
-                        idx, false, preferredGhostHand.get().getPreferredMode(idx));
-                if (callback == null) {
-                    putCanNotPlace(pos);
-                    return false;
-                }
-                if (!handlePlace(result.val())) {
-                    InteractionTasks.finishInteractGhostHand(mode.get(), callback);
-                    putCanNotPlace(pos);
-                    return false;
-                }
-                // sb grimac
-                if (returnBlock.get()) {
-                    InteractionTasks.finishInteractGhostHand(mode.get(), callback);
-                }
-                putSuccessPlace(pos);
-                return true;
-            } finally {
-                if (!state) {
-                    enableRotateFix.set(false);
-                }
-                if (!state2) {
-                    enableLegalLook.set(false);
-                }
-                enableRot.set(bypassMode);
+            if (!BlockRotate.INSTANCE.handleYawDeceivePlace(
+                    mode.get(), result.val(), InteractionHand.MAIN_HAND, targetState, swingHand.get())) {
+                putCanNotPlace(pos);
+                return false;
             }
+            putSuccessPlace(pos);
+            return true;
         } else {
             putCanNotPlace(pos);
             return false;
@@ -471,15 +442,10 @@ public class PrinterRewrite extends BaseModule {
             if (rotation.flag() == mc.player.isShiftKeyDown()) {
                 var rot = rotation.val();
 
-                Runnable callback = InvExtra.INSTANCE.swapItemToHand(
-                        item, false, preferredGhostHand.get().getPreferredMode(item));
-                if (callback != null) {
+                if (InvExtra.INSTANCE.swapItemToHotbarCache(item) != null) {
                     InteractionTasks.interactItem(InteractionHand.MAIN_HAND, rot.x, rot.y, true, swingHand.get());
                     suc = true;
                     waterBlocks.put(mc.level.getBlockStatePredictionHandler().currentSequenceNr, pos);
-                    if (returnBlock.get()) {
-                        callback.run();
-                    }
                 }
             }
             if (suc) {
@@ -585,7 +551,7 @@ public class PrinterRewrite extends BaseModule {
         if (currentBlock instanceof RespawnAnchorBlock
                 && targetBlock instanceof RespawnAnchorBlock
                 && currentState.getValue(RespawnAnchorBlock.CHARGE) < targetState.getValue(RespawnAnchorBlock.CHARGE)) {
-            var entry = InventoryUtils.findPlayerItem(stack -> stack.is(Items.GLOWSTONE), true, false);
+            var entry = InventoryUtils.findPlayerItem(stack -> stack.is(Items.GLOWSTONE), false, false);
             return entry == null ? -1 : entry.index();
         }
         if (currentBlock instanceof CandleBlock
@@ -593,18 +559,18 @@ public class PrinterRewrite extends BaseModule {
                 && !currentState.getValue(CandleBlock.LIT)
                 && targetState.getValue(CandleBlock.LIT)) {
             var entry = InventoryUtils.findPlayerItem(
-                    stack -> stack.is(Items.FLINT_AND_STEEL) || stack.is(Items.FIRE_CHARGE), true, false);
+                    stack -> stack.is(Items.FLINT_AND_STEEL) || stack.is(Items.FIRE_CHARGE), false, false);
             return entry == null ? -1 : entry.index();
         }
         if (currentBlock instanceof PumpkinBlock && targetBlock == Blocks.CARVED_PUMPKIN) {
-            var entry = InventoryUtils.findPlayerItem(stack -> stack.is(Items.SHEARS), true, false);
+            var entry = InventoryUtils.findPlayerItem(stack -> stack.is(Items.SHEARS), false, false);
             return entry == null ? -1 : entry.index();
         }
         if (currentBlock instanceof FlowerPotBlock fromPot && targetBlock instanceof FlowerPotBlock targetPot) {
             if (fromPot.getPotted() == Blocks.AIR && targetPot.getPotted() != Blocks.AIR) {
                 Item item = targetPot.getPotted().asItem();
                 if (item == Items.AIR) return -1;
-                var entry = InventoryUtils.findPlayerItem(stack -> stack.is(item), true, false);
+                var entry = InventoryUtils.findPlayerItem(stack -> stack.is(item), false, false);
                 return entry == null ? -1 : entry.index();
             }
             return -2;
@@ -612,7 +578,7 @@ public class PrinterRewrite extends BaseModule {
         if (currentBlock instanceof CakeBlock && targetBlock instanceof CandleCakeBlock) {
             Item item = targetBlock.asItem();
             if (item == Items.AIR) return -1;
-            var entry = InventoryUtils.findPlayerItem(stack -> stack.is(item), true, false);
+            var entry = InventoryUtils.findPlayerItem(stack -> stack.is(item), false, false);
             return entry == null ? -1 : entry.index();
         }
         return -2;
@@ -627,7 +593,7 @@ public class PrinterRewrite extends BaseModule {
             BlockState nextBlockState = nextStepState.getFirst();
             Predicate<ItemStack> needStack = nextStepState.getSecond();
             // self replacement
-            var re = InventoryUtils.findPlayerItem(needStack, true, true);
+            var re = InventoryUtils.findPlayerItem(needStack, false, true);
             if (re != null) {
                 FlagEntry<BlockHitResult> hitResult;
                 if (nextBlockState.getBlock() == currentState.getBlock() && !needStack.test(ItemStack.EMPTY)) {
@@ -641,20 +607,15 @@ public class PrinterRewrite extends BaseModule {
                         putCanNotPlace(pos);
                         return false;
                     }
-                    Runnable runnable = InvExtra.INSTANCE.swapItemToHand(
-                            re.index(), false, preferredGhostHand.get().getPreferredMode(re.index()));
-                    if (runnable != null) {
-                        if (!InteractionTasks.handlePlaceMode(mode.get(), hitResult.val(), InteractionHand.MAIN_HAND)) {
-                            InteractionTasks.finishInteractGhostHand(mode.get(), runnable);
+                    if (InvExtra.INSTANCE.swapItemToHotbarCache(re.index()) != null) {
+                        if (!BlockRotate.INSTANCE.handleYawDeceivePlace(
+                                mode.get(), hitResult.val(), InteractionHand.MAIN_HAND, targetState, swingHand.get())) {
                             putCanNotPlace(pos);
                             return false;
                         }
                         putSuccessPlace(pos);
                         if (isDesyncStateInteractTransition(currentState, targetState)) {
                             desyncWaitBlocks.add(pos);
-                        }
-                        if (returnBlock.get()) {
-                            InteractionTasks.finishInteractGhostHand(mode.get(), runnable);
                         }
                         return true;
                     }
@@ -671,15 +632,6 @@ public class PrinterRewrite extends BaseModule {
 
     public void tickTryDrainWater() {}
 
-    public boolean handlePlace(BlockHitResult result) {
-        if (!mode.get().isLegal()) {
-            InteractionTasks.interactBlock(InteractionHand.MAIN_HAND, result, swingHand.get());
-            return true;
-        } else {
-            return InteractionTasks.handlePlaceMode(mode.get(), result, InteractionHand.MAIN_HAND, swingHand.get());
-        }
-    }
-
     public void onRender(Event<Render3D> event) {
         PoseStack stack = event.context().stack();
         if (enable.get() && render.get()) {
@@ -694,7 +646,6 @@ public class PrinterRewrite extends BaseModule {
 
     public void onPresetReload(Event<EventContainer<ModulePreset>> event) {
         ModulePreset preset = event.context.getValue();
-        preferredGhostHand.set(preset.getGhostHandMode(preferredGhostHand.get()));
         if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
         if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
         if (!preset.isOptionPreset()) {

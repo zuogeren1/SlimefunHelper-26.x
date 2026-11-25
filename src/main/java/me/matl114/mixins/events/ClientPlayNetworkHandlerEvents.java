@@ -2,7 +2,6 @@ package me.matl114.mixins.events;
 
 import me.matl114.hacks.utils.ClientUtils;
 
-import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;

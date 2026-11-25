@@ -183,9 +183,16 @@ public class TpInteract extends BaseModule {
     }
 
     public boolean tpAndInteractBlock(BlockHitResult hitResult, InteractionHand hand, boolean swing) {
+        return tpAndInteractBlock(hitResult, hand, swing, () -> {});
+    }
+
+    public boolean tpAndInteractBlock(
+            BlockHitResult hitResult, InteractionHand hand, boolean swing, Runnable beforeInteract) {
         return tpToBlock(
                 hitResult.getBlockPos(),
                 (sel) -> executeTp(sel, () -> {
+                    // 先跑调用方给的准备动作，再发包：交互包必须在准备动作之后发出
+                    beforeInteract.run();
                     InteractionTasks.interactBlock(hand, hitResult, swing);
                 }));
     }
