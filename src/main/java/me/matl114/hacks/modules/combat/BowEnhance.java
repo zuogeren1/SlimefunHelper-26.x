@@ -18,7 +18,7 @@ import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.modules.move.RotationManager;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
-import me.matl114.hacks.utils.enums.LegalInteractMode;
+import me.matl114.hacks.utils.enums.LegalServerRotMode;
 import me.matl114.hacks.utils.move.Rotation;
 import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
@@ -68,9 +68,9 @@ public class BowEnhance extends BaseModule {
 
     public FlagRef enableTp = flagBuilder(bowAtt.add("tp-enable")).build();
 
-    public EnumRef<LegalInteractMode> mode = builder(
-                    bowAtt.add("targeting-mode"), LegalInteractMode.class)
-            .defaultValue(LegalInteractMode.USEITEM_PACKET)
+    public EnumRef<LegalServerRotMode> mode = builder(
+                    bowAtt.add("targeting-mode"), LegalServerRotMode.class)
+            .defaultValue(LegalServerRotMode.USE_ITEM)
             .build();
 
     public DoubleRef tpDistance = builder(bowAtt.add("tp-accelerate"), DoubleRef.TYPE)
@@ -96,7 +96,7 @@ public class BowEnhance extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onBowAction, 999);
-        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
+        registerListener(Listener.getPostTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRenderAimTarget);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
     }
@@ -151,9 +151,9 @@ public class BowEnhance extends BaseModule {
                     velocity = 3.0F;
                 }
                 switch (mode.get()) {
-                    case LEGACY_SLIENT_ROT -> bowActionMovement(actionEvent, targetEntity, velocity);
-                    case DELAY_MOVEMENT, MOVEMENT_POST -> bowActionDelayMovement(actionEvent, targetEntity, velocity);
-                    case USEITEM_PACKET -> bowActionInteractItem(actionEvent, targetEntity, velocity);
+                    case LEGACY_SNAP -> bowActionMovement(actionEvent, targetEntity, velocity);
+                    case DELAY_MOVEMENT -> bowActionDelayMovement(actionEvent, targetEntity, velocity);
+                    case USE_ITEM -> bowActionInteractItem(actionEvent, targetEntity, velocity);
                     default -> bowActionInteractItem(actionEvent, targetEntity, velocity);
                 }
             }
@@ -162,7 +162,7 @@ public class BowEnhance extends BaseModule {
 
     private void updateRenderCollector() {
         targetCollector.clear();
-        if (!enable.get() || !enableAim.get() || !renderTarget.get() || mc.player == null || !mc.player.isUsingItem()) {
+        if (!enable.get() || !enableAim.get() || !renderTarget.get() || checkNull() || !mc.player.isUsingItem()) {
             return;
         }
         ItemStack itemInUse = mc.player.getActiveItem();
@@ -370,6 +370,7 @@ public class BowEnhance extends BaseModule {
                     }
                     return Rotation.from(pitchYaw);
                 })
+                .applyMoveFix(true)
                 .postTickTask(() -> Tasks.scheduleDelayedPre(() -> Listener.sendPacketNoEvents(delayedPacket), 0)));
     }
 
@@ -519,29 +520,13 @@ public class BowEnhance extends BaseModule {
                 if (tpDistance.get() < 0) {
                     tpDistance.set(-tpDistance.get());
                 }
-                if (mode.get() == LegalInteractMode.DELAY_MOVEMENT) {
-                    mode.set(LegalInteractMode.LEGACY_SLIENT_ROT);
-                }
             }
             default -> {
                 if (tpDistance.get() > 0) {
                     tpDistance.set(-tpDistance.get());
                 }
-                if (mode.get() == LegalInteractMode.LEGACY_SLIENT_ROT) {
-                    mode.set(LegalInteractMode.DELAY_MOVEMENT);
-                }
             }
         }
-        switch (preset) {
-            case HACKING, VANILLA -> {
-                mode.set(LegalInteractMode.NONE);
-            }
-            case AC_GRIM_LEGACY -> {
-                mode.set(LegalInteractMode.LEGACY_SLIENT_ROT);
-            }
-            default -> {
-                mode.set(LegalInteractMode.USEITEM_PACKET);
-            }
-        }
+        mode.set(LegalServerRotMode.getFromPreset(preset));
     }
 }

@@ -17,11 +17,11 @@ import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
-import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.mine.PacketMine;
+import me.matl114.hacks.modules.mine.QueueMine;
 import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.enums.GhostHandMode;
@@ -214,6 +214,28 @@ public class CrystalAura extends BaseModule {
             .validator(Configs.INT_NONNEGATIVE)
             .build();
 
+    public final ModulePath liquidFill = root.add("liquid-fill");
+
+    public final FlagRef enableLiquidFill =
+            builder(liquidFill.addEnable(), Boolean.class).defaultValue(false).build();
+
+    public final KeyBindRef hotkeyLiquidFill = toggleHotkey(
+                    liquidFill.addHotkey(), new MultiKeyBind(), liquidFill.addEnable())
+            .build();
+
+    public final DoubleRef fillLiquidPunishment = builder(liquidFill.add("fill-liquid-punishment"), DoubleRef.TYPE)
+            .defaultValue(0.9D)
+            .build();
+
+    public final FlagRef autoFillZeroTick = builder(liquidFill.add("auto-fill-zero-tick"), Boolean.class)
+            .defaultValue(false)
+            .build();
+
+    public final NBTRef<EntrySet<Item>> liquidFillWhiteList = builder(
+                    liquidFill.add("fill-white-list"), EntrySet.<Item>parameter())
+            .defaultValue(new EntrySet<>(BuiltInRegistries.ITEM, List.of(Items.GLASS, Items.OAK_LEAVES)))
+            .build();
+
     public final ModulePath damageBlock = root.add("auto-block");
 
     public final FlagRef autoBlock =
@@ -255,6 +277,7 @@ public class CrystalAura extends BaseModule {
     List<Player> currentTarget = List.of();
     List<CrystalPlan> pendingBases = new ArrayList<>();
     private InteractionQueue blockingQueue;
+    private InteractionQueue fillLiquidQueue;
     private CrystalPlan blockingPlan;
     private boolean placeCrystalAfterBlocking;
     Map<BlockPos, Integer> trackedGlasses = new ConcurrentHashMap<>();
@@ -269,6 +292,7 @@ public class CrystalAura extends BaseModule {
         timer = 0;
         pendingBases.clear();
         clearBlockingQueue();
+        clearFillLiquidQueue();
     }
 
     boolean fillWorkingTick = false;
@@ -299,6 +323,7 @@ public class CrystalAura extends BaseModule {
             if (eatingAbort.get() && mc.player.isUsingItem()) {
                 return;
             }
+            boolean fillLiquidWasPending = fillLiquidQueue != null;
             boolean blockingWasPending = blockingQueue != null;
             boolean alreadyHasPlace = tickTrackedGlasses();
             if (alreadyHasPlace) {
@@ -306,13 +331,16 @@ public class CrystalAura extends BaseModule {
             }
             // constantly attack, only delay when place
             boolean attack = tickAttack();
-            boolean queuedPlaces =
-                    blockingWasPending ? tickBlockingQueue() : blockingQueue == null && tickPendingBase();
+            boolean queuedPlaces = fillLiquidWasPending
+                    ? tickFillLiquidQueue()
+                    : blockingWasPending ? tickBlockingQueue() : blockingQueue == null && tickPendingBase();
             if (queuedPlaces) {
                 timer = 0;
             }
             ++timer;
-            if (!blockingWasPending
+            if (!fillLiquidWasPending
+                    && fillLiquidQueue == null
+                    && !blockingWasPending
                     && blockingQueue == null
                     && (timer >= delay.get() || (placeAfterAttack.get() && attack) || fillWorkingTick)
                     && !currentTarget.isEmpty()) {
@@ -331,6 +359,7 @@ public class CrystalAura extends BaseModule {
             timer = 0;
             pendingBases.clear();
             clearBlockingQueue();
+            clearFillLiquidQueue();
         }
     }
 
@@ -411,7 +440,8 @@ public class CrystalAura extends BaseModule {
         return CombatManager.INSTANCE.trackedEndCrystals.stream()
                 .filter(EntityUtils::isEntityValid)
                 .filter(crystal -> !CombatManager.INSTANCE.isPendingCrystalRemoval(crystal))
-                .filter(crystal -> TargetSelector.INSTANCE.isTargetInRange(crystal, attackRange, 0))
+                .filter(crystal ->
+                        TargetSelector.INSTANCE.isWithinAttackRange(mc.player.position(), crystal, attackRange))
                 .toList();
     }
 
@@ -435,11 +465,13 @@ public class CrystalAura extends BaseModule {
             Map<Player, Double> damageMap = calculateCrystalDamage(crystal.position());
             Map<Player, Double> attackDamageMap =
                     considerInvulnerability.get() ? calculateInvulnerabilityDamageMap(damageMap) : damageMap;
-            if (isSuitableExplodePos(damageMap) && (skipTick || isSuitableAttackExplodePos(attackDamageMap))) {
-                candidates.add(Map.entry(crystal, attackDamageMap));
-            } else {
-                // use raw damage
-                maxExistingDamageValue = Math.max(maxExistingDamageValue, getBestEnemyDamage(damageMap));
+            if (isSuitableExplodePos(damageMap)) {
+                if ((skipTick || isSuitableAttackExplodePos(attackDamageMap))) {
+                    candidates.add(Map.entry(crystal, attackDamageMap));
+                } else {
+                    // use raw damage
+                    maxExistingDamageValue = Math.max(maxExistingDamageValue, getBestEnemyDamage(damageMap));
+                }
             }
         }
         if (tickAttackExecutor.canRun(attackDelay.get())) {
@@ -499,6 +531,8 @@ public class CrystalAura extends BaseModule {
         double bestSelfDamage = Double.POSITIVE_INFINITY;
         Map<Player, Double> bestDamageMap = Map.of();
         Set<EndCrystal> currentPreRemovals = Set.of();
+        BlockPos bestLiquidPos = null;
+        double bestLiquidScore = Double.NEGATIVE_INFINITY;
         boolean canAutoBase = autoBase.get();
         if (canAutoBase) {
             if (supplyItem(Items.OBSIDIAN) == null) {
@@ -517,7 +551,8 @@ public class CrystalAura extends BaseModule {
                 .map(currentPlayerPos::offset)
                 .filter(s -> InteractExtra.INSTANCE.isWithinInteractRange(mc.player.position(), s))
                 .filter(this::isBasePlacedCrystalInAttackRange)
-                .filter(s -> canPlaceCrystal(s.above()))
+                .filter(s -> canPlaceCrystal(s.above())
+                        || (enableLiquidFill.get() && trackedGlasses.isEmpty() && isLiquidFillTarget(s.above())))
                 .sorted(Comparator.comparingDouble(s -> currentTarget.stream()
                         .map(v -> new AABB(s).distanceToSqr(v.position()))
                         .min(Double::compare)
@@ -527,6 +562,21 @@ public class CrystalAura extends BaseModule {
         boolean shouldConsiderExisting = bestEnemyDamage >= targetDamageThreshold.get();
         for (BlockPos pos : searchBlockPos) {
             BlockPos crystalPos = pos.above();
+            if (!canPlaceCrystal(crystalPos)) {
+                IndexEntry<ItemStack> fillItem = supplyLiquidFillBlock();
+                if (fillItem != null && canPlaceLiquidFill(crystalPos, fillItem.val(), getLiquidFillHit(crystalPos))) {
+                    Map<Player, Double> liquidDamage = calculateCrystalDamage(
+                            getCrystalExplosionPos(pos), Map.of(crystalPos, Blocks.AIR.defaultBlockState()));
+                    if (isSuitableExplodePos(liquidDamage) && isSuitableAttackExplodePos(liquidDamage)) {
+                        double score = getBestEnemyDamage(liquidDamage) * fillLiquidPunishment.get();
+                        if (score >= targetDamageThreshold.get() && score > bestLiquidScore) {
+                            bestLiquidScore = score;
+                            bestLiquidPos = crystalPos;
+                        }
+                    }
+                }
+                continue;
+            }
             boolean canPlaceCrystal = isCrystalHasBase(crystalPos);
             EndCrystalOption option;
             // filter the can-not-base positions first
@@ -623,36 +673,43 @@ public class CrystalAura extends BaseModule {
             }
         }
 
+        boolean liquidPlaced = bestLiquidPos != null
+                && bestLiquidScore > bestEnemyDamage
+                && (!shouldConsiderExisting
+                        || isSuitableAttackExplodePos(calculateInvulnerabilityDamageMap(calculateCrystalDamage(
+                                getCrystalExplosionPos(bestLiquidPos.below()),
+                                Map.of(bestLiquidPos, Blocks.AIR.defaultBlockState())))))
+                && placeLiquidFill(bestLiquidPos);
         if (bestPlan == null) {
-            return false;
+            return liquidPlaced;
         }
         if (!isSuitableAttackExplodePos(bestDamageMap)) {
             if (collisionDamage > bestEnemyDamage) {
                 if (!currentPreRemovals.isEmpty()) {
                     for (var re : currentPreRemovals) {
                         if (!CombatManager.INSTANCE.attackCrystal(re)) {
-                            return false;
+                            return liquidPlaced;
                         }
                     }
-                    return false;
+                    return liquidPlaced;
                 }
                 if (!currentInAttackRange.isEmpty()) {
                     for (var re : currentInAttackRange) {
                         if (!CombatManager.INSTANCE.attackCrystal(re)) {
-                            return false;
+                            return liquidPlaced;
                         }
                     }
-                    return false;
+                    return liquidPlaced;
                 }
                 nextHitSkipDamageTest = true;
             } else {
-                return false;
+                return liquidPlaced;
             }
         } else if (shouldConsiderExisting) {
             // do not attack if player are during,
             var invulnerable = calculateInvulnerabilityDamageMap(bestDamageMap);
             if (!isSuitableAttackExplodePos(invulnerable)) {
-                return false;
+                return liquidPlaced;
             }
         }
 
@@ -660,7 +717,7 @@ public class CrystalAura extends BaseModule {
         if (!currentPreRemovals.isEmpty()) {
             for (var re : currentPreRemovals) {
                 if (!CombatManager.INSTANCE.attackCrystal(re)) {
-                    return false;
+                    return liquidPlaced;
                 }
             }
         }
@@ -1016,7 +1073,7 @@ public class CrystalAura extends BaseModule {
 
     private IndexEntry<ItemStack> supplyItem(Item item) {
         return InventoryUtils.findPlayerItem(
-                stack -> stack.is(item), ghostHand.get().getSearchSize(offhand.get()), true, false);
+                stack -> stack.is(item), ghostHand.get().getSearchSize(offhand.get()), false, false);
     }
 
     private boolean isFillBlock(ItemStack stack) {
@@ -1029,17 +1086,109 @@ public class CrystalAura extends BaseModule {
 
     private IndexEntry<ItemStack> supplyFillBlock() {
         return InventoryUtils.findPlayerItem(
-                this::isFillBlock, ghostHand.get().getSearchSize(offhand.get()), true, false);
+                this::isFillBlock, ghostHand.get().getSearchSize(offhand.get()), false, false);
+    }
+
+    private boolean isLiquidFillBlock(ItemStack stack) {
+        return stack.getItem() instanceof BlockItem && liquidFillWhiteList.get().test(stack.getItem());
+    }
+
+    private IndexEntry<ItemStack> supplyLiquidFillBlock() {
+        return InventoryUtils.findPlayerItem(
+                this::isLiquidFillBlock, ghostHand.get().getSearchSize(offhand.get()), false, false);
+    }
+
+    private boolean isLiquidFillTarget(BlockPos pos) {
+        BlockState state = mc.level.getBlockState(pos);
+        return !state.isAir() && (state.liquid() || state.canBeReplaced());
+    }
+
+    private BlockHitResult getLiquidFillHit(BlockPos pos) {
+        FlagEntry<BlockHitResult> result = InteractionTasks.getPlaceSupportingResult(
+                pos, airplaceBase.get(), !mode.get().isLegal());
+        return InteractUtils.canInteractAndPlace(mc.player, result)
+                        && InteractExtra.INSTANCE.isWithinInteractRange(
+                                mc.player.position(), result.val().getBlockPos())
+                ? result.val()
+                : null;
+    }
+
+    private boolean canPlaceLiquidFill(BlockPos pos, ItemStack stack, BlockHitResult hit) {
+        if (!enableLiquidFill.get()
+                || !trackedGlasses.isEmpty()
+                || !isLiquidFillTarget(pos)
+                || !isLiquidFillBlock(stack)
+                || !isCrystalHasBase(pos)
+                || !canPlaceCrystalAtPos(pos, Map.of(pos, Blocks.AIR.defaultBlockState()))
+                || hit == null) {
+            return false;
+        }
+        BlockState placement = InteractUtils.getBlockPlacement(
+                mc.player, offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, stack, hit);
+        return placement != null && CombatManager.INSTANCE.canBlockPlace(mc.player, pos, placement);
+    }
+
+    private boolean placeLiquidFill(BlockPos pos) {
+        IndexEntry<ItemStack> entry = supplyLiquidFillBlock();
+        BlockHitResult hit = getLiquidFillHit(pos);
+        if (entry == null || !canPlaceLiquidFill(pos, entry.val(), hit)) return false;
+        var placeMode = mode.get();
+        boolean zeroTick = autoFillZeroTick.get()
+                && DisablerManager.INSTANCE.isMultiRotPlaceCheckDisabled(placeMode.canMultiRotPlace());
+        if (zeroTick) {
+            Runnable restore = InvExtra.INSTANCE.swapItemToHand(entry.index(), offhand.get(), ghostHand.get());
+            if (restore == null) return false;
+            boolean placed = InteractionTasks.handlePlaceMode(
+                    placeMode, hit, offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND, swingHand.get());
+            InteractionTasks.finishInteractGhostHand(placeMode, restore);
+            if (placed && QueueMine.INSTANCE != null) QueueMine.INSTANCE.sumitMine(pos);
+            return placed;
+        }
+        InteractionQueue queue = new InteractionQueue(
+                1,
+                offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
+                ghostHand.get(),
+                airplaceBase.get(),
+                placeMode,
+                swingHand.get());
+        queue.enqueueAll(List.of(new InteractRequestImpl(
+                this::isLiquidFillBlock,
+                (interactionQueue, itemMatched) -> {
+                    BlockHitResult nextHit = getLiquidFillHit(pos);
+                    IndexEntry<ItemStack> nextItem = supplyLiquidFillBlock();
+                    return itemMatched && nextItem != null && canPlaceLiquidFill(pos, nextItem.val(), nextHit)
+                            ? interactionQueue.success(nextHit)
+                            : interactionQueue.abort();
+                },
+                interactionQueue -> {
+                    if (QueueMine.INSTANCE != null) QueueMine.INSTANCE.sumitMine(pos);
+                })));
+        fillLiquidQueue = queue;
+        return true;
+    }
+
+    private boolean tickFillLiquidQueue() {
+        fillLiquidQueue.tick();
+        if (!fillLiquidQueue.isEmpty()) return false;
+        boolean success = fillLiquidQueue.isSuccess();
+        fillLiquidQueue = null;
+        return success;
+    }
+
+    private void clearFillLiquidQueue() {
+        if (fillLiquidQueue == null) return;
+        fillLiquidQueue.clear();
+        fillLiquidQueue = null;
     }
 
     private IndexEntry<ItemStack> supplyCrystalItem() {
         return InventoryUtils.findPlayerItem(
-                stack -> stack.is(Items.END_CRYSTAL), ghostHand.get().getSearchSize(offhand.get()), true, false);
+                stack -> stack.is(Items.END_CRYSTAL), ghostHand.get().getSearchSize(offhand.get()), false, false);
     }
 
     private IndexEntry<ItemStack> supplyBlockingBlock() {
         return InventoryUtils.findPlayerItem(
-                this::isBlockingBlock, ghostHand.get().getSearchSize(false), true, false);
+                this::isBlockingBlock, ghostHand.get().getSearchSize(false), false, false);
     }
 
     private boolean isBlockingBlock(ItemStack stack) {
@@ -1408,10 +1557,7 @@ public class CrystalAura extends BaseModule {
             return;
         }
         // tracked glass
-        if (SequencedActionManager.INSTANCE
-                .getCurrentPendingBlockPlace()
-                .anyMatch(s -> s.placingBlockPos().isPresent()
-                        && Objects.equals(pos, s.placingBlockPos().get()))) {
+        if (SequencedActionManager.INSTANCE.isWaitingBlockPlaceResponse(pos)) {
             eventPreMine.cancel();
             return;
         }

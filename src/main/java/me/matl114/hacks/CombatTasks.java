@@ -245,6 +245,9 @@ public class CombatTasks {
     private static SpearAttack spearAttack;
 
     @Getter
+    private static SpearSwap spearSwap;
+
+    @Getter
     private static Blink blink;
 
     @Getter
@@ -310,6 +313,7 @@ public class CombatTasks {
 
         spearEnhance = new SpearEnhance().register(m);
         spearAttack = new SpearAttack().register(m);
+        spearSwap = new SpearSwap().register(m);
         blink = new Blink().register(m);
         backTrack = new BackTrack().register(m);
         autoThrow = new AutoThrow().register(m);

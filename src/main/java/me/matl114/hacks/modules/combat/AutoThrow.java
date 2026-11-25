@@ -71,10 +71,6 @@ public class AutoThrow extends BaseModule {
     public final FlagRef eatingAbort = builder(root.add("using-item-abort"), Boolean.class)
             .defaultValue(false)
             .build();
-    public final FlagRef offhand = flagBuilder(root.add("offhand")).build();
-    public final EnumRef<GhostHandMode> ghostHand = builder(root.add("ghost-hand-mode"), GhostHandMode.class)
-            .defaultValue(GhostHandMode.INV_SWAP)
-            .build();
 
     public final FlagRef swingHand =
             builder(root.add("swing-hand"), Boolean.class).defaultValue(true).build();
@@ -112,6 +108,11 @@ public class AutoThrow extends BaseModule {
 
     public final FlagRef autoClose = flagBuilder(xp.add("auto-close")).build();
 
+    public final FlagRef xpOffhand = flagBuilder(xp.add("offhand")).build();
+    public final EnumRef<GhostHandMode> xpGhostHand = builder(xp.add("ghost-hand-mode"), GhostHandMode.class)
+            .defaultValue(GhostHandMode.INV_SWAP)
+            .build();
+
     public final FlagRef potionEnable = flagBuilder(potions.addEnable()).build();
 
     public final KeyBindRef potionHotkey = moduleEntry(potions.addHotkey(), new MultiKeyBind(), potions.addEnable())
@@ -128,6 +129,11 @@ public class AutoThrow extends BaseModule {
             .registerHotkey(HotKeyUtils.wrapAsHandler(this::throwPotion))
             .build();
 
+    public final FlagRef poOffhand = flagBuilder(potions.add("offhand")).build();
+    public final EnumRef<GhostHandMode> poGhostHand = builder(potions.add("ghost-hand-mode"), GhostHandMode.class)
+            .defaultValue(GhostHandMode.INV_SWAP)
+            .build();
+
     @Override
     public void registerAll() {
         super.registerAll();
@@ -137,6 +143,10 @@ public class AutoThrow extends BaseModule {
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
         ModulePreset preset = event.context.getValue();
+        if (preset.isGhostHandPreset()) {
+            xpGhostHand.set(preset.getGhostHandMode(xpGhostHand.get()));
+            poGhostHand.set(preset.getGhostHandMode(poGhostHand.get()));
+        }
         if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
     }
 
@@ -184,7 +194,7 @@ public class AutoThrow extends BaseModule {
                 continue;
             }
 
-            if (stack.getDamageValue() >= stopFixArmorDur.get()) {
+            if (stack.getDamageValue() > stopFixArmorDur.get()) {
                 return true;
             }
         }
@@ -200,7 +210,7 @@ public class AutoThrow extends BaseModule {
             if (stack.isEmpty() || !stack.isDamageableItem()) {
                 continue;
             }
-            if (stack.getDamageValue() >= startFix) {
+            if (stack.getDamageValue() > startFix) {
                 return true;
             }
         }
@@ -220,7 +230,11 @@ public class AutoThrow extends BaseModule {
                     if (checkDurability.get()) {
                         if (startMending) {
                             if (canMend()) {
-                                throwItem((item) -> item.is(Items.EXPERIENCE_BOTTLE) ? 1.0D : null, mul.get());
+                                throwItem(
+                                        (item) -> item.is(Items.EXPERIENCE_BOTTLE) ? 1.0D : null,
+                                        mul.get(),
+                                        xpGhostHand.get(),
+                                        xpOffhand.get());
                             } else {
                                 startMending = false;
                                 if (autoClose.get()) {
@@ -235,7 +249,11 @@ public class AutoThrow extends BaseModule {
                         }
                     } else {
                         startMending = false;
-                        throwItem((item) -> item.is(Items.EXPERIENCE_BOTTLE) ? 1.0D : null, mul.get());
+                        throwItem(
+                                (item) -> item.is(Items.EXPERIENCE_BOTTLE) ? 1.0D : null,
+                                mul.get(),
+                                xpGhostHand.get(),
+                                xpOffhand.get());
                     }
 
                 } else {
@@ -287,11 +305,13 @@ public class AutoThrow extends BaseModule {
                         }
                         return null;
                     },
-                    1);
+                    1,
+                    poGhostHand.get(),
+                    poOffhand.get());
         }
     }
 
-    public void throwItem(Function<ItemStack, Double> stackPredicate, int multiply) {
+    public void throwItem(Function<ItemStack, Double> stackPredicate, int multiply, GhostHandMode mode, boolean off) {
         AABB box = mc.player.getBoundingBox();
         AABB groundCheck = box.expandTowards(0, -acceptHeight.get(), 0);
         AABB ceilingCheck = box.expandTowards(0, ceilingHeight.get(), 0);
@@ -305,27 +325,26 @@ public class AutoThrow extends BaseModule {
             needSpeed = PlayerStateManager.INSTANCE.lastKnownRealMovementSpeed.y > 0.1;
             pitch = -90.0F;
         }
-        var entry = InventoryUtils.findBestPlayerItem(
-                stackPredicate, ghostHand.get().getSearchSize(offhand.get()), true, false);
+        var entry = InventoryUtils.findBestPlayerItem(stackPredicate, mode.getSearchSize(off), false, false);
         if (entry == null) return;
         int mul = Math.min(multiply, entry.val().getCount());
-        var cb = InvExtra.INSTANCE.swapItemToHand(entry.index(), offhand.get(), ghostHand.get());
+        var cb = InvExtra.INSTANCE.swapItemToHand(entry.index(), off, mode);
         if (cb != null) {
             for (var re = 0; re < mul; ++re) {
                 if (needSpeed) {
                     mc.gameMode.startPrediction(
                             mc.level,
                             (seq) -> new ServerboundUseItemPacket(
-                                    offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
+                                    off ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
                                     seq,
                                     PlayerStateManager.INSTANCE.lastYaw,
                                     pitch));
                     if (swingHand.get()) {
-                        ClientUtils.swing(mc.player, offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND);
+                        ClientUtils.swing(mc.player, off ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND);
                     }
                 } else {
                     InteractionTasks.interactItem(
-                            offhand.get() ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
+                            off ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND,
                             pitch,
                             PlayerStateManager.INSTANCE.lastYaw,
                             true,

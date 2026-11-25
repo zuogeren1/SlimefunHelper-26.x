@@ -9,6 +9,8 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
 import lombok.With;
 import me.matl114.accessors.hacks.EntityInternalAccess;
 import me.matl114.events.*;
@@ -117,6 +119,7 @@ public class PositionPredict extends BaseModule {
 
     static {
         PacketManager.getPacketQueueInEvent().registerHandler(PositionPredict::onInBoundPacket, Integer.MIN_VALUE);
+        Listener.getServerDisconnectPoint().registerHandler((Consumer<Event<Void>>) (ev) -> onDisconnect());
     }
 
     static final Int2ObjectMap<PredictorImpl> asyncLoadedPlayerPositionTrackers = new Int2ObjectOpenHashMap<>();
@@ -138,6 +141,12 @@ public class PositionPredict extends BaseModule {
         }
     }
 
+    private static void onDisconnect() {
+        synchronized (asyncLoadedPlayerPositionTrackers) {
+            asyncLoadedPlayerPositionTrackers.clear();
+        }
+    }
+
     private static void onPacket(Packet<?> ev) {
         if (ev instanceof ClientboundBundlePacket bundle) {
             for (var re : bundle.subPackets()) {
@@ -145,7 +154,12 @@ public class PositionPredict extends BaseModule {
             }
             return;
         }
-        if (ev instanceof ClientboundLoginPacket joinWorld || ev instanceof ClientboundRespawnPacket) {
+        if (ev instanceof ClientboundLoginPacket
+                || (ev instanceof ClientboundRespawnPacket respawn
+                        && (mc.level == null
+                                || !Objects.equals(
+                                        mc.level.dimension(),
+                                        respawn.commonPlayerSpawnInfo().dimension())))) {
             synchronized (asyncLoadedPlayerPositionTrackers) {
                 asyncLoadedPlayerPositionTrackers.clear();
             }

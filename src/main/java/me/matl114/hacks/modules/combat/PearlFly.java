@@ -1,6 +1,8 @@
 package me.matl114.hacks.modules.combat;
 
 import java.awt.*;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import me.matl114.events.Event;
@@ -31,11 +33,11 @@ import me.matl114.utils.render.RenderCollector;
 import net.minecraft.core.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
@@ -64,14 +66,20 @@ public class PearlFly extends BaseModule {
             flagBuilder(pearlPhase.add("enable-stand")).build();
 
     public final FlagRef autoCrawl = flagBuilder(pearlPhase.add("auto-crawl")).build();
+    public final FlagRef useWASDControl =
+            flagBuilder(pearlPhase.add("use-wasd-control")).build();
 
     public final DoubleRef autoPearlActivateRange = doubleBuilder(pearlPhase.add("auto-activate-range"))
             .defaultValue(0.35)
-            .validator(Configs.doubleRange(0.0D, 2.0D))
+            .validator(Configs.doubleRange(0.0D, 5.0D))
+            .show(() -> !this.useWASDControl.get())
             .build();
 
-    public final FlagRef useWASDControl =
-            flagBuilder(pearlPhase.add("use-wasd-control")).build();
+    public final DoubleRef wasdPearlActiveRange = doubleBuilder(pearlPhase.add("wasd-activate-range"))
+            .defaultValue(1.0)
+            .validator(Configs.doubleRange(0.0D, 5.0D))
+            .show(this.useWASDControl::get)
+            .build();
 
     public final FlagRef enableJump = builder(pearlPhase.add("enable-jump-up"), Boolean.class)
             .defaultValue(true)
@@ -133,69 +141,137 @@ public class PearlFly extends BaseModule {
             if (mc.player.getCooldowns().isOnCooldown(new ItemStack(Items.ENDER_PEARL))) {
                 return;
             }
-            Vec3 facingDirection = EntityUtils.pitchYawToRotation(0, mc.player.getYRot());
-            Direction direction = mc.player.getDirection();
-            Vec3 pos = Vec3.atCenterOf(mc.player.blockPosition());
-            Vec3 ppos = mc.player.position();
-
-            BlockPos searchPos;
             if (useWASDControl.get()) {
                 var input = PlayerInputUtils.of(mc.options);
+                if (!input.hasMovementControl()) {
+                    return;
+                }
+                Vec3 facingDirection = EntityUtils.pitchYawToRotation(0, mc.player.getYRot());
                 Vec3 adAxis = new Vec3(facingDirection.z, 0, -facingDirection.x);
                 Vec3 inputVec = facingDirection
                         .scale(input.forwardSpeed())
                         .add(adAxis.scale(input.sidewaysSpeed()))
-                        .normalize();
-                searchPos = BlockPos.containing(ppos.add(inputVec));
+                        .normalize()
+                        .scale(wasdPearlActiveRange.get());
                 if (enableJump.get() && input.upwardSpeed() > 0) {
-                    searchPos = searchPos.relative(Direction.UP, input.upwardSpeed());
+                    inputVec = inputVec.add(0, input.upwardSpeed(), 0);
                 }
-                if (!Objects.equals(mc.player.blockPosition(), searchPos)
-                        && doPearlUse(mc.player.blockPosition(), searchPos)) {
+                boolean anySolid = false;
+                Vec3 targetPos = mc.player.position().add(inputVec);
+                Vec3 targetEyePos = mc.player.getEyePosition().add(inputVec);
+                for (var re : RaycastUtils.createRaycastBlockPoses(mc.player.position(), targetPos)) {
+                    if (!mc.level
+                            .getBlockState(re)
+                            .getCollisionShape(mc.level, re)
+                            .isEmpty()) {
+                        anySolid = true;
+                        break;
+                    }
+                }
+                if (!anySolid) {
+                    for (var re : RaycastUtils.createRaycastBlockPoses(mc.player.getEyePosition(), targetEyePos)) {
+                        if (!mc.level
+                                .getBlockState(re)
+                                .getCollisionShape(mc.level, re)
+                                .isEmpty()) {
+                            anySolid = true;
+                            break;
+                        }
+                    }
+                }
+                if (!anySolid) {
+                    return;
+                }
+                BlockPos searchPos = BlockPos.containing(mc.player.position().add(inputVec));
+
+                if (!Objects.equals(mc.player.blockPosition(), searchPos) && doPearlUse(searchPos)) {
                     enablePearlPhase.set(false);
                     return;
                 }
             } else {
-                if (MathUtils.isInXZRange(pos, ppos, 0.5 - autoPearlActivateRange.get())) {
-                    return;
-                }
-                Direction search = direction;
-                Direction result = direction;
-                double min = Double.MAX_VALUE;
-                BlockPos pbpos = mc.player.blockPosition();
-                do {
-                    BlockPos test = pbpos.relative(search);
-
-                    if (MathUtils.isInXZRange(ppos, Vec3.atCenterOf(test), 0.5 + autoPearlActivateRange.get())) {
-                        double sqd = test.distToCenterSqr(ppos);
-                        if (sqd < min) {
-                            result = search;
-                            min = sqd;
-                        }
+                AABB playerBox = mc.player.getBoundingBox();
+                double extra = autoPearlActivateRange.get();
+                double minX = playerBox.minX;
+                double maxX = playerBox.maxX;
+                double minY = playerBox.minY;
+                double maxY = playerBox.maxY;
+                double minZ = playerBox.minZ;
+                double maxZ = playerBox.maxZ;
+                List<AABB> verticalSearchBoxes;
+                if (autoCrawl.get()) {
+                    verticalSearchBoxes = new ArrayList<>();
+                    for (int y = Mth.floor(minY); y < Math.ceil(maxY); y++) {
+                        double sliceMinY = Math.max(minY, y);
+                        double sliceMaxY = Math.min(maxY, y + 1.0);
+                        verticalSearchBoxes.add(new AABB(minX, sliceMinY, minZ, maxX, sliceMaxY, maxZ));
                     }
-
-                    search = search.getClockWise();
-                } while (search != direction);
-                if (min == Double.MAX_VALUE) {
-                    return;
+                } else {
+                    verticalSearchBoxes = List.of(playerBox);
                 }
-                search = result;
-                searchPos = pbpos.relative(search, 1);
+                List<AABB> cornerSearchBoxes = List.of(
+                        new AABB(maxX, minY, maxZ, maxX + extra, maxY, maxZ + extra),
+                        new AABB(minX - extra, minY, maxZ, minX, maxY, maxZ + extra),
+                        new AABB(minX - extra, minY, minZ - extra, minX, maxY, minZ),
+                        new AABB(maxX, minY, minZ - extra, maxX + extra, maxY, minZ));
+                List<AABB> sideSearchBoxes = List.of(
+                        new AABB(maxX, minY, minZ, maxX + extra, maxY, maxZ),
+                        new AABB(minX - extra, minY, minZ, minX, maxY, maxZ),
+                        new AABB(minX, minY, maxZ, maxX, maxY, maxZ + extra),
+                        new AABB(minX, minY, minZ - extra, maxX, maxY, minZ));
 
-                BlockState state = mc.level.getBlockState(searchPos);
-                if (!state.isAir() && !state.liquid()) {
-                    if (doPearlUse(pbpos, searchPos)) {
+                List<List<BlockPos>> collisionGroups = new ArrayList<>();
+                for (List<AABB> searchBoxes : List.of(cornerSearchBoxes, sideSearchBoxes)) {
+                    collisionGroups.add(searchBoxes.stream()
+                            .flatMap(searchBox -> verticalSearchBoxes.stream()
+                                    .map(verticalBox -> new AABB(
+                                            searchBox.minX,
+                                            verticalBox.minY,
+                                            searchBox.minZ,
+                                            searchBox.maxX,
+                                            verticalBox.maxY,
+                                            searchBox.maxZ)))
+                            .flatMap(
+                                    searchBox -> CollisionUtil.getBoxCollision(mc.level, mc.player, searchBox).stream())
+                            .distinct()
+                            .toList());
+                }
+
+                int blockY = mc.player.getBlockY();
+                Vec3 eyePos = mc.player.getEyePosition();
+                Comparator<BlockPos> horizontalDistance = Comparator.comparingDouble(pos ->
+                        MathUtils.squareSum(pos.getX() + 0.5 - mc.player.getX(), pos.getZ() + 0.5 - mc.player.getZ()));
+                if (autoCrawl.get() && pose != Pose.SWIMMING && pose != Pose.FALL_FLYING) {
+                    BlockPos crawlPos = collisionGroups.stream()
+                            .flatMap(List::stream)
+                            .filter(pos -> pos.getY() == blockY + 1)
+                            .filter(pos -> {
+                                BlockPos crawlSpacePos = pos.below();
+                                return mc.level
+                                        .getBlockState(crawlSpacePos)
+                                        .getCollisionShape(mc.level, crawlSpacePos)
+                                        .isEmpty();
+                            })
+                            .filter(pos -> RaycastUtils.raycastOnlyBlockCollisions(
+                                            eyePos, getPearlTargetPoint(pos, blockY + 0.01))
+                                    == null)
+                            .max(horizontalDistance)
+                            .orElse(null);
+                    if (crawlPos != null
+                            && usePearl(
+                                    getPearlTargetPoint(crawlPos, blockY + 0.01).subtract(eyePos))) {
                         enablePearlPhase.set(false);
                         return;
                     }
                 }
-                if (autoCrawl.get() && pose != Pose.SWIMMING) {
-                    BlockState state2 = mc.level.getBlockState(searchPos.relative(Direction.UP));
-                    if (!state2.isAir() && !state2.liquid()) {
-                        if (doPearlUse(pbpos, searchPos)) {
-                            enablePearlPhase.set(false);
-                            return;
-                        }
+
+                for (List<BlockPos> collisionPositions : collisionGroups) {
+                    BlockPos targetPos = collisionPositions.stream()
+                            .filter(pos -> pos.getY() == blockY)
+                            .max(horizontalDistance)
+                            .orElse(null);
+                    if (targetPos != null && doPearlUse(targetPos)) {
+                        enablePearlPhase.set(false);
+                        return;
                     }
                 }
             }
@@ -274,23 +350,19 @@ public class PearlFly extends BaseModule {
         }
     }
 
-    public boolean doPearlUse(BlockPos originPos, BlockPos pos) {
-        Pose pose = mc.player.getPose();
-        Vec3 look;
-        if (pose == Pose.SWIMMING) {
-            look = Vec3.atCenterOf(pos).subtract(mc.player.getEyePosition());
-        } else {
-            look = Vec3.atCenterOf(pos)
-                    .add(Vec3.atCenterOf(originPos))
-                    .scale(0.5)
-                    .subtract(mc.player.getEyePosition());
-        }
-        return usePearl(look);
+    public boolean doPearlUse(BlockPos pos) {
+        Vec3 eyePos = mc.player.getEyePosition();
+        return usePearl(getPearlTargetPoint(pos, mc.player.getBlockY() + 0.5).subtract(eyePos));
+    }
+
+    private Vec3 getPearlTargetPoint(BlockPos pos, double y) {
+        Vec3 eyePos = mc.player.getEyePosition();
+        return MathUtils.magnitudePoint(new AABB(pos), eyePos).with(Direction.Axis.Y, y);
     }
 
     public boolean usePearl(Vec3 look) {
         look = look.normalize();
-        var re = InventoryUtils.findPlayerItem((ss) -> ss.getItem() == Items.ENDER_PEARL, true, false);
+        var re = InventoryUtils.findPlayerItem((ss) -> ss.getItem() == Items.ENDER_PEARL, false, false);
         if (re == null) {
             logI18NSub("Pearl", "message.module.pearl-fly.no-pearl");
             return true;

@@ -22,6 +22,7 @@ import me.matl114.versioned.SupportVersion;
 import me.matl114.versioned.api.VDataFlag;
 import me.matl114.versioned.api.VItem;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundCooldownPacket;
 import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
@@ -32,6 +33,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.InterpolationHandler;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.AttackRange;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -56,6 +59,9 @@ public class CombatExtra extends BaseModule {
             .validator(Configs.doubleRange(0.0D, 64.0D))
             .build();
 
+    public final FlagRef spearReach =
+            flagBuilder(combat.add("grim-spear-reach")).build();
+
     public final FlagRef shieldPredict =
             flagBuilder(combat.add("shielding-setback-log")).build();
 
@@ -71,7 +77,7 @@ public class CombatExtra extends BaseModule {
 
     public double getAttackAtTargetRange(Entity entity) {
         double d = ridingBypass(mc.player) || ridingBypass(entity) ? boatAttackRange.get() : range.get();
-        return mc.player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE) + d;
+        return getAttackRangeAttribute() + d;
     }
 
     public double getAttackRange() {
@@ -80,7 +86,25 @@ public class CombatExtra extends BaseModule {
     }
 
     public double getAttackRangeAttribute() {
-        return mc.player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
+        double reachValue = mc.player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
+        if (spearReach.get()
+                && ViaFabricPlusHooks.getInstance().getCurrentVersion().isHigherOrEqualTo(21, 11)) {
+            ItemStack lastStack = PlayerStateManager.INSTANCE
+                    .getOrCreatePlayerStatus(mc.player)
+                    .getMainHandSnapshot();
+            if (lastStack.has(DataComponents.ATTACK_RANGE)) {
+                AttackRange range1 = lastStack.get(DataComponents.ATTACK_RANGE);
+                double reach1 = range1.effectiveMaxRange(mc.player);
+                reachValue = Math.max(reach1, reachValue);
+            }
+            ItemStack handStack = mc.player.getItemInHand(InteractionHand.MAIN_HAND);
+            if (handStack.has(DataComponents.ATTACK_RANGE)) {
+                AttackRange range1 = handStack.get(DataComponents.ATTACK_RANGE);
+                double reach1 = range1.effectiveMaxRange(mc.player);
+                reachValue = Math.max(reach1, reachValue);
+            }
+        }
+        return reachValue;
     }
 
     @Override

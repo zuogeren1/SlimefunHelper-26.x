@@ -75,7 +75,7 @@ public class BowTp extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPacketPoint().getChannel(ServerboundPlayerActionPacket.class), this::onBowAction, -999);
-        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
+        registerListener(Listener.getPostTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
     }
@@ -258,7 +258,7 @@ public class BowTp extends BaseModule {
 
     private void updateRenderCollector() {
         targetCollector.clear();
-        if (!enable.get() || mc.player == null || !render.get()) return;
+        if (!enable.get() || checkNull() || !render.get()) return;
         if (!mc.player.isUsingItem() || !(mc.player.getActiveItem().getItem() instanceof BowItem)) return;
         var targetSelector = CombatTasks.getTargetSelector();
         Entity entity = targetSelector.searchAttackEntity(
