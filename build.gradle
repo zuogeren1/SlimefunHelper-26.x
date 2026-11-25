@@ -94,11 +94,47 @@ tasks.register('build') {
 
 def rootLibsDir = layout.buildDirectory.dir('libs').get().asFile
 def rootReleaseDir = layout.buildDirectory.dir('release').get().asFile
+def langPackSrc = file('src/main/resources/assets/slimefunhelper/lang/zh_ch_resource_pack.json')
+def langPackMetaDir = layout.buildDirectory.dir('tmp/langPack').get().asFile
+def modVer = findProperty('mod_version').toString()
+
+tasks.register('prepareLangPackMeta') {
+	inputs.property('modVersion', modVer)
+	def outDir = langPackMetaDir
+	outputs.dir(outDir)
+	doLast {
+		outDir.mkdirs()
+		def mcmeta = new groovy.json.JsonBuilder([
+			pack: [
+				description: "SlimefunHelper 汉化资源包 (v${modVer})",
+				min_format: 84,
+				max_format: 97
+			]
+		]).toPrettyString()
+		new File(outDir, 'pack.mcmeta').setText(mcmeta + '\n', 'UTF-8')
+	}
+}
+
+tasks.register('packageLangPack', Zip) {
+	dependsOn 'prepareLangPackMeta'
+	mustRunAfter 'buildAndGather'
+	destinationDirectory.set(rootLibsDir)
+	archiveFileName.set("SlimefunHelper-zh_cn-${modVer}.zip")
+	from(langPackMetaDir) {
+		include 'pack.mcmeta'
+	}
+	from(langPackSrc) {
+		into 'assets/slimefunhelper/lang'
+		rename { 'zh_cn.json' }
+	}
+	outputs.upToDateWhen { false }
+}
 
 tasks.register('syncRelease', Copy) {
-	mustRunAfter 'buildAndGather'
+	dependsOn 'packageLangPack'
+	mustRunAfter 'buildAndGather', 'packageLangPack'
 	from rootLibsDir
-	include '*.jar'
+	include '*.jar', '*.zip'
 	into rootReleaseDir
 	duplicatesStrategy = DuplicatesStrategy.INCLUDE
 	outputs.upToDateWhen { false }
