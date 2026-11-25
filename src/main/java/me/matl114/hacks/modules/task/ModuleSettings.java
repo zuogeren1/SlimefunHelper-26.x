@@ -2,12 +2,9 @@ package me.matl114.hacks.modules.task;
 
 import java.util.List;
 import me.matl114.accessors.events.ChatHudAccess;
-import me.matl114.accessors.gui.TextFieldAccess;
 import me.matl114.hacks.utils.clickgui.ClassicClickGuiScreen;
 import me.matl114.managers.command.MainCommand;
 import me.matl114.gui.WidgetUtils;
-import me.matl114.gui.basic.DrawableWidget;
-import me.matl114.gui.presets.single.KeyBindConfigurateWidget;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.utils.config.StringFormat;
@@ -90,22 +87,7 @@ public class ModuleSettings extends BaseModule {
         if (ClientUtils.getScreen(mc) instanceof ClassicClickGuiScreen clickGui) {
             return false;
         }
-        var focused = ClientUtils.getScreen(mc).getFocused();
-
-        if (focused instanceof TextFieldAccess) {
-            return true;
-        }
-        if (focused instanceof DrawableWidget widget) {
-            var focus = WidgetUtils.getFocusedWidget(widget);
-            if (WidgetUtils.isInputWidget(WidgetUtils.getFocusedWidget(focus))) {
-                return true;
-            }
-            var list = WidgetUtils.getWidgetHierarchy(widget);
-            if (list.stream().anyMatch(s -> s instanceof KeyBindConfigurateWidget)) {
-                return true;
-            }
-        }
-        return false;
+        return WidgetUtils.isInputing(ClientUtils.getScreen(mc).getFocused());
     }
 
     public static final String TOGGLE_UNIQUE_ID = "slimefunhelper:module_toggle/";

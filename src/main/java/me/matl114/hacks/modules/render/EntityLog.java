@@ -31,7 +31,6 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
@@ -111,6 +110,12 @@ public class EntityLog extends BaseModule {
     public final FlagRef renderFaraway =
             flagBuilder(entityLog.add("render-reason-faraway")).build();
 
+    public final NBTRef<StringFormat> renderTextFormat = builder(
+                    entityLog.add("render-text-format"), StringFormat.class)
+            .defaultValue(
+                    new StringFormat(List.of("name", "reason", "position"), "{name}&l {reason} at {position}", true))
+            .build();
+
     public final FlagRef logLogReconnect =
             flagBuilder(entityLog.add("log-log-reconnect")).build();
 
@@ -160,7 +165,7 @@ public class EntityLog extends BaseModule {
                 this::onEntityRemove);
         registerListener(Listener.getServerDisconnectPoint(), this::onServerExit);
         registerListener(Listener.getPostTick(), this::onUpdate);
-        registerListener(Listener.getPostGameTick(), this::onPostGameTick);
+        registerListener(Listener.getPostTick(), this::onPostGameTick);
         registerListener(XaeroHelper.getWorldSwitchPoint(), this::onXaeroWorldSwitch);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(Listener.getOtherPlayerJoinPoint(), this::onPlayerListEntryAdd);
@@ -453,7 +458,8 @@ public class EntityLog extends BaseModule {
     }
 
     public void onPostGameTick() {
-        if (worldDirty && !checkNull()) {
+        if (checkNull()) return;
+        if (worldDirty) {
             XaeroHelper xaeroHelper = XaeroHelper.INSTANCE;
             if (xaeroHelper != null) {
                 xaeroHelper.removeSub(this);
@@ -529,13 +535,18 @@ public class EntityLog extends BaseModule {
                     if (op.box() && re.leaveEntity != null) {
                         entityFace.submit(re.leaveEntity, color.withAlpha(64));
                     }
-                    var builder = ChatUtils.builder();
-                    builder.withText(re.displayName, Style.EMPTY.withBold(true));
-                    builder.withColorString("&l %s at ".formatted(LEAVE_REASON[re.exitCode]));
-                    builder.withText(ChatUtils.getDisplayedLocation(re.leavePos), Style.EMPTY.withBold(true));
-                    builder.end();
                     texting.submit(
-                            new RenderElements.Text(builder.build(), re.leavePos.add(0, 2, 0), 0.66F),
+                            new RenderElements.Text(
+                                    renderTextFormat
+                                            .get()
+                                            .formatText(
+                                                    re.displayName.copy().withStyle(style -> style.withBold(true)),
+                                                    LEAVE_REASON[re.exitCode],
+                                                    ChatUtils.getDisplayedLocation(re.leavePos)
+                                                            .copy()
+                                                            .withStyle(style -> style.withBold(true))),
+                                    re.leavePos.add(0, 2, 0),
+                                    0.66F),
                             color.withAlpha(255));
                 }
             }

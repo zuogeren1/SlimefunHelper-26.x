@@ -4,6 +4,7 @@ import java.util.Iterator;
 import me.matl114.accessors.gui.ScreenAccess;
 import me.matl114.gui.basic.Draggable;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.hooks.IMBlockerHooks;
 import me.matl114.managers.input.KeyCode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.events.GuiEventListener;
@@ -104,6 +105,9 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
         return super.mouseReleased(click);
     }
 
+    // 输入法状态只在焦点真正切换时下发，避免每次点击都重置 IMBlocker 的候选窗状态
+    boolean lastFocusedOnChatIMBlocker = false;
+
     @Override
     public final boolean mouseClicked(MouseButtonEvent click, boolean input) {
         // remove the fucking super method
@@ -125,7 +129,25 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
                 this.draggingButton = button;
             }
         }
+        IMBlockerHooks imBlockerHooks = IMBlockerHooks.getInstance();
+        if (imBlockerHooks.isEnabled()) {
+            if (shouldNotExecuteInInput()) {
+                if (!lastFocusedOnChatIMBlocker) {
+                    imBlockerHooks.setPreferredState(shouldNotExecuteInInput());
+                    lastFocusedOnChatIMBlocker = true;
+                    imBlockerHooks.setEnglishState(true);
+                }
+            } else {
+                lastFocusedOnChatIMBlocker = false;
+                imBlockerHooks.setPreferredState(false);
+            }
+        }
         return val;
+    }
+
+    public boolean shouldNotExecuteInInput() {
+        var focused = this.getFocused();
+        return WidgetUtils.isInputing(focused);
     }
 
     @Override
@@ -151,6 +173,10 @@ public class GenericScreen extends Screen implements NarratableEntry, Draggable 
         // schedule refresh
         this.rebuildWidgets();
         // mc.executeSync(()->this.init(mc,mc.getWindow().getScaledWidth(), mc.getWindow().getScaledHeight()));
+    }
+
+    public final void resizeScreen(int width, int height) {
+        this.init(width, height);
     }
 
     @Override

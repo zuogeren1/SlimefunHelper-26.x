@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import me.matl114.accessors.hacks.EntityInternalAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.RenderListener;
@@ -14,6 +13,7 @@ import me.matl114.events.impl.Render2D;
 import me.matl114.events.impl.Render3D;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.config.EntryPrimitiveMap;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.NBTTypes;
@@ -44,7 +44,6 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2d;
 import me.matl114.hacks.utils.render.EntityBoundaryCollector;
 import me.matl114.hacks.utils.render.EntityFaceCollector;
-import me.matl114.utils.collections.MetaData;
 
 /**
  * 实体 ESP。
@@ -63,9 +62,6 @@ import me.matl114.utils.collections.MetaData;
  * {@code render-mode} 只决定盒子与追踪线画在 3D 还是 2D。
  */
 public class EntityESP extends BaseModule {
-    /** 元数据键：实体在本模块里的追踪级别，取值见 {@link EntityInternalAccess#RENDER_LEVEL_DISABLE}。 */
-    private static final String KEY_RENDER_LEVEL = "render-tracked-level";
-
     /** 线宽是屏幕空间像素，不随距离变细；比原版碰撞箱描边略粗，才像 ESP 标记。 */
     private static final float LINE_WIDTH_SCALE = 0.6F;
 
@@ -165,7 +161,7 @@ public class EntityESP extends BaseModule {
 
         registerListener(RenderListener.getRender3DEvent(), this::onRender3D);
         registerListener(RenderListener.getRender2DEvent(), this::onRender2D);
-        registerListener(Listener.getPostGameTick(), this::onTick);
+        registerListener(Listener.getPostTick(), this::onTick);
     }
 
     /** 一帧内要画的实体：三个开关与颜色都在 tick 线程解析好，渲染线程不再读配置。 */
@@ -204,13 +200,11 @@ public class EntityESP extends BaseModule {
         List<Target> nextTargets = new ArrayList<>();
 
         for (Entity entity : mc.level.entitiesForRendering()) {
-            if (entity.isRemoved() || entity == focused) {
+            if (entity == focused) {
                 continue;
             }
-            byte level = resolveRenderLevel(entity, whitelist);
-            boolean forced = level == EntityInternalAccess.RENDER_LEVEL_FORCE;
-            boolean whitelisted = level == EntityInternalAccess.RENDER_LEVEL_WHITELIST;
-            if (!forced && !(whitelisted && enabled)) {
+            // 白名单是唯一判据：总开关关掉时整批不画，不必再给实体挂追踪级别。
+            if (!enabled || !EntityUtils.isEntityValid(entity) || !whitelist.test(entity.getType())) {
                 continue;
             }
 
@@ -236,30 +230,6 @@ public class EntityESP extends BaseModule {
         }
 
         targets = nextTargets;
-    }
-
-    /**
-     * 维护并回读实体上的 render-level：FORCE 由外部设置，表示不看白名单也不看总开关；
-     * 其余情况按白名单重算。默认值 DISABLE 不落元数据 —— 每 tick 给世界里每个实体都写一次
-     * 会白造一份 {@code MetaData}。
-     */
-    private byte resolveRenderLevel(Entity entity, EntrySet<EntityType<?>> whitelist) {
-        EntityInternalAccess<Entity> access = EntityInternalAccess.of(entity);
-        Byte stored = access.isMetaEmpty() ? null : access.getMetadata().get(this, KEY_RENDER_LEVEL);
-        if (stored != null && stored == EntityInternalAccess.RENDER_LEVEL_FORCE) {
-            return stored;
-        }
-        byte resolved = whitelist.test(entity.getType())
-                ? EntityInternalAccess.RENDER_LEVEL_WHITELIST
-                : EntityInternalAccess.RENDER_LEVEL_DISABLE;
-        if (stored == null) {
-            if (resolved != EntityInternalAccess.RENDER_LEVEL_DISABLE) {
-                access.getMetadata().put(this, KEY_RENDER_LEVEL, resolved);
-            }
-        } else if (stored != resolved) {
-            access.getMetadata().put(this, KEY_RENDER_LEVEL, resolved);
-        }
-        return resolved;
     }
 
     public void onRender3D(Event<Render3D> event) {

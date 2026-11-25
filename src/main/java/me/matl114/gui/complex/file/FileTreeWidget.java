@@ -248,8 +248,7 @@ public class FileTreeWidget extends SubScreenWidget {
                 }
             }
         } catch (IOException | SecurityException exception) {
-            Debug.chat(Component.translatable("widget.file.new_folder_failed", exception.getMessage())
-                    .withStyle(ChatFormatting.RED));
+            Debug.info(exception);
         }
     }
 
@@ -291,14 +290,6 @@ public class FileTreeWidget extends SubScreenWidget {
                         File selected = getSelectedFile();
                         if (selected != null && selected.toPath().startsWith(target)) clearSelection();
                         expanded.removeIf(directory -> directory.toPath().startsWith(target));
-                        Debug.chat(Component.translatable("widget.file.delete_success", file.getName())
-                                .withStyle(ChatFormatting.GREEN));
-                    } else {
-                        Throwable cause = error instanceof CompletionException && error.getCause() != null
-                                ? error.getCause()
-                                : error;
-                        Debug.chat(Component.translatable("widget.file.delete_failed", cause.getMessage())
-                                .withStyle(ChatFormatting.RED));
                     }
                     requestDiskRefresh();
                 }));
@@ -378,7 +369,6 @@ public class FileTreeWidget extends SubScreenWidget {
         String newName = edit.name().getInput();
         if (oldFile.getName().equals(newName)) return;
         if (!edit.name().isValidate()) {
-            Debug.chat(Component.translatable("widget.file.rename_invalid").withStyle(ChatFormatting.RED));
             return;
         }
         try {
@@ -401,8 +391,7 @@ public class FileTreeWidget extends SubScreenWidget {
             nameDelegates.put(newFile, edit.entry().delegate());
             select(newFile, edit.entry().directory());
         } catch (IOException | SecurityException exception) {
-            Debug.chat(Component.translatable("widget.file.rename_failed", exception.getMessage())
-                    .withStyle(ChatFormatting.RED));
+            Debug.info(exception);
         }
         requestDiskRefresh();
     }

@@ -13,11 +13,14 @@ import me.matl114.hacks.InvTasks;
 import me.matl114.utils.ChatUtils;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.ScreenUtils;
+import me.matl114.utils.world.ContainerPosition;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
@@ -28,6 +31,8 @@ import org.apache.commons.lang3.function.Consumers;
 public class InventoryViewScreen extends GenericBackGroundScreen {
     protected BlockPos blockPos;
     protected ClientLevel blockWorld;
+    // 缓存里记的是别的维度时 blockWorld 为空，标题仍要显示记录的维度
+    protected ResourceKey<Level> blockDimension;
     //    protected HandledScreen<?> handledScreen;
     protected final GridSubScreen<DrawableWidget> grid;
     protected final GridSubScreen<DrawableWidget> modifyPlayerInventoryGrid;
@@ -47,6 +52,14 @@ public class InventoryViewScreen extends GenericBackGroundScreen {
             blockPos = tile.getPos();
             this.blockWorld = tile.getWorld();
         }
+    }
+
+    public InventoryViewScreen withContainerPosition(ContainerPosition containerPosition) {
+        this.blockPos = containerPosition.getFirst().getPos();
+        this.blockDimension = containerPosition.world();
+        ClientLevel level = Minecraft.getInstance().level;
+        this.blockWorld = level != null && level.dimension().equals(this.blockDimension) ? level : null;
+        return this;
     }
 
     private static List<Slot> streamInventoryToSlot(Container inventory, int size) {
@@ -96,10 +109,14 @@ public class InventoryViewScreen extends GenericBackGroundScreen {
         if (blockPos != null) {
             labelElement = LabelElement.instance(Component.literal("%s [%d, %d, %d] "
                                     .formatted(
-                                            this.blockWorld
-                                                    .dimension()
-                                                    .identifier()
-                                                    .toString(),
+                                            this.blockDimension != null
+                                                    ? this.blockDimension
+                                                            .identifier()
+                                                            .toString()
+                                                    : this.blockWorld
+                                                            .dimension()
+                                                            .identifier()
+                                                            .toString(),
                                             blockPos.getX(),
                                             blockPos.getY(),
                                             blockPos.getZ()))

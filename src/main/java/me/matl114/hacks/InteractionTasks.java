@@ -1,6 +1,7 @@
 package me.matl114.hacks;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import lombok.Getter;
@@ -23,6 +24,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.FrontAndTop;
 import net.minecraft.network.protocol.game.ServerboundAttackPacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
@@ -57,7 +59,10 @@ import net.minecraft.world.level.block.WallHangingSignBlock;
 import net.minecraft.world.level.block.state.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.BellAttachType;
 import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.*;
@@ -96,8 +101,8 @@ public class InteractionTasks {
     public static boolean interactItem(InteractionHand hand, boolean realInteract, boolean swingHand) {
         return interactItem(
                 hand,
-                PlayerStateManager.INSTANCE.lastPitch,
-                PlayerStateManager.INSTANCE.lastYaw,
+                PlayerStateManager.INSTANCE.lastServerSidePitch,
+                PlayerStateManager.INSTANCE.lastServerSideYaw,
                 realInteract,
                 swingHand);
     }
@@ -128,8 +133,8 @@ public class InteractionTasks {
     public static void interactBlock(InteractionHand hand, BlockHitResult result, boolean swing) {
         Vec2 storePY = new Vec2(mc.player.getXRot(), mc.player.getYRot());
         // use true fucking rotation .
-        mc.player.setXRot(PlayerStateManager.INSTANCE.lastPitch);
-        mc.player.setYRot(PlayerStateManager.INSTANCE.lastYaw);
+        mc.player.setXRot(PlayerStateManager.INSTANCE.lastServerSidePitch);
+        mc.player.setYRot(PlayerStateManager.INSTANCE.lastServerSideYaw);
         InteractionResult actionResult2 = mc.gameMode.useItemOn(mc.player, hand, result);
         mc.player.setXRot(storePY.x);
         mc.player.setYRot(storePY.y);
@@ -150,7 +155,8 @@ public class InteractionTasks {
     }
 
     public static void addPostRotationCorrectTask(BlockPos pos, Runnable callback) {
-        RotationManager.INSTANCE.request(RotationManager.ofBlock(() -> pos).postTickTask(callback));
+        RotationManager.INSTANCE.request(
+                RotationManager.ofBlock(() -> pos).applyMoveFix(true).postTickTask(callback));
     }
 
     public static Vec3 createBlockRayCastDirection(BlockPos pos) {
@@ -176,7 +182,7 @@ public class InteractionTasks {
         };
     }
 
-    private static boolean canDirectHit(BlockHitResult result) {
+    public static boolean canDirectHit(BlockHitResult result) {
         return RaycastUtils.canRaycastHit(
                 mc.player,
                 PlayerStateManager.INSTANCE.lastPitch,
@@ -198,7 +204,8 @@ public class InteractionTasks {
             }
             case DELAY_MOVEMENT -> {
                 if (!directlyHit) {
-                    if (!RotationManager.INSTANCE.request(RotationManager.ofBlock(result::getBlockPos))) {
+                    if (!RotationManager.INSTANCE.request(
+                            RotationManager.ofBlock(result::getBlockPos).applyMoveFix(true))) {
                         return false;
                     }
                     RotationManager.INSTANCE.startQueuePacket();
@@ -243,8 +250,12 @@ public class InteractionTasks {
     }
 
     public static boolean checkInHead(BlockPos targetPos, Vec3 playerPos) {
-        AABB box = AABB.unitCubeFromLowerCorner(Vec3.atLowerCornerOf(targetPos));
-        return interactExtra.getPotentialEyeHeights(playerPos).anyMatch(box::contains);
+        BlockState state = mc.level.getBlockState(targetPos);
+        if (weirdBoxes.contains(state.getBlock()) || buggyBoxes.contains(state.getBlock())) {
+            return false;
+        }
+        AABB boundary = getPositionPlaceBoundary(targetPos, state);
+        return interactExtra.getPotentialEyeHeights(playerPos).anyMatch(boundary::contains);
     }
 
     public static boolean isSpecialPositionPlaceState(BlockState state) {
@@ -266,24 +277,36 @@ public class InteractionTasks {
         }
 
         List<AABB> shapeBoxes = shape.toAabbs();
-        AABB boundary = new AABB(pos);
+        double minX = pos.getX();
+        double minY = pos.getY();
+        double minZ = pos.getZ();
+        double maxX = pos.getX() + 1;
+        double maxY = pos.getY() + 1;
+        double maxZ = pos.getZ() + 1;
         for (AABB localBox : shapeBoxes) {
             AABB box = localBox.move(pos);
-            boundary = new AABB(
-                    Math.max(boundary.minX, box.minX),
-                    Math.max(boundary.minY, box.minY),
-                    Math.max(boundary.minZ, box.minZ),
-                    Math.min(boundary.maxX, box.maxX),
-                    Math.min(boundary.maxY, box.maxY),
-                    Math.min(boundary.maxZ, box.maxZ));
+            minX = Math.max(minX, box.minX);
+            minY = Math.max(minY, box.minY);
+            minZ = Math.max(minZ, box.minZ);
+            maxX = Math.min(maxX, box.maxX);
+            maxY = Math.min(maxY, box.maxY);
+            maxZ = Math.min(maxZ, box.maxZ);
         }
-        return boundary;
+        return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     public static boolean checkPositionPlace(BlockPos pos, Direction face, Vec3 playerPos) {
         Vec3 plateCenter = Vec3.atCenterOf(pos).relative(face, 0.5d);
         BlockState state = mc.level.getBlockState(pos);
-        if (!state.isCollisionShapeFullBlock(mc.level, pos) || isSpecialPositionPlaceState(state)) {
+        if (weirdBoxes.contains(state.getBlock()) || buggyBoxes.contains(state.getBlock())) {
+            plateCenter = switch (face) {
+                case DOWN -> new Vec3(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5);
+                case UP -> new Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+                case NORTH -> new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 1);
+                case SOUTH -> new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ());
+                case WEST -> new Vec3(pos.getX() + 1, pos.getY() + 0.5, pos.getZ() + 0.5);
+                case EAST -> new Vec3(pos.getX(), pos.getY() + 0.5, pos.getZ() + 0.5);};
+        } else if (!state.isCollisionShapeFullBlock(mc.level, pos) || isSpecialPositionPlaceState(state)) {
             AABB boundary = getPositionPlaceBoundary(pos, state);
             plateCenter = switch (face) {
                 case DOWN -> new Vec3(pos.getX() + 0.5, boundary.minY, pos.getZ() + 0.5);
@@ -321,8 +344,9 @@ public class InteractionTasks {
             }
         }
         for (var direction : list) {
-            if (checkInHead(pos, playerPos) || checkPositionPlace(pos, dir, playerPos)) {
-                return new BlockHitResult(Vec3.atCenterOf(pos).relative(direction, 0.5), direction, pos, true);
+            boolean checkInHead = checkInHead(pos, playerPos);
+            if (checkInHead || checkPositionPlace(pos, dir, playerPos)) {
+                return new BlockHitResult(Vec3.atCenterOf(pos).relative(direction, 0.5), direction, pos, checkInHead);
             }
         }
         return RaycastUtils.createHitResult(pos, dir);
@@ -338,8 +362,12 @@ public class InteractionTasks {
                 mc.level, mc.player, result.getBlockPos(), mc.level.getBlockState(result.getBlockPos()));
         return new FlagEntry<>(mayInteract, result);
     }
-    public static boolean checkInteractRange(BlockPos interactBlockPos, Vec3 playerPos, double range) {
-        return interactExtra.isWithinInteractRange(playerPos, interactBlockPos, range);
+    public static boolean checkInteractRange(BlockPos interactBlockPos, Vec3 playerPos, double interactRange) {
+        return interactExtra.isWithinInteractRange(playerPos, interactBlockPos, interactRange);
+    }
+
+    public static boolean checkInteractRange(BlockPos interactBlockPos, Vec3 playerPos) {
+        return interactExtra.isWithinInteractRange(playerPos, interactBlockPos);
     }
 
     public static FlagEntry<BlockHitResult> getPlaceSupportingResult(
@@ -578,443 +606,493 @@ public class InteractionTasks {
             BlockState targetState,
             boolean enableAirPlace,
             boolean enablePositionPlace) {
-        boolean currentSneaking = mc.player.isSecondaryUseActive();
         Block block = targetState.getBlock();
-        BlockState currentState = mc.level.getBlockState(placeTargetBlock);
+        if (block instanceof BedBlock && targetState.getValue(BedBlock.PART) == BedPart.HEAD) {
+            BlockPos footPos = placeTargetBlock.relative(targetState.getValue(BedBlock.FACING).getOpposite());
+            return createSpecificStateHitResult(
+                    preferredDirection,
+                    footPos,
+                    targetState.setValue(BedBlock.PART, BedPart.FOOT),
+                    enableAirPlace,
+                    enablePositionPlace);
+        }
+        if (block instanceof DoublePlantBlock && targetState.getValue(DoublePlantBlock.HALF) == DoubleBlockHalf.UPPER) {
+            return createSpecificStateHitResult(
+                    preferredDirection,
+                    placeTargetBlock.below(),
+                    targetState.setValue(DoublePlantBlock.HALF, DoubleBlockHalf.LOWER),
+                    enableAirPlace,
+                    enablePositionPlace);
+        }
+        if (block instanceof DoorBlock && targetState.getValue(DoorBlock.HALF) == DoubleBlockHalf.UPPER) {
+            return createSpecificStateHitResult(
+                    preferredDirection,
+                    placeTargetBlock.below(),
+                    targetState.setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER),
+                    enableAirPlace,
+                    enablePositionPlace);
+        }
         if (block instanceof ScaffoldingBlock) {
             return getScaffoldingPlacement(
                     preferredDirection, placeTargetBlock, targetState, enableAirPlace, enablePositionPlace);
         }
-        Vec3 centerPos = Vec3.atCenterOf(placeTargetBlock);
-        Vec3 playerFeetPos = mc.player.position();
-        double interactRange = interactExtra.getBlockReachDistance();
-        List<Direction> order = new ArrayList<>(6);
-        FlagEntry<BlockHitResult> result = getDirectReplacingPlacement(
-                preferredDirection, placeTargetBlock, currentState, targetState, enableAirPlace, enablePositionPlace);
-        if (result != null && currentSneaking == result.flag()) {
-            return result;
+        if (block instanceof SlabBlock) {
+            return createSlabHitResult(
+                    preferredDirection, placeTargetBlock, targetState, enableAirPlace, enablePositionPlace);
         }
         if (block instanceof StairBlock) {
-            Half half = targetState.getValue(StairBlock.HALF);
-            for (var direction : new Direction[] {
-                Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
-            }) {
-                if (direction == Direction.DOWN && half == Half.TOP
-                        || direction == Direction.UP && half == Half.BOTTOM) {
-                    continue;
-                }
-                Vec3 plateCenter = centerPos.relative(direction, 0.5);
-                Vec3 interactBlockCenter = centerPos.relative(direction, 1.0D);
-                BlockPos targetPos = BlockPos.containing(interactBlockCenter);
-                if (!checkInteractRange(targetPos, playerFeetPos, interactRange)) {
-                    continue;
-                }
-                Vec3 interactPos = (direction == Direction.DOWN || direction == Direction.UP)
-                        ? plateCenter
-                        : plateCenter.add(0, 0.25 * (half == Half.TOP ? 1 : -1), 0);
-                BlockState interactState = mc.level.getBlockState(targetPos);
-                if (interactState.isAir() || interactState.liquid() || interactState.canBeReplaced()) {
-                    continue;
-                }
-                boolean mayInteract =
-                        InteractUtils.isInteractOnBlockAcceptable(mc.level, mc.player, targetPos, interactState);
-                if (checkInHead(targetPos, playerFeetPos)) {
-                    // ?
-                    var re = new FlagEntry<>(
-                            mayInteract, new BlockHitResult(interactPos, direction.getOpposite(), targetPos, true));
-                    if (!matchesSpecificPlacementState(placeTargetBlock, targetState, re.val())) {
-                        continue;
+            return createStairsHitResult(
+                    preferredDirection, placeTargetBlock, targetState, enableAirPlace, enablePositionPlace);
+        }
+        if (block instanceof TrapDoorBlock) {
+            return createTrapdoorHitResult(
+                    preferredDirection, placeTargetBlock, targetState, enableAirPlace, enablePositionPlace);
+        }
+        return createMainHitResult(
+                preferredDirection, placeTargetBlock, targetState, enableAirPlace, enablePositionPlace);
+    }
+
+    private static FlagEntry<BlockHitResult> createStairsHitResult(
+            Direction preferredDirection,
+            BlockPos placeTargetBlock,
+            BlockState targetState,
+            boolean enableAirPlace,
+            boolean enablePositionPlace) {
+
+        Function<BlockHitResult, BlockHitResult> specificStateFilter =
+                hit -> filterStairsPlacementState(placeTargetBlock, targetState, hit);
+        return createPlacementHitResult(
+                preferredDirection, targetState, placeTargetBlock, enableAirPlace, enablePositionPlace, (val) -> {
+                    var re = specificStateFilter.apply(val);
+                    if (re != null) {
+                        return new FlagEntry<>(false, re);
                     }
-                    if (currentSneaking == re.flag()) {
-                        return re;
-                    } else if (result == null) {
-                        result = re;
+                    return null;
+                });
+    }
+
+    private static FlagEntry<BlockHitResult> createTrapdoorHitResult(
+            Direction preferredDirection,
+            BlockPos placeTargetBlock,
+            BlockState targetState,
+            boolean enableAirPlace,
+            boolean enablePositionPlace) {
+
+        Function<BlockHitResult, BlockHitResult> specificStateFilter =
+                hit -> filterTrapdoorPlacementState(placeTargetBlock, targetState, hit);
+        return createPlacementHitResult(
+                preferredDirection, targetState, placeTargetBlock, enableAirPlace, enablePositionPlace, (val) -> {
+                    var re = specificStateFilter.apply(val);
+                    if (re != null) {
+                        return new FlagEntry<>(false, re);
                     }
+                    return null;
+                });
+    }
+
+    private static FlagEntry<BlockHitResult> createSlabHitResult(
+            Direction preferredDirection,
+            BlockPos placeTargetBlock,
+            BlockState targetState,
+            boolean enableAirPlace,
+            boolean enablePositionPlace) {
+
+        Function<BlockHitResult, BlockHitResult> specificStateFilter =
+                hit -> filterSlabPlacementState(placeTargetBlock, targetState, hit);
+        return createPlacementHitResult(
+                preferredDirection, targetState, placeTargetBlock, enableAirPlace, enablePositionPlace, (val) -> {
+                    var re = specificStateFilter.apply(val);
+                    if (re != null) {
+                        return new FlagEntry<>(false, re);
+                    }
+                    return null;
+                });
+    }
+
+    private static Vec3 getSlabPlacementHitPos(
+            BlockPos placeTargetBlock, BlockState currentState, BlockState targetState, Direction side, Vec3 hitPos) {
+        if (!side.getAxis().isHorizontal()) {
+            return hitPos;
+        }
+        SlabType placementType = targetState.getValue(SlabBlock.TYPE);
+        if (currentState.is(targetState.getBlock())) {
+            SlabType currentType = currentState.getValue(SlabBlock.TYPE);
+            if (currentType == SlabType.DOUBLE) {
+                return hitPos;
+            }
+            placementType = currentType == SlabType.BOTTOM ? SlabType.TOP : SlabType.BOTTOM;
+        }
+        double hitY = placeTargetBlock.getY() + (placementType == SlabType.TOP ? 0.75 : 0.25);
+        return new Vec3(hitPos.x, hitY, hitPos.z);
+    }
+
+    private static FlagEntry<BlockHitResult> createMainHitResult(
+            Direction preferredDirection,
+            BlockPos placeTargetBlock,
+            BlockState targetState,
+            boolean enableAirPlace,
+            boolean enablePositionPlace) {
+        Block block = targetState.getBlock();
+
+        Predicate<BlockHitResult> stateFilter = hit -> true;
+        boolean forceSneak = false;
+        if (block instanceof RedstoneWallTorchBlock) {
+            Predicate<BlockHitResult> torchFilter = createTorchOrLeverPlacementFilter(placeTargetBlock, targetState);
+            stateFilter = hit -> hit.getBlockPos().equals(placeTargetBlock)
+                    ? matchesDirectionalPlacement(placeTargetBlock, targetState, hit)
+                    : torchFilter.test(hit);
+        } else if (block instanceof WallTorchBlock) {
+            Predicate<BlockHitResult> torchFilter = createTorchOrLeverPlacementFilter(placeTargetBlock, targetState);
+            stateFilter = hit -> hit.getBlockPos().equals(placeTargetBlock)
+                    ? matchesDirectionalPlacement(placeTargetBlock, targetState, hit)
+                    : torchFilter.test(hit);
+        } else if (block instanceof BaseTorchBlock || block instanceof LeverBlock) {
+            stateFilter = createTorchOrLeverPlacementFilter(placeTargetBlock, targetState);
+        } else if (block instanceof FaceAttachedHorizontalDirectionalBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof WallSkullBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof WallSignBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof WallHangingSignBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof WallBannerBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof VineBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof TripWireHookBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof BaseCoralWallFanBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof CocoaBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof MultifaceBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof LanternBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof LadderBlock) {
+            stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
+        } else if (block instanceof EndRodBlock) {
+            Direction targetFacing = targetState.getValue(EndRodBlock.FACING);
+            stateFilter = hit -> hit.getDirection() == targetFacing;
+        } else if (block instanceof ChestBlock) {
+            ChestType targetChestType = targetState.getValue(ChestBlock.TYPE);
+            Direction targetFacing = targetState.getValue(ChestBlock.FACING);
+            BlockPos pos = placeTargetBlock;
+            if (mc.player.isSecondaryUseActive()) {
+                if (targetChestType != ChestType.SINGLE) {
+                    Direction left = targetFacing.getCounterClockWise();
+                    Direction right = targetFacing.getClockWise();
+                    boolean canForm = false;
+                    for (Direction direction : new Direction[] {left, right}) {
+                        BlockPos neighborPos = pos.relative(direction);
+                        BlockState neighborState = mc.level.getBlockState(neighborPos);
+                        if (neighborState.getBlock() instanceof ChestBlock
+                                && neighborState.getValue(ChestBlock.TYPE) == ChestType.SINGLE
+                                && neighborState.getValue(ChestBlock.FACING) == targetFacing) {
+                            canForm = true;
+                            break;
+                        }
+                    }
+                    if (!canForm) {
+                        targetChestType = ChestType.SINGLE;
+                    }
+                }
+                if (targetChestType == ChestType.SINGLE) {
+                    stateFilter = hit -> {
+                        Direction side = hit.getDirection();
+                        if (!side.getAxis().isHorizontal()) return true;
+                        BlockPos neighborPos = pos.relative(side.getOpposite());
+                        BlockState neighborState = mc.level.getBlockState(neighborPos);
+                        if (!(neighborState.getBlock() instanceof ChestBlock)) return true;
+                        if (neighborState.getValue(ChestBlock.TYPE) != ChestType.SINGLE) return true;
+                        Direction neighborFacing = neighborState.getValue(ChestBlock.FACING);
+                        return neighborFacing.getAxis() == side.getAxis();
+                    };
                 } else {
-                    if (enablePositionPlace || checkPositionPlace(targetPos, direction.getOpposite(), playerFeetPos)) {
-                        var re = new FlagEntry<>(
-                                mayInteract,
-                                new BlockHitResult(interactPos, direction.getOpposite(), targetPos, false));
-                        if (!matchesSpecificPlacementState(placeTargetBlock, targetState, re.val())) {
-                            continue;
-                        }
-                        if (currentSneaking == re.flag()) {
-                            return re;
-                        } else if (result == null) {
-                            result = re;
-                        }
+                    final ChestType finalTargetChestType = targetChestType;
+                    stateFilter = hit -> {
+                        Direction side = hit.getDirection();
+                        if (!side.getAxis().isHorizontal()) return false;
+                        BlockPos neighborPos = pos.relative(side.getOpposite());
+                        BlockState neighborState = mc.level.getBlockState(neighborPos);
+                        if (!(neighborState.getBlock() instanceof ChestBlock)) return false;
+                        if (neighborState.getValue(ChestBlock.TYPE) != ChestType.SINGLE) return false;
+                        Direction neighborFacing = neighborState.getValue(ChestBlock.FACING);
+                        if (neighborFacing.getAxis() == side.getAxis()) return false;
+                        ChestType finalChestType = (neighborFacing.getCounterClockWise() == side.getOpposite())
+                                ? ChestType.RIGHT
+                                : ChestType.LEFT;
+                        return neighborFacing == targetFacing && finalChestType == finalTargetChestType;
+                    };
+                }
+            } else if (targetChestType == ChestType.SINGLE) {
+                Direction left = targetFacing.getCounterClockWise();
+                Direction right = targetFacing.getClockWise();
+                for (BlockPos neighborPos : new BlockPos[] {pos.relative(left), pos.relative(right)}) {
+                    BlockState neighborState = mc.level.getBlockState(neighborPos);
+                    if (neighborState.getBlock() instanceof ChestBlock
+                            && neighborState.getValue(ChestBlock.TYPE) == ChestType.SINGLE
+                            && neighborState.getValue(ChestBlock.FACING) == targetFacing) {
+                        forceSneak = true;
+                        break;
                     }
                 }
             }
-        } else if (block instanceof SlabBlock) {
-            SlabType type = targetState.getValue(SlabBlock.TYPE);
-            int sgn;
-            if (type == SlabType.DOUBLE) {
-                sgn = 0;
-            } else if (type == SlabType.TOP) {
-                sgn = 1;
-            } else if (type == SlabType.BOTTOM) {
-                sgn = -1;
+        } else if (block instanceof BellBlock) {
+            Direction targetFacing = targetState.getValue(BellBlock.FACING);
+            BellAttachType attachment = targetState.getValue(BellBlock.ATTACHMENT);
+            stateFilter = hit -> {
+                if (attachment == BellAttachType.FLOOR || attachment == BellAttachType.CEILING) {
+                    if (hit.getDirection() != (attachment == BellAttachType.FLOOR ? Direction.UP : Direction.DOWN)) {
+                        return false;
+                    }
+                } else if (!hit.getDirection().getAxis().isHorizontal()
+                        || hit.getDirection() != targetFacing.getOpposite()) {
+                    return false;
+                }
+                BlockState placed = getSpecificPlacementState(placeTargetBlock, (BlockItem) block.asItem(), hit);
+                return placed != null && placed.getValue(BellBlock.ATTACHMENT) == attachment;
+            };
+        } else if (block instanceof LightningRodBlock) {
+            Direction targetFacing = targetState.getValue(LightningRodBlock.FACING);
+            stateFilter = hit -> hit.getDirection() == targetFacing;
+        } else if (block instanceof ShulkerBoxBlock) {
+            Direction targetFacing = targetState.getValue(ShulkerBoxBlock.FACING);
+            stateFilter = hit -> hit.getDirection() == targetFacing;
+        } else if (block instanceof HopperBlock) {
+            Direction targetFacing = targetState.getValue(HopperBlock.FACING);
+            if (targetFacing == Direction.DOWN) {
+                stateFilter = hit -> hit.getDirection() == Direction.UP || hit.getDirection() == Direction.DOWN;
             } else {
-                sgn = 0;
+                stateFilter = hit -> hit.getDirection() == targetFacing.getOpposite();
             }
-            for (var direction : new Direction[] {
-                Direction.UP, Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
-            }) {
-                if (direction == Direction.UP && type == SlabType.BOTTOM
-                        || direction == Direction.DOWN && type == SlabType.TOP) {
-                    continue;
-                }
-                Vec3 plateCenter = centerPos.relative(direction, 0.5);
-                Vec3 interactBlockCenter = centerPos.relative(direction, 1.0D);
-                BlockPos targetPos = BlockPos.containing(interactBlockCenter);
-                if (!checkInteractRange(targetPos, playerFeetPos, interactRange)) {
-                    continue;
-                }
-                // check double condition
-                BlockState interactState = mc.level.getBlockState(targetPos);
-                // this will make the interactState become DOUBLE
-                if (interactState.is(targetState.getBlock())
-                        && interactState.getValue(SlabBlock.TYPE) != SlabType.DOUBLE
-                        && interactState.getValue(SlabBlock.TYPE) != targetState.getValue(SlabBlock.TYPE)) {
-                    continue;
-                }
-                Vec3 interactPos = (direction == Direction.DOWN || direction == Direction.UP)
-                        ? plateCenter
-                        : plateCenter.add(0, 0.25 * (double) sgn, 0);
-                if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
-                    continue;
-                }
-                boolean mayInteract =
-                        InteractUtils.isInteractOnBlockAcceptable(mc.level, mc.player, targetPos, interactState);
-                if (checkInHead(targetPos, playerFeetPos)) {
-                    // ?
-                    var re = new FlagEntry<>(
-                            mayInteract, new BlockHitResult(interactPos, direction.getOpposite(), targetPos, true));
-                    if (!matchesSpecificPlacementState(placeTargetBlock, targetState, re.val())) {
+        } else if (block instanceof InfestedRotatedPillarBlock) {
+            Direction.Axis targetAxis = targetState.getValue(RotatedPillarBlock.AXIS);
+            stateFilter = hit -> hit.getDirection().getAxis() == targetAxis;
+        } else if (block instanceof RotatedPillarBlock || block instanceof CreakingHeartBlock) {
+            Direction.Axis targetAxis = targetState.getValue(RotatedPillarBlock.AXIS);
+            stateFilter = hit -> hit.getDirection().getAxis() == targetAxis;
+        } else if (block instanceof JigsawBlock) {
+            FrontAndTop orientation = targetState.getValue(JigsawBlock.ORIENTATION);
+            stateFilter = hit -> hit.getDirection() == orientation.front()
+                    && (hit.getDirection().getAxis() == Direction.Axis.Y || orientation.top() == Direction.UP);
+        } else if (block instanceof AmethystClusterBlock) {
+            Direction targetFacing = targetState.getValue(AmethystClusterBlock.FACING);
+            stateFilter = hit -> hit.getDirection() == targetFacing;
+        }
+        Predicate<BlockHitResult> filter2 = stateFilter;
+        boolean sneak2 = forceSneak;
+        return createPlacementHitResult(
+                preferredDirection, targetState, placeTargetBlock, enableAirPlace, enablePositionPlace, (fac) -> {
+                    if (filter2.test(fac)) {
+                        return new FlagEntry<>(sneak2, fac);
+                    }
+                    return null;
+                });
+    }
+
+    private static FlagEntry<BlockHitResult> createPlacementHitResult(
+            Direction preferredDirection,
+            BlockState targetState,
+            BlockPos targetPos,
+            boolean enableAirPlace,
+            boolean enablePositionPlace,
+            Function<BlockHitResult, FlagEntry<BlockHitResult>> blockHitResultFactory) {
+        Block block = targetState.getBlock();
+        BlockState currentState = mc.level.getBlockState(targetPos);
+        boolean canUseAirPlace = enableAirPlace && !(block instanceof BaseTorchBlock);
+        if (block instanceof RedstoneWallTorchBlock) {
+            canUseAirPlace = enableAirPlace;
+        } else if (block instanceof WallTorchBlock) {
+            canUseAirPlace = enableAirPlace;
+        }
+        Vec3 centerPos = Vec3.atCenterOf(targetPos);
+        Vec3 playerFeetPos = mc.player.position();
+        double interactRange = interactExtra.getBlockReachDistance();
+        FlagEntry<BlockHitResult> result = null;
+        boolean inside = checkInHead(targetPos, playerFeetPos);
+        List<Direction> order = new ArrayList<>(6);
+        order.add(preferredDirection);
+        for (Direction direction : new Direction[] {
+            Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
+        }) {
+            if (direction != preferredDirection) {
+                order.add(direction);
+            }
+        }
+        if (checkInteractRange(targetPos, playerFeetPos, interactRange)) {
+            if ((!currentState.isAir() && !currentState.liquid()) || canUseAirPlace) {
+                for (Direction direction : order) {
+                    Direction side = direction.getOpposite();
+                    BlockHitResult hitResult = new BlockHitResult(centerPos.relative(side, 0.5), side, targetPos, inside);
+                    FlagEntry<BlockHitResult> entry = blockHitResultFactory.apply(hitResult);
+                    if (entry == null) {
                         continue;
                     }
-                    if (currentSneaking == re.flag()) {
-                        return re;
-                    } else if (result == null) {
-                        result = re;
-                    }
-                } else {
-                    if (enablePositionPlace || checkPositionPlace(targetPos, direction.getOpposite(), playerFeetPos)) {
-                        var re = new FlagEntry<>(
-                                mayInteract,
-                                new BlockHitResult(interactPos, direction.getOpposite(), targetPos, false));
-                        if (!matchesSpecificPlacementState(placeTargetBlock, targetState, re.val())) {
-                            continue;
-                        }
-                        if (currentSneaking == re.flag()) {
-                            return re;
-                        } else if (result == null) {
-                            result = re;
-                        }
-                    }
-                }
-            }
-            // DOUBLE 类型不修改
-        } else if (block instanceof TrapDoorBlock) {
-            Half half = targetState.getValue(TrapDoorBlock.HALF);
-            for (var direction : new Direction[] {
-                Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
-            }) {
-                if (direction == Direction.DOWN && half == Half.TOP
-                        || direction == Direction.UP && half == Half.BOTTOM) {
-                    continue;
-                }
-                if (direction.getAxis().isHorizontal()
-                        && targetState.getValue(TrapDoorBlock.FACING) != direction.getOpposite()) {
-                    continue;
-                }
-                Vec3 plateCenter = centerPos.relative(direction, 0.5);
-                Vec3 interactBlockCenter = centerPos.relative(direction, 1.0);
-                BlockPos targetPos = BlockPos.containing(interactBlockCenter);
-                if (!checkInteractRange(targetPos, playerFeetPos, interactRange)) {
-                    continue;
-                }
-                BlockState interactState = mc.level.getBlockState(targetPos);
-                // 交互点：对于垂直方向使用 plateCenter，对于水平方向需要根据 HALF 调整 Y 偏移
-                Vec3 interactPos;
-                if (direction == Direction.DOWN || direction == Direction.UP) {
-                    interactPos = plateCenter;
-                } else {
-                    double yOffset = (half == Half.TOP) ? 0.25 : -0.25;
-                    interactPos = plateCenter.add(0, yOffset, 0);
-                }
-                if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
-                    continue;
-                }
-                boolean mayInteract =
-                        InteractUtils.isInteractOnBlockAcceptable(mc.level, mc.player, targetPos, interactState);
-                if (checkInHead(targetPos, playerFeetPos)) {
-                    // ?
-                    var re = new FlagEntry<>(
-                            mayInteract, new BlockHitResult(interactPos, direction.getOpposite(), targetPos, true));
-                    if (!matchesSpecificPlacementState(placeTargetBlock, targetState, re.val())) {
-                        continue;
-                    }
-                    if (currentSneaking == re.flag()) {
-                        return re;
-                    } else if (result == null) {
-                        result = re;
-                    }
-                } else {
-                    if (enablePositionPlace || checkPositionPlace(targetPos, direction.getOpposite(), playerFeetPos)) {
-                        var re = new FlagEntry<>(
-                                mayInteract,
-                                new BlockHitResult(interactPos, direction.getOpposite(), targetPos, false));
-                        if (!matchesSpecificPlacementState(placeTargetBlock, targetState, re.val())) {
-                            continue;
-                        }
-                        if (currentSneaking == re.flag()) {
-                            return re;
-                        } else if (result == null) {
-                            result = re;
-                        }
-                    }
-                }
-            }
-        } else {
-            // Validate complete hit results using the target block's placement rules.
-            Predicate<BlockHitResult> stateFilter = hit -> true;
-            boolean forceSneak = false;
-            if (block instanceof BaseTorchBlock || block instanceof LeverBlock) {
-                stateFilter = createTorchOrLeverPlacementFilter(placeTargetBlock, targetState);
-            } else if (usesPlacementDirections(block)) {
-                stateFilter = hit -> matchesDirectionalPlacement(placeTargetBlock, targetState, hit);
-            } else if (block instanceof EndRodBlock) {
-                Direction targetFacing = targetState.getValue(EndRodBlock.FACING);
-                // EndRodBlock: getPlacementState 直接 with(FACING, ctx.getDirection())
-                stateFilter = hit -> hit.getDirection() == targetFacing;
-            } else if (block instanceof ChestBlock) {
-                ChestType targetChestType = targetState.getValue(ChestBlock.TYPE);
-                Direction targetFacing = targetState.getValue(ChestBlock.FACING);
-                BlockPos pos = placeTargetBlock;
-
-                if (mc.player.isSecondaryUseActive()) {
-
-                    // ---- 预检查：双箱能否形成 ----
-                    if (targetChestType != ChestType.SINGLE) {
-                        Direction left = targetFacing.getCounterClockWise();
-                        Direction right = targetFacing.getClockWise();
-                        boolean canForm = false;
-                        for (Direction d : new Direction[] {left, right}) {
-                            BlockPos neighborPos = pos.relative(d);
-                            BlockState neighborState = mc.level.getBlockState(neighborPos);
-                            if (neighborState.getBlock() instanceof ChestBlock
-                                    && neighborState.getValue(ChestBlock.TYPE) == ChestType.SINGLE
-                                    && neighborState.getValue(ChestBlock.FACING) == targetFacing) {
-                                canForm = true;
-                                break;
-                            }
-                        }
-                        if (!canForm) {
-                            targetChestType = ChestType.SINGLE; // 降级
-                        }
-                    }
-
-                    // ---- 根据是否潜行处理 ----
-                    if (targetChestType == ChestType.SINGLE) {
-                        // 单箱：排除会导致合并的水平面
-                        stateFilter = hit -> {
-                            Direction side = hit.getDirection();
-                            if (!side.getAxis().isHorizontal()) return true;
-                            BlockPos neighborPos = pos.relative(side.getOpposite());
-                            BlockState neighborState = mc.level.getBlockState(neighborPos);
-                            if (!(neighborState.getBlock() instanceof ChestBlock)) return true;
-                            if (neighborState.getValue(ChestBlock.TYPE) != ChestType.SINGLE) return true;
-                            Direction neighborFacing = neighborState.getValue(ChestBlock.FACING);
-                            return neighborFacing.getAxis() == side.getAxis();
-                        };
-                    } else {
-                        // 双箱（此时 canForm 一定为 true）：只保留能精确形成该双箱的水平面
-                        final ChestType finalTargetChestType = targetChestType;
-                        stateFilter = hit -> {
-                            Direction side = hit.getDirection();
-                            if (!side.getAxis().isHorizontal()) return false;
-                            BlockPos neighborPos = pos.relative(side.getOpposite());
-                            BlockState neighborState = mc.level.getBlockState(neighborPos);
-                            if (!(neighborState.getBlock() instanceof ChestBlock)) return false;
-                            if (neighborState.getValue(ChestBlock.TYPE) != ChestType.SINGLE) return false;
-                            Direction neighborFacing = neighborState.getValue(ChestBlock.FACING);
-                            if (neighborFacing.getAxis() == side.getAxis()) return false;
-                            ChestType finalChestType = (neighborFacing.getCounterClockWise() == side.getOpposite())
-                                    ? ChestType.RIGHT
-                                    : ChestType.LEFT;
-                            return neighborFacing == targetFacing && finalChestType == finalTargetChestType;
-                        };
-                    }
-                } else {
-                    // 非下蹲：不过滤 stateFilter，但单箱时检查是否需 forceSneak
-                    if (targetChestType == ChestType.SINGLE) {
-                        Direction left = targetFacing.getCounterClockWise();
-                        Direction right = targetFacing.getClockWise();
-                        boolean canMerge = false;
-                        for (BlockPos neighborPos : new BlockPos[] {pos.relative(left), pos.relative(right)}) {
-                            BlockState neighborState = mc.level.getBlockState(neighborPos);
-                            if (neighborState.getBlock() instanceof ChestBlock
-                                    && neighborState.getValue(ChestBlock.TYPE) == ChestType.SINGLE
-                                    && neighborState.getValue(ChestBlock.FACING) == targetFacing) {
-                                canMerge = true;
-                                break;
-                            }
-                        }
-                        if (canMerge) {
-                            forceSneak = true;
-                        }
-                    }
-                }
-            } else if (block instanceof BellBlock) {
-                // BellBlock: 在水平方向时，FACING 设置为 ctx.getDirection().getOpposite()
-                // 垂直方向时 FACING 使用 getHorizontalPlayerFacing，不依赖 getSide
-                Direction targetFacing = targetState.getValue(BellBlock.FACING);
-                if (targetFacing.getAxis().isHorizontal()) {
-                    // 只允许与 targetFacing 相反的方向（因为 with(FACING, direction.getOpposite())）
-                    Direction allowedSide = targetFacing.getOpposite();
-                    stateFilter = hit -> hit.getDirection() == allowedSide;
-                }
-                // 如果 targetFacing 垂直，则保留所有方向（因为垂直时 FACING 不由 getSide 决定）
-            } else if (block instanceof LightningRodBlock) {
-                Direction targetFacing = targetState.getValue(LightningRodBlock.FACING);
-                // LightningRodBlock: 直接 with(FACING, ctx.getDirection())
-                stateFilter = hit -> hit.getDirection() == targetFacing;
-            } else if (block instanceof ShulkerBoxBlock) {
-                Direction targetFacing = targetState.getValue(ShulkerBoxBlock.FACING);
-                // ShulkerBoxBlock: 直接 with(FACING, ctx.getDirection())
-                stateFilter = hit -> hit.getDirection() == targetFacing;
-            } else if (block instanceof HopperBlock) {
-                Direction targetFacing = targetState.getValue(HopperBlock.FACING);
-                // HopperBlock: getPlacementState 逻辑
-                //   direction = ctx.getDirection().getOpposite()
-                //   if direction.getAxis() == Y -> final = DOWN, else final = direction
-                // 因此允许的 getSide 需满足：
-                //   如果 targetFacing == DOWN，则允许 UP 或 DOWN
-                //   如果 targetFacing 水平，则允许 targetFacing.getOpposite()
-                if (targetFacing == Direction.DOWN) {
-                    stateFilter = hit -> hit.getDirection() == Direction.UP || hit.getDirection() == Direction.DOWN;
-                } else {
-                    Direction direction = targetFacing.getOpposite();
-                    stateFilter = hit -> hit.getDirection() == direction;
-                }
-            } else if (block instanceof InfestedRotatedPillarBlock) {
-                Direction.Axis targetAxis = targetState.getValue(RotatedPillarBlock.AXIS);
-                // InfestedRotatedPillarBlock: with(RotatedPillarBlock.AXIS, ctx.getDirection().getAxis())
-                // 允许的方向轴必须等于 targetAxis
-                stateFilter = hit -> hit.getDirection().getAxis() == targetAxis;
-            } else if (block instanceof AmethystClusterBlock) {
-                Direction targetFacing = targetState.getValue(AmethystClusterBlock.FACING);
-                // AmethystClusterBlock: 直接 with(FACING, ctx.getDirection())
-                stateFilter = hit -> hit.getDirection() == targetFacing;
-            }
-            // 其他方块不做过滤（保留所有方向）
-            Direction dir = preferredDirection;
-            order.add(dir);
-            for (var direction : new Direction[] {
-                Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
-            }) {
-                if (direction != dir) {
-                    order.add(direction);
-                }
-            }
-            if (!currentState.isAir() && !currentState.liquid() && currentState.canBeReplaced()) {
-                if (checkInteractRange(placeTargetBlock, playerFeetPos, interactRange)) {
-                    for (Direction direction : order) {
-                        Vec3 plateCenter = centerPos.relative(direction, 0.5);
-                        boolean mayInteract = InteractUtils.isInteractOnBlockAcceptable(
-                                mc.level, mc.player, placeTargetBlock, currentState);
-                        if (checkInHead(placeTargetBlock, playerFeetPos)) {
-                            // ?
-                            var re = new FlagEntry<>(
-                                    mayInteract,
-                                    new BlockHitResult(plateCenter, direction.getOpposite(), placeTargetBlock, true));
-                            if (!stateFilter.test(re.val())) {
+                    if (!currentState.isAir() && !currentState.liquid()) {
+                        if (!currentState.canBeReplaced()) {
+                            BlockPlaceContext placementContext = new BlockPlaceContext(
+                                    mc.player,
+                                    InteractionHand.MAIN_HAND,
+                                    new ItemStack(targetState.getBlock().asItem()),
+                                    entry.val());
+                            if (!placementContext.replacingClickedOnBlock()) {
                                 continue;
                             }
-                            if (!re.flag()) {
-                                return re;
-                            } else if (result == null) {
-                                result = re;
-                            }
-                        } else {
-                            if (enablePositionPlace
-                                    || checkPositionPlace(placeTargetBlock, direction.getOpposite(), playerFeetPos)) {
-                                var re = new FlagEntry<>(
-                                        mayInteract,
-                                        new BlockHitResult(
-                                                plateCenter, direction.getOpposite(), placeTargetBlock, false));
-                                if (!stateFilter.test(re.val())) {
-                                    continue;
-                                }
-                                if (!re.flag()) {
-                                    return re;
-                                } else if (result == null) {
-                                    result = re;
-                                }
-                            }
                         }
+                    }
+                    hitResult = entry.val();
+                    if (!checkInHead(hitResult.getBlockPos(), playerFeetPos)
+                            && !enablePositionPlace
+                            && !checkPositionPlace(hitResult.getBlockPos(), hitResult.getDirection(), playerFeetPos)) {
+                        continue;
+                    }
+                    boolean mayInteract = InteractUtils.isInteractOnBlockAcceptable(
+                            mc.level,
+                            mc.player,
+                            hitResult.getBlockPos(),
+                            mc.level.getBlockState(hitResult.getBlockPos()));
+                    FlagEntry<BlockHitResult> candidate = new FlagEntry<>(mayInteract || entry.flag(), entry.val());
+                    if (InteractUtils.canInteractAndPlace(mc.player, candidate)) {
+                        return candidate;
+                    }
+                    if (result == null) {
+                        result = candidate;
                     }
                 }
             }
-            for (var direction : order) {
-                Vec3 plateCenter = centerPos.relative(direction, 0.5);
-                Vec3 interactBlockCenter = centerPos.relative(direction, 1.0D);
-                BlockPos targetPos = BlockPos.containing(interactBlockCenter);
-                if (!checkInteractRange(targetPos, playerFeetPos, interactRange)) {
-                    continue;
-                }
-                BlockState interactState = mc.level.getBlockState(targetPos);
-                if ((interactState.isAir() || interactState.liquid() || interactState.canBeReplaced())) {
-                    continue;
-                }
-                boolean mayInteract =
-                        InteractUtils.isInteractOnBlockAcceptable(mc.level, mc.player, targetPos, interactState);
-                if (checkInHead(targetPos, playerFeetPos)) {
-                    // ?
-                    var re = new FlagEntry<>(
-                            mayInteract || forceSneak,
-                            new BlockHitResult(plateCenter, direction.getOpposite(), targetPos, true));
-                    if (!stateFilter.test(re.val())) {
-                        continue;
-                    }
-                    if (currentSneaking == re.flag()) {
-                        return re;
-                    } else if (result == null) {
-                        result = re;
-                    }
-                } else {
-                    if (enablePositionPlace || checkPositionPlace(targetPos, direction.getOpposite(), playerFeetPos)) {
-                        var re = new FlagEntry<>(
-                                mayInteract || forceSneak,
-                                new BlockHitResult(plateCenter, direction.getOpposite(), targetPos, false));
-                        if (!stateFilter.test(re.val())) {
-                            continue;
-                        }
-                        if (currentSneaking == re.flag()) {
-                            return re;
-                        } else if (result == null) {
-                            result = re;
-                        }
-                    }
-                }
+        }
+
+        for (Direction direction : order) {
+            Vec3 plateCenter = centerPos.relative(direction, 0.5);
+            BlockPos neighbour = BlockPos.containing(centerPos.relative(direction, 1.0D));
+            if (!checkInteractRange(neighbour, playerFeetPos, interactRange)) {
+                continue;
+            }
+            BlockState interactState = mc.level.getBlockState(neighbour);
+            if (interactState.isAir() || interactState.liquid() || interactState.canBeReplaced()) {
+                continue;
+            }
+            boolean inHead = checkInHead(neighbour, playerFeetPos);
+            BlockHitResult hitResult = new BlockHitResult(plateCenter, direction.getOpposite(), neighbour, inHead);
+            FlagEntry<BlockHitResult> entry = blockHitResultFactory.apply(hitResult);
+            if (entry == null) continue;
+            hitResult = entry.val();
+            if (!checkInHead(hitResult.getBlockPos(), playerFeetPos)
+                    && !enablePositionPlace
+                    && !checkPositionPlace(hitResult.getBlockPos(), hitResult.getDirection(), playerFeetPos)) {
+                continue;
+            }
+            boolean mayInteract = InteractUtils.isInteractOnBlockAcceptable(
+                    mc.level, mc.player, hitResult.getBlockPos(), mc.level.getBlockState(hitResult.getBlockPos()));
+            FlagEntry<BlockHitResult> candidate = new FlagEntry<>(mayInteract || entry.flag(), entry.val());
+            if (InteractUtils.canInteractAndPlace(mc.player, candidate)) {
+                return candidate;
+            }
+            if (result == null) {
+                result = candidate;
             }
         }
         return result;
     }
 
-    private static boolean matchesSpecificPlacementState(
+    private static BlockHitResult filterStairsPlacementState(
             BlockPos placeTargetBlock, BlockState targetState, BlockHitResult hitResult) {
         if (!(targetState.getBlock().asItem() instanceof BlockItem blockItem)) {
-            return false;
+            return null;
         }
+        BlockState currentState = mc.level.getBlockState(placeTargetBlock);
+        if (hitResult.getDirection().getAxis().isHorizontal()
+                && (currentState.isAir() || currentState.liquid() || currentState.canBeReplaced())) {
+            boolean topHalf = targetState.getValue(StairBlock.HALF) == Half.TOP;
+            double hitY = placeTargetBlock.getY() + (topHalf ? 0.75 : 0.25);
+            Vec3 hitPos = hitResult.getLocation();
+            hitResult = new BlockHitResult(
+                    new Vec3(hitPos.x, hitY, hitPos.z),
+                    hitResult.getDirection(),
+                    hitResult.getBlockPos(),
+                    hitResult.isInside());
+        }
+        BlockState placementState = getSpecificPlacementState(placeTargetBlock, blockItem, hitResult);
+        return placementState != null && placementState.getValue(StairBlock.HALF) == targetState.getValue(StairBlock.HALF)
+                ? hitResult
+                : null;
+    }
+
+    private static BlockHitResult filterTrapdoorPlacementState(
+            BlockPos placeTargetBlock, BlockState targetState, BlockHitResult hitResult) {
+        if (!(targetState.getBlock().asItem() instanceof BlockItem blockItem)) {
+            return null;
+        }
+        BlockState currentState = mc.level.getBlockState(placeTargetBlock);
+        if (hitResult.getDirection().getAxis().isHorizontal()
+                && (currentState.isAir() || currentState.liquid() || currentState.canBeReplaced())) {
+            boolean topHalf = targetState.getValue(TrapDoorBlock.HALF) == Half.TOP;
+            double hitY = placeTargetBlock.getY() + (topHalf ? 0.75 : 0.25);
+            Vec3 hitPos = hitResult.getLocation();
+            hitResult = new BlockHitResult(
+                    new Vec3(hitPos.x, hitY, hitPos.z),
+                    hitResult.getDirection(),
+                    hitResult.getBlockPos(),
+                    hitResult.isInside());
+        }
+        BlockState placementState = getSpecificPlacementState(placeTargetBlock, blockItem, hitResult);
+        return placementState != null
+                        && placementState.getValue(TrapDoorBlock.HALF) == targetState.getValue(TrapDoorBlock.HALF)
+                        && (!hitResult.getDirection().getAxis().isHorizontal()
+                                || placementState.getValue(TrapDoorBlock.FACING)
+                                        == targetState.getValue(TrapDoorBlock.FACING))
+                ? hitResult
+                : null;
+    }
+
+    private static BlockHitResult filterSlabPlacementState(
+            BlockPos placeTargetBlock, BlockState targetState, BlockHitResult hitResult) {
+
+        if (!(targetState.getBlock().asItem() instanceof BlockItem blockItem)) {
+            return null;
+        }
+
+        BlockState currentState = mc.level.getBlockState(placeTargetBlock);
+        SlabType targetType = targetState.getValue(SlabBlock.TYPE);
+        Direction side = hitResult.getDirection();
+        Vec3 hitPos = hitResult.getLocation();
+
+        if (side.getAxis().isHorizontal()) {
+            double hitY;
+
+            if (hitResult.getBlockPos().equals(placeTargetBlock)
+                    && currentState.is(targetState.getBlock())
+                    && currentState.getValue(SlabBlock.TYPE) != SlabType.DOUBLE) {
+
+                // canBeReplaced(): BOTTOM requires y > 0.5, TOP requires y <= 0.5.
+                SlabType currentType = currentState.getValue(SlabBlock.TYPE);
+                hitY = placeTargetBlock.getY() + (currentType == SlabType.BOTTOM ? 0.75 : 0.25);
+
+            } else {
+                // getPlacementState(): horizontal placement uses hit Y.
+                hitY = placeTargetBlock.getY() + (targetType == SlabType.TOP ? 0.75 : 0.25);
+            }
+
+            hitPos = new Vec3(hitPos.x, hitY, hitPos.z);
+        }
+
+        BlockHitResult adjusted = new BlockHitResult(hitPos, side, hitResult.getBlockPos(), hitResult.isInside());
+
+        BlockState placementState = getSpecificPlacementState(placeTargetBlock, blockItem, adjusted);
+
+        return placementState != null && placementState.getValue(SlabBlock.TYPE) == targetType ? adjusted : null;
+    }
+
+    private static BlockState getSpecificPlacementState(
+            BlockPos placeTargetBlock, BlockItem blockItem, BlockHitResult hitResult) {
         BlockPlaceContext context =
                 new BlockPlaceContext(mc.player, InteractionHand.MAIN_HAND, new ItemStack(blockItem), hitResult);
         context = blockItem.updatePlacementContext(context);
-        return context != null
-                && context.getClickedPos().equals(placeTargetBlock)
-                && targetState.equals(blockItem.getPlacementState(context));
+        return context != null && context.getClickedPos().equals(placeTargetBlock)
+                ? blockItem.getPlacementState(context)
+                : null;
     }
 
     private static FlagEntry<BlockHitResult> getScaffoldingPlacement(
@@ -1261,23 +1339,6 @@ public class InteractionTasks {
         return hit -> true;
     }
 
-    private static boolean usesPlacementDirections(Block block) {
-        return block instanceof FaceAttachedHorizontalDirectionalBlock
-                || block instanceof WallTorchBlock
-                || block instanceof RedstoneWallTorchBlock
-                || block instanceof WallSkullBlock
-                || block instanceof WallSignBlock
-                || block instanceof WallHangingSignBlock
-                || block instanceof WallBannerBlock
-                || block instanceof VineBlock
-                || block instanceof TripWireHookBlock
-                || block instanceof BaseCoralWallFanBlock
-                || block instanceof CocoaBlock
-                || block instanceof MultifaceBlock
-                || block instanceof LanternBlock
-                || block instanceof LadderBlock;
-    }
-
     private static boolean matchesDirectionalPlacement(
             BlockPos placeTargetBlock, BlockState targetState, BlockHitResult hitResult) {
         if (hitResult.getBlockPos().equals(placeTargetBlock)) {
@@ -1368,76 +1429,6 @@ public class InteractionTasks {
         return placementState.canSurvive(mc.level, placeTargetBlock);
     }
 
-
-    private static FlagEntry<BlockHitResult> getDirectReplacingPlacement(
-            Direction preferredDirection,
-            BlockPos placeTargetBlock,
-            BlockState currentState,
-            BlockState targetState,
-            boolean enableAirPlace,
-            boolean enablePositionPlace) {
-        if (currentState == null
-                || targetState == null
-                || ((currentState.isAir() || currentState.liquid()) && !enableAirPlace)
-                || !checkInteractRange(placeTargetBlock, mc.player.position(), interactExtra.getBlockReachDistance())) {
-            return null;
-        }
-        // Let the per-block predicates decide whether direct target hits are allowed.
-        if (!currentState.isAir()
-                && !currentState.liquid()
-                && (usesPlacementDirections(targetState.getBlock())
-                        || targetState.getBlock() instanceof BaseTorchBlock)) {
-            return null;
-        }
-
-        Vec3 playerFeetPos = mc.player.position();
-        List<Direction> order = new ArrayList<>(6);
-        Direction preferredSide = preferredDirection.getOpposite();
-        order.add(preferredSide);
-        for (Direction direction : new Direction[] {
-            Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
-        }) {
-            if (direction != preferredSide) {
-                order.add(direction);
-            }
-        }
-        FlagEntry<BlockHitResult> result = null;
-        boolean inside = checkInHead(placeTargetBlock, playerFeetPos);
-        for (Direction side : order) {
-            Vec3 hitPos = getDirectReplacingHitPos(placeTargetBlock, currentState, targetState, side);
-            BlockHitResult hitResult = new BlockHitResult(hitPos, side, placeTargetBlock, false);
-            BlockPlaceContext placementContext = new BlockPlaceContext(
-                    mc.player,
-                    InteractionHand.MAIN_HAND,
-                    new ItemStack(targetState.getBlock().asItem()),
-                    hitResult);
-            if (!placementContext.replacingClickedOnBlock()) {
-                continue;
-            }
-
-            if (!inside) {
-                if (!enablePositionPlace && !checkPositionPlace(placeTargetBlock, side, playerFeetPos)) {
-                    continue;
-                }
-            }
-            hitResult = new BlockHitResult(hitPos, side, placeTargetBlock, inside);
-            BlockState placedState =
-                    InteractUtils.getBlockPlacement(targetState.getBlock(), mc.player, mc.level, hitResult);
-            if (!targetState.equals(placedState)) {
-                continue;
-            }
-            boolean mayInteract =
-                    InteractUtils.isInteractAcceptable(mc.level, mc.player, placeTargetBlock, currentState);
-            FlagEntry<BlockHitResult> re = new FlagEntry<>(mayInteract, hitResult);
-            if (!re.flag()) {
-                return re;
-            }
-            if (result == null) {
-                result = re;
-            }
-        }
-        return result;
-    }
 
     private static Vec3 getDirectReplacingHitPos(
             BlockPos placeTargetBlock, BlockState currentState, BlockState targetState, Direction side) {

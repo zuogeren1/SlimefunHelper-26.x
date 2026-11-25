@@ -130,7 +130,7 @@ public class RenderOptimize extends BaseModule {
         registerListener(Listener.getEntityPreTickListener(), this::onEntityCullingTick);
         registerListener(Listener.getEntityPreTickListener(), this::onEntityLabelShowTick);
         registerListener(Listener.getBlockEntityTickListener(), this::onBlockEntityTick);
-        registerListener(Listener.getPostGameTick(), this::onCacheClean);
+        registerListener(Listener.getPostTick(), this::onCacheClean);
         registerListener(Listener.getPreGameTick(), this::onBlockEntityCullingTick);
 
         registerListener(RenderListener.getEntityRenderListener(), this::onEntityRender);
@@ -178,45 +178,45 @@ public class RenderOptimize extends BaseModule {
 
     public void onEntityCullingTick(Event<Entity> event) {
         Entity entity = event.context();
+        // 关掉剔除时直接返回：否则每 tick 仍要取相机坐标、查实体类型，白跑一遍。
+        if (!cullingEnable.get()) return;
         if (entity instanceof MetadataHolder holder) {
             MetaData metaData;
             RenderController controller;
             Vec3 pos = RenderUtils.getCameraPos();
             EntityType<?> types = entity.getType();
-            if (cullingEnable.get()) {
-                if (this.cullingTypes.get().test(types)) {
-                    metaData = holder.getMetadata();
-                    controller = metaData.getOrPut(this, KEY_RENDER_CONTROL, RenderController::new);
+            if (this.cullingTypes.get().test(types)) {
+                metaData = holder.getMetadata();
+                controller = metaData.getOrPut(this, KEY_RENDER_CONTROL, RenderController::new);
 
-                    // do not hide nearby entity
-                    AABB box = entity.getBoundingBox();
-                    if (box.distanceToSqr(pos) < 16) {
-                        controller.hideAll = false;
-                    } else if (box.distanceToSqr(pos) > MathUtils.s2(cullingRadius.get())) {
+                // do not hide nearby entity
+                AABB box = entity.getBoundingBox();
+                if (box.distanceToSqr(pos) < 16) {
+                    controller.hideAll = false;
+                } else if (box.distanceToSqr(pos) > MathUtils.s2(cullingRadius.get())) {
+                    controller.hideAll = true;
+                } else {
+                    Vec3 playerTo = pos.subtract(entity.position());
+                    Vec3 playerLook = RenderUtils.getCameraLookVec(0.0F);
+                    if (playerLook.dot(playerTo) > 0) {
                         controller.hideAll = true;
                     } else {
-                        Vec3 playerTo = pos.subtract(entity.position());
-                        Vec3 playerLook = RenderUtils.getCameraLookVec(0.0F);
-                        if (playerLook.dot(playerTo) > 0) {
-                            controller.hideAll = true;
+                        if (cullingUseRaycast.get()) {
+                            delayScheduleRaycast(box, controller, (val) -> {
+                                controller.hideAll = val;
+                            });
                         } else {
-                            if (cullingUseRaycast.get()) {
-                                delayScheduleRaycast(box, controller, (val) -> {
-                                    controller.hideAll = val;
-                                });
-                            } else {
-                                controller.hideAll = false;
-                            }
-                        }
-                    }
-
-                } else {
-                    if (!holder.isMetaEmpty()) {
-                        metaData = holder.getMetadata();
-                        controller = metaData.get(this, KEY_RENDER_CONTROL);
-                        if (controller != null) {
                             controller.hideAll = false;
                         }
+                    }
+                }
+
+            } else {
+                if (!holder.isMetaEmpty()) {
+                    metaData = holder.getMetadata();
+                    controller = metaData.get(this, KEY_RENDER_CONTROL);
+                    if (controller != null) {
+                        controller.hideAll = false;
                     }
                 }
             }
@@ -457,6 +457,11 @@ public class RenderOptimize extends BaseModule {
     private int tickCounter = 0;
 
     public void onCacheClean() {
+        // 退出世界后缓存里的坐标没有意义，留着只会让下次进世界读到上一局的射线结果。
+        if (checkNull()) {
+            cache.clear();
+            return;
+        }
         if (cullingUseRaycast.get()) {
             tickCounter += 1;
             if (tickCounter > 1) {
