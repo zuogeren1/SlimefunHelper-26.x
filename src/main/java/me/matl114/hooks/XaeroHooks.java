@@ -30,6 +30,8 @@ public class XaeroHooks implements IHooks {
     XaeroWorldMapHooks worldMapHooks;
     XaeroPlusHooks plusHooks;
     XaeroMiniMapHooks minimap;
+    /** 构造期快照：真实是否装了 Xaero 小地图，见 {@link #isXaeroMiniMapEnable()} */
+    boolean miniMapInstalled;
 
     @Getter
     @Broadcast
@@ -52,14 +54,33 @@ public class XaeroHooks implements IHooks {
         } catch (Throwable e) {
             minimap = new XaeroMiniMapHooks();
         }
-        enable = isXaeroPlusEnable() || isXaeroMiniMapEnable() || isXaeroWorldMapEnable();
+        // 只在这里取一次：路径点探针会把 minimap 换成一个恒说自己启用的桩，
+        // 之后再实时问「装没装」就会被那个桩带着答「装了」
+        miniMapInstalled = minimap.isEnabled();
+        enable = isXaeroPlusEnable() || miniMapInstalled || isXaeroWorldMapEnable();
     }
 
     public boolean isXaeroWorldMapEnable() {
         return worldMapHooks.isEnabled();
     }
 
+    /**
+     * 真实是否安装了 Xaero 小地图。
+     *
+     * <p>玩家能看到的判断（界面上的「已检测到」提示）只认它，所以取构造期快照；
+     * 运行期 {@code minimap} 可能已经被换成路径点探针的桩，问它等于问「探针在不在」。
+     */
     public boolean isXaeroMiniMapEnable() {
+        return miniMapInstalled;
+    }
+
+    /**
+     * 现在是「有没有可用的航点接收器」：可能是真 Xaero，也可能是接管它的探针。
+     *
+     * <p>航点提交与同步链路只认它 —— 探针在场时必须为真，否则 {@code XaeroHelper}
+     * 不会把已提交的点挂到当前世界的 {@code access} 上，点就永远流不出来。
+     */
+    public boolean isXaeroWaypointSinkAvailable() {
         return minimap.isEnabled();
     }
 

@@ -417,7 +417,9 @@ public class XaeroHelper extends BaseModule {
     public void onXaeroTempWaypointSync() {
         if (checkNull()) return;
         cleanupCollectedWaypoints();
-        if (!XaeroHooks.getInstance().isXaeroMiniMapEnable()) {
+        // 这里要的是「点有没有地方放」，不是「玩家装没装 Xaero」：
+        // 路径点探针接管时前者为真、后者为假，两者不能共用一个判断
+        if (!XaeroHooks.getInstance().isXaeroWaypointSinkAvailable()) {
             return;
         }
         syncWaypointAccess();
