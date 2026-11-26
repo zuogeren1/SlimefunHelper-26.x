@@ -1,9 +1,7 @@
 package me.matl114.utils.worldgen.structures;
 
-import me.matl114.utils.RegistryUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
@@ -15,16 +13,13 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.biome.Climate.Sampler;
-import net.minecraft.world.level.biome.MultiNoiseBiomeSource;
-import net.minecraft.world.level.biome.MultiNoiseBiomeSourceParameterList;
-import net.minecraft.world.level.biome.MultiNoiseBiomeSourceParameterLists;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
-import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import me.matl114.utils.worldgen.DefaultWorldgenRegistryManager;
+import me.matl114.utils.worldgen.terrain.OverworldTerrainContext;
 //#if MC >= 260300
 //$$ import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 //#endif
@@ -47,42 +42,34 @@ public final class CubiomesOverworldBiomeSampler {
             BiomeSource biomeSource,
             Sampler biomeNoise,
             RandomState randomState,
-            NoiseBasedChunkGenerator terrainGenerator) {
+            NoiseBasedChunkGenerator terrainGenerator,
+            LevelHeightAccessor heightLimitView) {
         this.seed = seed;
         this.biomeSource = biomeSource;
         this.biomeNoise = biomeNoise;
         this.randomState = randomState;
         this.cubiomesDepth = new CubiomesDepthSampler(randomState);
         this.terrainGenerator = terrainGenerator;
-        this.heightLimitView = LevelHeightAccessor.create(-64, 384);
+        this.heightLimitView = heightLimitView;
     }
 
     public static CubiomesOverworldBiomeSampler create(long seed) {
-        HolderLookup.Provider registries = DefaultWorldgenRegistryManager.registry();
-        Holder<MultiNoiseBiomeSourceParameterList> biomeParameters =
-                RegistryUtils.getRegistryEntry(registries, MultiNoiseBiomeSourceParameterLists.OVERWORLD);
-        Holder<NoiseGeneratorSettings> generatorSettings =
-                RegistryUtils.getRegistryEntry(registries, NoiseGeneratorSettings.OVERWORLD);
-        if (biomeParameters == null || generatorSettings == null) {
-            throw new IllegalStateException("Vanilla Overworld worldgen entries are unavailable");
-        }
-        BiomeSource biomeSource = MultiNoiseBiomeSource.createFromPreset(biomeParameters);
-        RandomState randomState = RandomState.create(
-                //#if MC >= 260300
-                //$$ registries.lookupOrThrow(Registries.NOISE), seed, generatorSettings.value());
-                //#else
-                generatorSettings.value(), registries.lookupOrThrow(Registries.NOISE), seed);
-                //#endif
+        return create(OverworldTerrainContext.create(seed));
+    }
+
+    public static CubiomesOverworldBiomeSampler create(OverworldTerrainContext terrain) {
+        RandomState randomState = terrain.randomState();
         return new CubiomesOverworldBiomeSampler(
-                seed,
-                biomeSource,
+                terrain.seed(),
+                terrain.biomeSource(),
                 //#if MC >= 260300
                 //$$ randomState.createClimateSampler(SamplerContext.EMPTY_UNCACHED),
                 //#else
                 randomState.sampler(),
                 //#endif
                 randomState,
-                new NoiseBasedChunkGenerator(biomeSource, generatorSettings));
+                terrain.generator(),
+                terrain.heightLimitView());
     }
 
     public boolean isAncientCityBiomeViable(long seed, StructurePosition structure) {
